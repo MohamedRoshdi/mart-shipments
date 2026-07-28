@@ -16,7 +16,7 @@
   <main>
     <section id="screen-name" hidden>
       <h2>أهلاً بيك! اكتب اسمك</h2>
-      <input id="employee-name" type="text" placeholder="الاسم">
+      <input id="employee-name" type="text" maxlength="50" placeholder="الاسم">
       <button id="save-name" class="primary big">حفظ</button>
     </section>
 
@@ -29,16 +29,16 @@
 
     <section id="screen-new" hidden>
       <button class="btn-back link">→ رجوع</button>
-      <input id="shipment-name" type="text" placeholder="اسم الشحنة (مثلاً: شحنة المراعي)">
+      <input id="shipment-name" type="text" maxlength="100" placeholder="اسم الشحنة (مثلاً: شحنة المراعي)">
       <button id="btn-scan" class="primary big">📷 امسح الباركود</button>
       <div id="reader" hidden></div>
       <div class="manual">
-        <input id="barcode-input" type="text" inputmode="numeric" placeholder="أو اكتب الباركود" dir="ltr">
+        <input id="barcode-input" type="text" inputmode="numeric" maxlength="32" placeholder="أو اكتب الباركود" dir="ltr">
         <button id="btn-lookup">بحث</button>
       </div>
       <div id="item-form" hidden>
         <p>الباركود: <span id="item-barcode" dir="ltr"></span></p>
-        <input id="item-name" type="text" placeholder="اسم الصنف">
+        <input id="item-name" type="text" maxlength="100" placeholder="اسم الصنف">
         <div class="qty-row">
           <button id="qty-minus">−</button>
           <input id="item-qty" type="number" value="1" min="1" dir="ltr">
