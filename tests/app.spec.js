@@ -56,10 +56,11 @@ test('manager: PIN gate, list, copy text', async ({ page }) => {
   });
   await page.reload();
   await page.click('#btn-manager');
-  await page.fill('#pin-input', '1111');
+  const pin = await page.evaluate(() => window.APP_CONFIG.managerPin);
+  await page.fill('#pin-input', pin === '0000' ? '9999' : '0000');
   await page.click('#btn-pin');
   await expect(page.locator('#screen-pin')).toBeVisible(); // wrong PIN stays
-  await page.fill('#pin-input', '2580');
+  await page.fill('#pin-input', pin);
   await page.click('#btn-pin');
   await expect(page.locator('#all-shipments li')).toHaveCount(1);
   await page.click('.shipment-row');
