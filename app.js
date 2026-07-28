@@ -175,3 +175,14 @@ function beep() {
   o.start();
   o.stop(ctx.currentTime + 0.15);
 }
+
+function updateSync() {
+  $("sync-state").textContent = navigator.onLine ? "متصل ✓" : "في انتظار الاتصال";
+}
+addEventListener("online", updateSync);
+addEventListener("offline", updateSync);
+updateSync();
+
+if ("serviceWorker" in navigator && !new URLSearchParams(location.search).has("test")) {
+  navigator.serviceWorker.register("./sw.js");
+}

@@ -76,3 +76,14 @@ test('scanner lib loads', async ({ page }) => {
   const hasLib = await page.evaluate(() => typeof window.Html5Qrcode === 'function');
   expect(hasLib).toBe(true);
 });
+
+test('PWA: manifest served, service worker registers', async ({ page }) => {
+  const res = await page.request.get('/manifest.json');
+  expect(res.ok()).toBeTruthy();
+  await page.goto('/'); // no ?test → sw registers (initDb error is caught, app still boots)
+  const active = await page.evaluate(async () => {
+    const reg = await navigator.serviceWorker.ready;
+    return !!reg.active;
+  });
+  expect(active).toBe(true);
+});
