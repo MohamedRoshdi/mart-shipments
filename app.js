@@ -21,7 +21,7 @@ const state = { items: [], currentBarcode: null, currentShipmentList: [] };
 
 async function goHome() {
   show("screen-home");
-  const all = await db.listShipments();
+  const all = await db.listShipments().catch(() => []);
   const mine = all.filter(s => s.createdBy === myName());
   $("my-shipments").innerHTML = mine.map(s =>
     `<li>${esc(s.name)} — ${s.items.length} صنف</li>`).join("") || "<li>لا توجد شحنات</li>";
@@ -34,19 +34,27 @@ $("save-name").onclick = () => {
   goHome();
 };
 
+function saveDraft() {
+  localStorage.setItem("draft", JSON.stringify({ name: $("shipment-name").value, items: state.items }));
+}
+
 $("btn-new").onclick = () => {
-  state.items = [];
+  const draft = JSON.parse(localStorage.getItem("draft") || "null");
+  state.items = (draft && draft.items) || [];
   state.currentBarcode = null;
-  $("shipment-name").value = "";
+  $("shipment-name").value = (draft && draft.name) || "";
   $("barcode-input").value = "";
   $("item-form").hidden = true;
   renderItems();
   show("screen-new");
+  if (state.items.length) toast("رجّعنالك الشحنة اللي كانت مفتوحة");
 };
+
+$("shipment-name").oninput = saveDraft;
 
 $("btn-lookup").onclick = () => {
   const code = $("barcode-input").value.trim();
-  if (code) onBarcode(code);
+  if (code) onBarcode(code).catch(() => toast("حصلت مشكلة — جرّب تاني"));
 };
 
 async function onBarcode(code) {
@@ -78,20 +86,34 @@ $("btn-add-item").onclick = async () => {
 function renderItems() {
   $("items-list").innerHTML = state.items.map(i => `<li>${esc(i.name)} × ${i.qty}</li>`).join("");
   $("btn-save-shipment").disabled = state.items.length === 0;
+  saveDraft();
 }
 
 $("btn-save-shipment").onclick = async () => {
   const name = $("shipment-name").value.trim();
   if (!name) { toast("اكتب اسم الشحنة الأول"); return; }
-  await db.saveShipment({ name, createdBy: myName(), items: state.items });
+  try {
+    await db.saveShipment({ name, createdBy: myName(), items: state.items });
+  } catch (e) {
+    console.error(e);
+    toast("الحفظ ما نفعش — حاول تاني");
+    return;
+  }
+  localStorage.removeItem("draft");
   toast("تم حفظ الشحنة");
   goHome();
 };
 
-document.querySelectorAll(".btn-back").forEach(b => b.onclick = goHome);
+document.querySelectorAll(".btn-back").forEach(b => b.onclick = async () => { await stopScan(); goHome(); });
+
+addEventListener("db-error", () => toast("مشكلة في مزامنة البيانات — اتأكد من الاتصال والإعدادات"));
+
+let dbBroken = false;
 
 (async () => {
-  await db.initDb().catch(console.error);
+  const ok = await db.initDb().then(() => true).catch((e) => { console.error(e); return false; });
+  dbBroken = !ok;
+  updateSync();
   if (myName()) goHome(); else show("screen-name");
 })();
 
@@ -104,7 +126,7 @@ $("btn-pin").onclick = () => {
 
 async function openManager() {
   show("screen-manager");
-  state.currentShipmentList = await db.listShipments();
+  state.currentShipmentList = await db.listShipments().catch(() => []);
   $("all-shipments").innerHTML = state.currentShipmentList.map((s, i) =>
     `<li><button class="shipment-row" data-i="${i}">${esc(s.name)} — ${esc(s.createdBy)} — ${fmtDate(s.createdAt)}</button></li>`
   ).join("") || "<li>لا توجد شحنات</li>";
@@ -129,15 +151,20 @@ function openDetail(s) {
   $("detail-title").textContent = s.name;
   $("detail-meta").textContent = `${s.createdBy} — ${fmtDate(s.createdAt)}`;
   $("detail-items").innerHTML = s.items.map(i =>
-    `<tr><td>${esc(i.name)}</td><td dir="ltr">${i.qty}</td></tr>`).join("");
+    `<tr><td>${esc(i.name)}</td><td dir="ltr">${esc(i.qty)}</td></tr>`).join("");
   show("screen-detail");
 }
 
 $("btn-back-manager").onclick = openManager;
 
 $("btn-copy").onclick = async () => {
-  await navigator.clipboard.writeText(shipmentText(currentDetail));
-  toast("تم النسخ");
+  try {
+    await navigator.clipboard.writeText(shipmentText(currentDetail));
+    toast("تم النسخ");
+  } catch (e) {
+    console.error(e);
+    toast("النسخ ما نفعش — انسخ من الشاشة");
+  }
 };
 
 let scanner = null;
@@ -150,7 +177,7 @@ $("btn-scan").onclick = async () => {
     await scanner.start(
       { facingMode: "environment" },
       { fps: 10, qrbox: { width: 250, height: 150 } },
-      async (text) => { await stopScan(); beep(); onBarcode(text.trim()); }
+      async (text) => { await stopScan(); beep(); onBarcode(text.trim()).catch(() => toast("حصلت مشكلة — جرّب تاني")); }
     );
   } catch (err) {
     console.error(err);
@@ -167,17 +194,21 @@ async function stopScan() {
   $("reader").hidden = true;
 }
 
+let beepCtx = null;
+
 function beep() {
-  const ctx = new AudioContext();
-  const o = ctx.createOscillator();
-  o.connect(ctx.destination);
-  o.frequency.value = 880;
-  o.start();
-  o.stop(ctx.currentTime + 0.15);
+  try {
+    beepCtx = beepCtx || new AudioContext();
+    const o = beepCtx.createOscillator();
+    o.connect(beepCtx.destination);
+    o.frequency.value = 880;
+    o.start();
+    o.stop(beepCtx.currentTime + 0.15);
+  } catch (e) { console.error(e); }
 }
 
 function updateSync() {
-  $("sync-state").textContent = navigator.onLine ? "متصل ✓" : "في انتظار الاتصال";
+  $("sync-state").textContent = dbBroken ? "إعدادات التطبيق ناقصة" : (navigator.onLine ? "متصل" : "في انتظار الاتصال");
 }
 addEventListener("online", updateSync);
 addEventListener("offline", updateSync);

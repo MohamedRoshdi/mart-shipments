@@ -87,3 +87,19 @@ test('PWA: manifest served, service worker registers', async ({ page }) => {
   });
   expect(active).toBe(true);
 });
+
+test("draft survives reload", async ({ page }) => {
+  await page.goto("/?test=1");
+  await page.evaluate(() => localStorage.setItem("employeeName", "أحمد"));
+  await page.reload();
+  await page.click("#btn-new");
+  await page.fill("#shipment-name", "مسودة");
+  await page.fill("#barcode-input", "111");
+  await page.click("#btn-lookup");
+  await page.fill("#item-name", "صنف");
+  await page.click("#btn-add-item");
+  await page.reload();
+  await page.click("#btn-new");
+  await expect(page.locator("#items-list li")).toHaveCount(1);
+  await expect(page.locator("#shipment-name")).toHaveValue("مسودة");
+});

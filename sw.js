@@ -1,5 +1,5 @@
 // bump CACHE version on every deploy - cache-first serving keeps old assets until the name changes
-const CACHE = "mart-v1";
+const CACHE = "mart-v2";
 const ASSETS = ["./", "index.html", "style.css", "app.js", "db.js", "firebase-config.js",
   "manifest.json", "vendor/html5-qrcode.min.js", "icon-192.png", "icon-512.png"];
 
@@ -16,6 +16,18 @@ self.addEventListener("activate", (e) => {
 });
 
 self.addEventListener("fetch", (e) => {
-  if (new URL(e.request.url).origin !== location.origin) return;
+  const url = new URL(e.request.url);
+  if (url.origin !== location.origin) return;
+  // firebase-config.js is network-first: a phone that cached the empty placeholder must pick up the real config
+  if (url.pathname.endsWith("firebase-config.js")) {
+    e.respondWith(
+      fetch(e.request).then((r) => {
+        const copy = r.clone();
+        caches.open(CACHE).then((c) => c.put(e.request, copy));
+        return r;
+      }).catch(() => caches.match(e.request))
+    );
+    return;
+  }
   e.respondWith(caches.match(e.request).then((r) => r || fetch(e.request)));
 });

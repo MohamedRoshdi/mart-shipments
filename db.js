@@ -23,7 +23,7 @@ export async function saveShipment(shipment) {
     return;
   }
   // no await on network: Firestore queues the write offline; awaiting would hang UI until server ack
-  fs.addDoc(fs.collection(dbRef, 'shipments'), shipment);
+  fs.addDoc(fs.collection(dbRef, 'shipments'), shipment).catch((e) => dispatchEvent(new CustomEvent('db-error', { detail: e })));
 }
 
 export async function listShipments() {
@@ -47,5 +47,5 @@ export async function saveProductName(barcode, name) {
     localStorage.setItem('test-products', JSON.stringify(map));
     return;
   }
-  fs.setDoc(fs.doc(dbRef, 'products', barcode), { name });
+  fs.setDoc(fs.doc(dbRef, 'products', barcode), { name }).catch((e) => dispatchEvent(new CustomEvent('db-error', { detail: e })));
 }
