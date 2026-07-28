@@ -1,3 +1,5 @@
+import * as db from './db.js';
+
 const $ = (id) => document.getElementById(id);
 
 function show(id) {
@@ -28,4 +30,7 @@ $('save-name').onclick = () => {
 
 document.querySelectorAll('.btn-back').forEach(b => b.onclick = goHome);
 
-if (myName()) goHome(); else show('screen-name');
+(async () => {
+  await db.initDb().catch(console.error);
+  if (myName()) goHome(); else show('screen-name');
+})();
