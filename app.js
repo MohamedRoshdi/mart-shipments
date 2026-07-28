@@ -139,3 +139,39 @@ $("btn-copy").onclick = async () => {
   await navigator.clipboard.writeText(shipmentText(currentDetail));
   toast("تم النسخ");
 };
+
+let scanner = null;
+
+$("btn-scan").onclick = async () => {
+  if (scanner) { await stopScan(); return; }
+  $("reader").hidden = false;
+  scanner = new Html5Qrcode("reader");
+  try {
+    await scanner.start(
+      { facingMode: "environment" },
+      { fps: 10, qrbox: { width: 250, height: 150 } },
+      async (text) => { await stopScan(); beep(); onBarcode(text.trim()); }
+    );
+  } catch (err) {
+    console.error(err);
+    await stopScan();
+    toast("الكاميرا مش متاحة — اكتب الباركود بإيدك");
+  }
+};
+
+async function stopScan() {
+  if (scanner) {
+    try { await scanner.stop(); scanner.clear(); } catch (e) { /* already stopped */ }
+    scanner = null;
+  }
+  $("reader").hidden = true;
+}
+
+function beep() {
+  const ctx = new AudioContext();
+  const o = ctx.createOscillator();
+  o.connect(ctx.destination);
+  o.frequency.value = 880;
+  o.start();
+  o.stop(ctx.currentTime + 0.15);
+}

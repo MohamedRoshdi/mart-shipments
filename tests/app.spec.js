@@ -70,3 +70,9 @@ test('manager: PIN gate, list, copy text', async ({ page }) => {
   expect(text).toContain('الموظف: أحمد');
   expect(text).toContain('لبن 3');
 });
+
+test('scanner lib loads', async ({ page }) => {
+  await page.goto('/?test=1');
+  const hasLib = await page.evaluate(() => typeof window.Html5Qrcode === 'function');
+  expect(hasLib).toBe(true);
+});
