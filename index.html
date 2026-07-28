@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0a7d33">
+  <title>شحنات المحل</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="manifest" href="manifest.json">
+</head>
+<body>
+  <header>
+    <h1>شحنات المحل</h1>
+    <span id="sync-state"></span>
+  </header>
+  <main>
+    <section id="screen-name" hidden>
+      <h2>أهلاً بيك! اكتب اسمك</h2>
+      <input id="employee-name" type="text" placeholder="الاسم">
+      <button id="save-name" class="primary big">حفظ</button>
+    </section>
+
+    <section id="screen-home" hidden>
+      <button id="btn-new" class="primary big">+ شحنة جديدة</button>
+      <h2>شحناتي</h2>
+      <ul id="my-shipments"></ul>
+      <button id="btn-manager" class="link">دخول المدير</button>
+    </section>
+
+    <section id="screen-new" hidden>
+      <button class="btn-back link">→ رجوع</button>
+      <input id="shipment-name" type="text" placeholder="اسم الشحنة (مثلاً: شحنة المراعي)">
+      <button id="btn-scan" class="primary big">📷 امسح الباركود</button>
+      <div id="reader" hidden></div>
+      <div class="manual">
+        <input id="barcode-input" type="text" inputmode="numeric" placeholder="أو اكتب الباركود" dir="ltr">
+        <button id="btn-lookup">بحث</button>
+      </div>
+      <div id="item-form" hidden>
+        <p>الباركود: <span id="item-barcode" dir="ltr"></span></p>
+        <input id="item-name" type="text" placeholder="اسم الصنف">
+        <div class="qty-row">
+          <button id="qty-minus">−</button>
+          <input id="item-qty" type="number" value="1" min="1" dir="ltr">
+          <button id="qty-plus">+</button>
+        </div>
+        <button id="btn-add-item" class="primary">إضافة الصنف</button>
+      </div>
+      <ul id="items-list"></ul>
+      <button id="btn-save-shipment" class="primary big" disabled>حفظ الشحنة</button>
+    </section>
+
+    <section id="screen-pin" hidden>
+      <button class="btn-back link">→ رجوع</button>
+      <h2>الرقم السري للمدير</h2>
+      <input id="pin-input" type="password" inputmode="numeric" maxlength="4" dir="ltr">
+      <button id="btn-pin" class="primary big">دخول</button>
+    </section>
+
+    <section id="screen-manager" hidden>
+      <button class="btn-back link">→ رجوع</button>
+      <h2>كل الشحنات</h2>
+      <ul id="all-shipments"></ul>
+    </section>
+
+    <section id="screen-detail" hidden>
+      <button id="btn-back-manager" class="link">→ رجوع</button>
+      <h2 id="detail-title"></h2>
+      <p id="detail-meta"></p>
+      <table><tbody id="detail-items"></tbody></table>
+      <button id="btn-copy" class="primary big">نسخ كنص</button>
+    </section>
+  </main>
+  <div id="toast"></div>
+  <script src="firebase-config.js"></script>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
