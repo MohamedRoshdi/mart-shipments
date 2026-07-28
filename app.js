@@ -94,3 +94,48 @@ document.querySelectorAll(".btn-back").forEach(b => b.onclick = goHome);
   await db.initDb().catch(console.error);
   if (myName()) goHome(); else show("screen-name");
 })();
+
+$("btn-manager").onclick = () => { $("pin-input").value = ""; show("screen-pin"); };
+
+$("btn-pin").onclick = () => {
+  if ($("pin-input").value !== window.APP_CONFIG.managerPin) { toast("الرقم السري غلط"); return; }
+  openManager();
+};
+
+async function openManager() {
+  show("screen-manager");
+  state.currentShipmentList = await db.listShipments();
+  $("all-shipments").innerHTML = state.currentShipmentList.map((s, i) =>
+    `<li><button class="shipment-row" data-i="${i}">${esc(s.name)} — ${esc(s.createdBy)} — ${fmtDate(s.createdAt)}</button></li>`
+  ).join("") || "<li>لا توجد شحنات</li>";
+}
+
+$("all-shipments").onclick = (e) => {
+  const btn = e.target.closest(".shipment-row");
+  if (btn) openDetail(state.currentShipmentList[+btn.dataset.i]);
+};
+
+function fmtDate(ts) { return new Date(ts).toLocaleDateString("ar-EG"); }
+
+function shipmentText(s) {
+  return `شحنة: ${s.name}\nالموظف: ${s.createdBy}\nالتاريخ: ${fmtDate(s.createdAt)}\n\n`
+    + s.items.map(i => `${i.name} ${i.qty}`).join("\n");
+}
+
+let currentDetail = null;
+
+function openDetail(s) {
+  currentDetail = s;
+  $("detail-title").textContent = s.name;
+  $("detail-meta").textContent = `${s.createdBy} — ${fmtDate(s.createdAt)}`;
+  $("detail-items").innerHTML = s.items.map(i =>
+    `<tr><td>${esc(i.name)}</td><td dir="ltr">${i.qty}</td></tr>`).join("");
+  show("screen-detail");
+}
+
+$("btn-back-manager").onclick = openManager;
+
+$("btn-copy").onclick = async () => {
+  await navigator.clipboard.writeText(shipmentText(currentDetail));
+  toast("تم النسخ");
+};

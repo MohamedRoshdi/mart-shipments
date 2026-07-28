@@ -44,3 +44,29 @@ test('create shipment: catalog memory + duplicate merge', async ({ page }) => {
   await expect(page.locator('#screen-home')).toBeVisible();
   await expect(page.locator('#my-shipments li')).toContainText('شحنة المراعي');
 });
+
+test('manager: PIN gate, list, copy text', async ({ page }) => {
+  await page.goto('/?test=1');
+  await page.evaluate(() => {
+    localStorage.setItem('employeeName', 'أحمد');
+    localStorage.setItem('test-shipments', JSON.stringify([
+      { name: 'شحنة المراعي', createdBy: 'أحمد', createdAt: 1753700000000,
+        items: [{ barcode: '6221031250057', name: 'لبن', qty: 3 }] },
+    ]));
+  });
+  await page.reload();
+  await page.click('#btn-manager');
+  await page.fill('#pin-input', '1111');
+  await page.click('#btn-pin');
+  await expect(page.locator('#screen-pin')).toBeVisible(); // wrong PIN stays
+  await page.fill('#pin-input', '2580');
+  await page.click('#btn-pin');
+  await expect(page.locator('#all-shipments li')).toHaveCount(1);
+  await page.click('.shipment-row');
+  await expect(page.locator('#detail-title')).toHaveText('شحنة المراعي');
+  await page.click('#btn-copy');
+  const text = await page.evaluate(() => navigator.clipboard.readText());
+  expect(text).toContain('شحنة: شحنة المراعي');
+  expect(text).toContain('الموظف: أحمد');
+  expect(text).toContain('لبن 3');
+});
