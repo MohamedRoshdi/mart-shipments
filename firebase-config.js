@@ -1,3 +1,10 @@
 // يُلصق صاحب المحل إعدادات Firebase هنا (راجع SETUP.md)
-window.FIREBASE_CONFIG = {};
+window.FIREBASE_CONFIG = {
+  projectId: "shipments-alaela-mart",
+  appId: "1:430785723659:web:e251741482c3c42b12b60e",
+  storageBucket: "shipments-alaela-mart.firebasestorage.app",
+  apiKey: "AIzaSyDWJTWWn89mS8nvDQfLWc4hxCaFyBtnttQ",
+  authDomain: "shipments-alaela-mart.firebaseapp.com",
+  messagingSenderId: "430785723659"
+};
 window.APP_CONFIG = { managerPin: '4739' };
