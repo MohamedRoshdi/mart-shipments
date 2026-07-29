@@ -9,7 +9,13 @@ service cloud.firestore {
         && request.resource.data.createdBy is string && request.resource.data.createdBy.size() <= 50
         && request.resource.data.createdAt is number
         && request.resource.data.items is list && request.resource.data.items.size() <= 200;
-      allow update: if false;
+      // edit changes only name + items; createdBy/createdAt stay as first written
+      allow update: if request.resource.data.keys().hasOnly(['name', 'createdBy', 'createdAt', 'items'])
+        && request.resource.data.createdBy == resource.data.createdBy
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.name is string && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 100
+        && request.resource.data.items is list && request.resource.data.items.size() <= 200;
       allow delete: if true;
     }
     match /products/{barcode} {

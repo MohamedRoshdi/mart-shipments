@@ -22,7 +22,9 @@ button.link { background: none; color: #0a7d33; text-decoration: underline; padd
 ul { list-style: none; padding: 0; }
 li { background: #fff; border-radius: 8px; padding: 12px; margin-block-end: 8px; }
 li button.shipment-row { inline-size: 100%; text-align: start; background: none; padding: 0; }
+li { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 .row-actions { display: flex; gap: 8px; margin-block-start: 8px; }
+input.qty-cell { inline-size: 72px; padding: 6px; text-align: center; }
 .row-actions button { padding: 8px 14px; }
 button.danger { background: #c0392b; color: #fff; }
 table { inline-size: 100%; background: #fff; border-radius: 8px; border-collapse: collapse; }

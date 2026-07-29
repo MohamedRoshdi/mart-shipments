@@ -38,6 +38,16 @@ export async function listShipments() {
   return snap.docs.map((d) => ({ ...d.data(), _id: d.id }));
 }
 
+export async function updateShipment(id, data) {
+  if (TEST_MODE) {
+    const all = lsArr('test-shipments').map((s) =>
+      String(s.createdAt) === id ? { ...s, name: data.name, items: data.items } : s);
+    localStorage.setItem('test-shipments', JSON.stringify(all));
+    return;
+  }
+  await fs.updateDoc(fs.doc(dbRef, 'shipments', id), { name: data.name, items: data.items });
+}
+
 export async function deleteShipment(id) {
   if (TEST_MODE) {
     const all = lsArr('test-shipments').filter((s) => String(s.createdAt) !== id);

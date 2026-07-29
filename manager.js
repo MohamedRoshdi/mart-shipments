@@ -71,13 +71,44 @@ $("all-shipments").onclick = async (e) => {
 };
 
 function openDetail(s) {
-  currentDetail = s;
-  $("detail-title").textContent = s.name;
+  currentDetail = { ...s, items: s.items.map(i => ({ ...i })) }; // edit a copy: cancel = just go back
+  $("detail-name").value = s.name;
   $("detail-meta").textContent = `${s.createdBy} — ${fmtDate(s.createdAt)}`;
-  $("detail-items").innerHTML = s.items.map(i =>
-    `<tr><td>${esc(i.name || i.barcode)}</td><td dir="ltr">${esc(i.barcode)}</td><td dir="ltr">${esc(i.qty)}</td></tr>`).join("");
+  renderDetailItems();
   show("screen-detail");
 }
+
+function renderDetailItems() {
+  $("detail-items").innerHTML = currentDetail.items.map((i, idx) =>
+    `<tr><td>${esc(i.name || i.barcode)}</td><td dir="ltr">${esc(i.barcode)}</td>
+     <td><input class="qty-cell" type="number" min="1" dir="ltr" data-qty="${idx}" value="${Number(i.qty) || 1}"></td>
+     <td><button class="danger" data-delitem="${idx}">×</button></td></tr>`).join("");
+}
+
+$("detail-items").oninput = (e) => {
+  const inp = e.target.closest("input[data-qty]");
+  if (inp) currentDetail.items[+inp.dataset.qty].qty = Math.max(1, parseInt(inp.value, 10) || 1);
+};
+
+$("detail-items").onclick = (e) => {
+  const btn = e.target.closest("button[data-delitem]");
+  if (!btn) return;
+  currentDetail.items.splice(+btn.dataset.delitem, 1);
+  renderDetailItems();
+};
+
+$("btn-save-edit").onclick = async () => {
+  const name = $("detail-name").value.trim();
+  if (!name) { toast("اكتب اسم الشحنة"); return; }
+  try {
+    await db.updateShipment(currentDetail._id, { name, items: currentDetail.items });
+    toast("تم حفظ التعديلات");
+    openManager();
+  } catch (err) {
+    console.error(err);
+    toast("الحفظ ما نفعش — جرّب تاني");
+  }
+};
 
 $("btn-back-manager").onclick = openManager;
 

@@ -17,14 +17,34 @@ function toast(msg) {
   setTimeout(() => $("toast").classList.remove("show"), 2000);
 }
 
-const state = { items: [], currentBarcode: null };
+const state = { items: [], currentBarcode: null, editingId: null, mine: [] };
 
 async function goHome() {
+  state.editingId = null; // leaving the edit screen (back button) ends edit mode
   show("screen-home");
   const all = await db.listShipments().catch(() => []);
-  const mine = all.filter(s => s.createdBy === myName());
-  $("my-shipments").innerHTML = mine.map(s =>
-    `<li>${esc(s.name)} — ${s.items.length} صنف</li>`).join("") || "<li>لا توجد شحنات</li>";
+  state.mine = all.filter(s => s.createdBy === myName());
+  $("my-shipments").innerHTML = state.mine.map((s, i) =>
+    `<li><div>${esc(s.name)} — ${s.items.length} صنف</div>
+     <div class="row-actions"><button data-edit="${i}">تعديل</button></div></li>`
+  ).join("") || "<li>لا توجد شحنات</li>";
+}
+
+$("my-shipments").onclick = (e) => {
+  const btn = e.target.closest("button[data-edit]");
+  if (btn) openShipment(state.mine[+btn.dataset.edit]);
+};
+
+function openShipment(s) {
+  state.editingId = s._id;
+  state.items = s.items.map(i => ({ ...i }));
+  state.currentBarcode = null;
+  $("shipment-name").value = s.name;
+  $("barcode-input").value = "";
+  $("item-form").hidden = true;
+  $("btn-save-shipment").textContent = "حفظ التعديلات";
+  renderItems();
+  show("screen-new");
 }
 
 $("save-name").onclick = () => {
@@ -35,16 +55,19 @@ $("save-name").onclick = () => {
 };
 
 function saveDraft() {
+  if (state.editingId) return; // editing a saved shipment must not overwrite the unsaved draft
   localStorage.setItem("draft", JSON.stringify({ name: $("shipment-name").value, items: state.items }));
 }
 
 $("btn-new").onclick = () => {
   const draft = JSON.parse(localStorage.getItem("draft") || "null");
+  state.editingId = null;
   state.items = (draft && draft.items) || [];
   state.currentBarcode = null;
   $("shipment-name").value = (draft && draft.name) || "";
   $("barcode-input").value = "";
   $("item-form").hidden = true;
+  $("btn-save-shipment").textContent = "حفظ الشحنة";
   renderItems();
   show("screen-new");
   if (state.items.length) toast("رجّعنالك الشحنة اللي كانت مفتوحة");
@@ -84,23 +107,34 @@ $("btn-add-item").onclick = async () => {
 };
 
 function renderItems() {
-  $("items-list").innerHTML = state.items.map(i => `<li>${esc(i.name || i.barcode)} × ${i.qty}</li>`).join("");
+  $("items-list").innerHTML = state.items.map((i, idx) =>
+    `<li><span>${esc(i.name || i.barcode)} × ${esc(i.qty)}</span>
+     <button class="danger" data-del="${idx}">×</button></li>`).join("");
   $("btn-save-shipment").disabled = state.items.length === 0;
   saveDraft();
 }
+
+$("items-list").onclick = (e) => {
+  const btn = e.target.closest("button[data-del]");
+  if (!btn) return;
+  state.items.splice(+btn.dataset.del, 1);
+  renderItems();
+};
 
 $("btn-save-shipment").onclick = async () => {
   const name = $("shipment-name").value.trim();
   if (!name) { toast("اكتب اسم الشحنة الأول"); return; }
   try {
-    await db.saveShipment({ name, createdBy: myName(), items: state.items });
+    if (state.editingId) await db.updateShipment(state.editingId, { name, items: state.items });
+    else await db.saveShipment({ name, createdBy: myName(), items: state.items });
   } catch (e) {
     console.error(e);
     toast("الحفظ ما نفعش — حاول تاني");
     return;
   }
-  localStorage.removeItem("draft");
-  toast("تم حفظ الشحنة");
+  if (!state.editingId) localStorage.removeItem("draft");
+  toast(state.editingId ? "تم حفظ التعديلات" : "تم حفظ الشحنة");
+  state.editingId = null;
   goHome();
 };
 

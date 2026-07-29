@@ -70,7 +70,60 @@ test('manager page: PIN gate, list, copy barcode-tab-qty', async ({ page }) => {
   const text = await page.evaluate(() => navigator.clipboard.readText());
   expect(text).toBe('6221031250057\t3');
   await page.click('button[data-act="view"]');
-  await expect(page.locator('#detail-title')).toHaveText('شحنة المراعي');
+  await expect(page.locator('#detail-name')).toHaveValue('شحنة المراعي');
+});
+
+test('manager page: edit name, change qty, delete item', async ({ page }) => {
+  await openManagerPage(page);
+  await page.click('button[data-act="view"]');
+  await page.fill('#detail-name', 'شحنة معدّلة');
+  await page.fill('input[data-qty="0"]', '7');
+  await page.click('#btn-save-edit');
+  await expect(page.locator('#all-shipments li')).toContainText('شحنة معدّلة');
+  await page.click('button[data-act="copy"]');
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('6221031250057\t7');
+  await page.click('button[data-act="view"]');
+  await page.click('button[data-delitem="0"]');
+  await page.click('#btn-save-edit');
+  await page.click('button[data-act="view"]');
+  await expect(page.locator('#detail-items tr')).toHaveCount(0);
+});
+
+test('employee: remove scanned item before saving', async ({ page }) => {
+  await page.goto('/?test=1');
+  await page.evaluate(() => localStorage.setItem('employeeName', 'أحمد'));
+  await page.reload();
+  await page.click('#btn-new');
+  await page.fill('#shipment-name', 'شحنة');
+  await page.fill('#barcode-input', '111');
+  await page.click('#btn-lookup');
+  await page.fill('#item-name', 'صنف غلط');
+  await page.click('#btn-add-item');
+  await expect(page.locator('#items-list li')).toHaveCount(1);
+  await page.click('button[data-del="0"]');
+  await expect(page.locator('#items-list li')).toHaveCount(0);
+  await expect(page.locator('#btn-save-shipment')).toBeDisabled();
+});
+
+test('employee: edit own saved shipment', async ({ page }) => {
+  await page.goto('/?test=1');
+  await page.evaluate(() => {
+    localStorage.setItem('employeeName', 'أحمد');
+    localStorage.setItem('test-shipments', JSON.stringify([
+      { name: 'شحنة قديمة', createdBy: 'أحمد', createdAt: 1753700000000,
+        items: [{ barcode: '111', name: 'لبن', qty: 2 }, { barcode: '222', name: 'جبنة', qty: 1 }] },
+    ]));
+  });
+  await page.reload();
+  await page.click('button[data-edit="0"]');
+  await expect(page.locator('#shipment-name')).toHaveValue('شحنة قديمة');
+  await expect(page.locator('#items-list li')).toHaveCount(2);
+  await page.click('button[data-del="1"]');
+  await page.fill('#shipment-name', 'شحنة متصلحة');
+  await page.click('#btn-save-shipment');
+  await expect(page.locator('#my-shipments li')).toHaveCount(1);
+  await expect(page.locator('#my-shipments li')).toContainText('شحنة متصلحة');
+  await expect(page.locator('#my-shipments li')).toContainText('1 صنف');
 });
 
 test('manager page: delete removes shipment', async ({ page }) => {
