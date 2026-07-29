@@ -90,6 +90,10 @@ test('scanner lib loads', async ({ page }) => {
 test('PWA: manifest served, service worker registers', async ({ page }) => {
   const res = await page.request.get('/manifest.json');
   expect(res.ok()).toBeTruthy();
+  const resManager = await page.request.get('/manifest-manager.json');
+  expect(resManager.ok()).toBeTruthy();
+  const resTemplate = await page.request.get('/products-template.csv');
+  expect(resTemplate.ok()).toBeTruthy();
   await page.goto('/'); // no ?test → sw registers (initDb error is caught, app still boots)
   const active = await page.evaluate(async () => {
     const reg = await navigator.serviceWorker.ready;

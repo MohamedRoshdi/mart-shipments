@@ -1,8 +1,8 @@
 {
-  "name": "شحنات المحل",
-  "short_name": "شحنات",
-  "id": "./",
-  "start_url": "./",
+  "name": "شحنات المحل — المدير",
+  "short_name": "المدير",
+  "id": "./manager.html",
+  "start_url": "./manager.html",
   "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#0a7d33",

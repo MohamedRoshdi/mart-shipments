@@ -111,4 +111,8 @@ addEventListener("online", updateSync);
 addEventListener("offline", updateSync);
 updateSync();
 
+if ("serviceWorker" in navigator && !new URLSearchParams(location.search).has("test")) {
+  navigator.serviceWorker.register("./sw.js");
+}
+
 db.initDb().catch(console.error);
