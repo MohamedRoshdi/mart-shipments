@@ -73,9 +73,9 @@ $("qty-minus").onclick = () => { $("item-qty").value = Math.max(1, +$("item-qty"
 $("btn-add-item").onclick = async () => {
   const name = $("item-name").value.trim();
   const qty = Math.max(1, parseInt($("item-qty").value, 10) || 1);
-  if (!name || !state.currentBarcode) { toast("اكتب اسم الصنف"); return; }
+  if (!state.currentBarcode) return;
   const existing = await db.getProductName(state.currentBarcode);
-  if (existing !== name) await db.saveProductName(state.currentBarcode, name);
+  if (name && existing !== name) await db.saveProductName(state.currentBarcode, name);
   const dup = state.items.find(i => i.barcode === state.currentBarcode);
   if (dup) dup.qty += qty; else state.items.push({ barcode: state.currentBarcode, name, qty });
   $("item-form").hidden = true;
@@ -84,7 +84,7 @@ $("btn-add-item").onclick = async () => {
 };
 
 function renderItems() {
-  $("items-list").innerHTML = state.items.map(i => `<li>${esc(i.name)} × ${i.qty}</li>`).join("");
+  $("items-list").innerHTML = state.items.map(i => `<li>${esc(i.name || i.barcode)} × ${i.qty}</li>`).join("");
   $("btn-save-shipment").disabled = state.items.length === 0;
   saveDraft();
 }
@@ -141,7 +141,7 @@ function fmtDate(ts) { return new Date(ts).toLocaleDateString("ar-EG"); }
 
 function shipmentText(s) {
   return `شحنة: ${s.name}\nالموظف: ${s.createdBy}\nالتاريخ: ${fmtDate(s.createdAt)}\n\n`
-    + s.items.map(i => `${i.name} ${i.qty}`).join("\n");
+    + s.items.map(i => `${i.name || i.barcode} ${i.qty}`).join("\n");
 }
 
 let currentDetail = null;
@@ -151,11 +151,32 @@ function openDetail(s) {
   $("detail-title").textContent = s.name;
   $("detail-meta").textContent = `${s.createdBy} — ${fmtDate(s.createdAt)}`;
   $("detail-items").innerHTML = s.items.map(i =>
-    `<tr><td>${esc(i.name)}</td><td dir="ltr">${esc(i.qty)}</td></tr>`).join("");
+    `<tr><td>${esc(i.name || i.barcode)}</td><td dir="ltr">${esc(i.qty)}</td></tr>`).join("");
   show("screen-detail");
 }
 
 $("btn-back-manager").onclick = openManager;
+
+$("btn-import").onclick = () => $("import-file").click();
+$("import-file").onchange = async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const buf = await file.arrayBuffer();
+  let text = new TextDecoder("utf-8").decode(buf);
+  // Excel on Arabic Windows exports windows-1256; UTF-8 decode of that yields replacement chars
+  if (text.includes("�")) text = new TextDecoder("windows-1256").decode(buf);
+  const rows = text.split(/\r?\n/).map(l => l.split(/[,;\t]/))
+    .filter(c => c.length >= 2 && /\d/.test(c[0]) && c[1].trim());
+  let n = 0;
+  try {
+    for (const c of rows) { await db.saveProductName(c[0].trim(), c.slice(1).join(" ").trim()); n++; }
+    toast(`تم استيراد ${n} صنف`);
+  } catch (err) {
+    console.error(err);
+    toast(`اتسجل ${n} صنف وبعدين حصلت مشكلة — جرّب تاني`);
+  }
+  e.target.value = "";
+};
 
 $("btn-copy").onclick = async () => {
   try {

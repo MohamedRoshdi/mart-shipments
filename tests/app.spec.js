@@ -89,6 +89,35 @@ test('PWA: manifest served, service worker registers', async ({ page }) => {
   expect(active).toBe(true);
 });
 
+test("catalog CSV import autofills names", async ({ page }) => {
+  await page.goto("/?test=1");
+  await page.evaluate(() => localStorage.setItem("employeeName", "أحمد"));
+  await page.reload();
+  await page.click("#btn-manager");
+  const pin = await page.evaluate(() => window.APP_CONFIG.managerPin);
+  await page.fill("#pin-input", pin);
+  await page.click("#btn-pin");
+  await page.setInputFiles("#import-file", "tests/fixtures/catalog.csv");
+  await expect(page.locator("#toast")).toContainText("تم استيراد 2 صنف");
+  await page.click("#screen-manager .btn-back");
+  await page.click("#btn-new");
+  await page.fill("#barcode-input", "6221031250057");
+  await page.click("#btn-lookup");
+  await expect(page.locator("#item-name")).toHaveValue("لبن المراعي");
+});
+
+test("item without name saves showing barcode", async ({ page }) => {
+  await page.goto("/?test=1");
+  await page.evaluate(() => localStorage.setItem("employeeName", "أحمد"));
+  await page.reload();
+  await page.click("#btn-new");
+  await page.fill("#shipment-name", "شحنة بدون أسماء");
+  await page.fill("#barcode-input", "9990001112223");
+  await page.click("#btn-lookup");
+  await page.click("#btn-add-item");
+  await expect(page.locator("#items-list li")).toContainText("9990001112223");
+});
+
 test("draft survives reload", async ({ page }) => {
   await page.goto("/?test=1");
   await page.evaluate(() => localStorage.setItem("employeeName", "أحمد"));
