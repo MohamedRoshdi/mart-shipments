@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0a7d33">
+  <title>شحنات المحل — المدير</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>شاشة المدير</h1>
+    <span id="sync-state"></span>
+  </header>
+  <main>
+    <section id="screen-pin">
+      <h2>الرقم السري</h2>
+      <input id="pin-input" type="password" inputmode="numeric" maxlength="4" dir="ltr">
+      <button id="btn-pin" class="primary big">دخول</button>
+    </section>
+
+    <section id="screen-manager" hidden>
+      <h2>كل الشحنات</h2>
+      <ul id="all-shipments"></ul>
+      <button id="btn-import" class="link">استيراد أصناف من ملف Excel/CSV</button>
+      <input id="import-file" type="file" accept=".csv,text/csv" hidden>
+    </section>
+
+    <section id="screen-detail" hidden>
+      <button id="btn-back-manager" class="link">→ رجوع</button>
+      <h2 id="detail-title"></h2>
+      <p id="detail-meta"></p>
+      <table><tbody id="detail-items"></tbody></table>
+      <button id="btn-copy" class="primary big">نسخ (باركود + كمية)</button>
+    </section>
+  </main>
+  <div id="toast"></div>
+  <script src="firebase-config.js"></script>
+  <script type="module" src="manager.js"></script>
+</body>
+</html>

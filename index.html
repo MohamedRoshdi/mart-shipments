@@ -24,7 +24,6 @@
       <button id="btn-new" class="primary big">+ شحنة جديدة</button>
       <h2>شحناتي</h2>
       <ul id="my-shipments"></ul>
-      <button id="btn-manager" class="link">دخول المدير</button>
     </section>
 
     <section id="screen-new" hidden>
@@ -50,28 +49,6 @@
       <button id="btn-save-shipment" class="primary big" disabled>حفظ الشحنة</button>
     </section>
 
-    <section id="screen-pin" hidden>
-      <button class="btn-back link">→ رجوع</button>
-      <h2>الرقم السري للمدير</h2>
-      <input id="pin-input" type="password" inputmode="numeric" maxlength="4" dir="ltr">
-      <button id="btn-pin" class="primary big">دخول</button>
-    </section>
-
-    <section id="screen-manager" hidden>
-      <button class="btn-back link">→ رجوع</button>
-      <h2>كل الشحنات</h2>
-      <ul id="all-shipments"></ul>
-      <button id="btn-import" class="link">استيراد أصناف من ملف Excel/CSV</button>
-      <input id="import-file" type="file" accept=".csv,text/csv" hidden>
-    </section>
-
-    <section id="screen-detail" hidden>
-      <button id="btn-back-manager" class="link">→ رجوع</button>
-      <h2 id="detail-title"></h2>
-      <p id="detail-meta"></p>
-      <table><tbody id="detail-items"></tbody></table>
-      <button id="btn-copy" class="primary big">نسخ كنص</button>
-    </section>
   </main>
   <div id="toast"></div>
   <script src="firebase-config.js"></script>

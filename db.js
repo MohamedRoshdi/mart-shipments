@@ -27,11 +27,24 @@ export async function saveShipment(shipment) {
 }
 
 export async function listShipments() {
-  if (TEST_MODE) return lsArr('test-shipments').sort((a, b) => b.createdAt - a.createdAt);
+  if (TEST_MODE) {
+    return lsArr('test-shipments')
+      .map((s) => ({ ...s, _id: String(s.createdAt) }))
+      .sort((a, b) => b.createdAt - a.createdAt);
+  }
   const snap = await fs.getDocs(
     fs.query(fs.collection(dbRef, 'shipments'), fs.orderBy('createdAt', 'desc'))
   );
-  return snap.docs.map((d) => d.data());
+  return snap.docs.map((d) => ({ ...d.data(), _id: d.id }));
+}
+
+export async function deleteShipment(id) {
+  if (TEST_MODE) {
+    const all = lsArr('test-shipments').filter((s) => String(s.createdAt) !== id);
+    localStorage.setItem('test-shipments', JSON.stringify(all));
+    return;
+  }
+  await fs.deleteDoc(fs.doc(dbRef, 'shipments', id));
 }
 
 export async function getProductName(barcode) {

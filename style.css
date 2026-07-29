@@ -22,6 +22,9 @@ button.link { background: none; color: #0a7d33; text-decoration: underline; padd
 ul { list-style: none; padding: 0; }
 li { background: #fff; border-radius: 8px; padding: 12px; margin-block-end: 8px; }
 li button.shipment-row { inline-size: 100%; text-align: start; background: none; padding: 0; }
+.row-actions { display: flex; gap: 8px; margin-block-start: 8px; }
+.row-actions button { padding: 8px 14px; }
+button.danger { background: #c0392b; color: #fff; }
 table { inline-size: 100%; background: #fff; border-radius: 8px; border-collapse: collapse; }
 td { padding: 10px 12px; border-block-end: 1px solid #eee; }
 #reader { border-radius: 8px; overflow: hidden; }

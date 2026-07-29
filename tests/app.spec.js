@@ -45,31 +45,40 @@ test('create shipment: catalog memory + duplicate merge', async ({ page }) => {
   await expect(page.locator('#my-shipments li')).toContainText('شحنة المراعي');
 });
 
-test('manager: PIN gate, list, copy text', async ({ page }) => {
-  await page.goto('/?test=1');
+async function openManagerPage(page) {
+  await page.goto('/manager.html?test=1');
   await page.evaluate(() => {
-    localStorage.setItem('employeeName', 'أحمد');
     localStorage.setItem('test-shipments', JSON.stringify([
       { name: 'شحنة المراعي', createdBy: 'أحمد', createdAt: 1753700000000,
         items: [{ barcode: '6221031250057', name: 'لبن', qty: 3 }] },
     ]));
   });
-  await page.reload();
-  await page.click('#btn-manager');
+  const pin = await page.evaluate(() => window.APP_CONFIG.managerPin);
+  await page.fill('#pin-input', pin);
+  await page.click('#btn-pin');
+}
+
+test('manager page: PIN gate, list, copy barcode-tab-qty', async ({ page }) => {
+  await page.goto('/manager.html?test=1');
   const pin = await page.evaluate(() => window.APP_CONFIG.managerPin);
   await page.fill('#pin-input', pin === '0000' ? '9999' : '0000');
   await page.click('#btn-pin');
   await expect(page.locator('#screen-pin')).toBeVisible(); // wrong PIN stays
-  await page.fill('#pin-input', pin);
-  await page.click('#btn-pin');
+  await openManagerPage(page);
   await expect(page.locator('#all-shipments li')).toHaveCount(1);
-  await page.click('.shipment-row');
-  await expect(page.locator('#detail-title')).toHaveText('شحنة المراعي');
-  await page.click('#btn-copy');
+  await page.click('button[data-act="copy"]');
   const text = await page.evaluate(() => navigator.clipboard.readText());
-  expect(text).toContain('شحنة: شحنة المراعي');
-  expect(text).toContain('الموظف: أحمد');
-  expect(text).toContain('لبن 3');
+  expect(text).toBe('6221031250057\t3');
+  await page.click('button[data-act="view"]');
+  await expect(page.locator('#detail-title')).toHaveText('شحنة المراعي');
+});
+
+test('manager page: delete removes shipment', async ({ page }) => {
+  await openManagerPage(page);
+  await expect(page.locator('#all-shipments li')).toHaveCount(1);
+  page.on('dialog', (d) => d.accept());
+  await page.click('button[data-act="del"]');
+  await expect(page.locator('#all-shipments li')).toHaveText('لا توجد شحنات');
 });
 
 test('scanner lib loads', async ({ page }) => {
@@ -89,17 +98,13 @@ test('PWA: manifest served, service worker registers', async ({ page }) => {
   expect(active).toBe(true);
 });
 
-test("catalog CSV import autofills names", async ({ page }) => {
+test("catalog CSV import on manager page autofills names in employee app", async ({ page }) => {
+  await openManagerPage(page);
+  await page.setInputFiles("#import-file", "tests/fixtures/catalog.csv");
+  await expect(page.locator("#toast")).toContainText("تم استيراد 2 صنف");
   await page.goto("/?test=1");
   await page.evaluate(() => localStorage.setItem("employeeName", "أحمد"));
   await page.reload();
-  await page.click("#btn-manager");
-  const pin = await page.evaluate(() => window.APP_CONFIG.managerPin);
-  await page.fill("#pin-input", pin);
-  await page.click("#btn-pin");
-  await page.setInputFiles("#import-file", "tests/fixtures/catalog.csv");
-  await expect(page.locator("#toast")).toContainText("تم استيراد 2 صنف");
-  await page.click("#screen-manager .btn-back");
   await page.click("#btn-new");
   await page.fill("#barcode-input", "6221031250057");
   await page.click("#btn-lookup");

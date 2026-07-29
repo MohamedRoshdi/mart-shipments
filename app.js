@@ -17,7 +17,7 @@ function toast(msg) {
   setTimeout(() => $("toast").classList.remove("show"), 2000);
 }
 
-const state = { items: [], currentBarcode: null, currentShipmentList: [] };
+const state = { items: [], currentBarcode: null };
 
 async function goHome() {
   show("screen-home");
@@ -116,77 +116,6 @@ let dbBroken = false;
   updateSync();
   if (myName()) goHome(); else show("screen-name");
 })();
-
-$("btn-manager").onclick = () => { $("pin-input").value = ""; show("screen-pin"); };
-
-$("btn-pin").onclick = () => {
-  if ($("pin-input").value !== window.APP_CONFIG.managerPin) { toast("الرقم السري غلط"); return; }
-  openManager();
-};
-
-async function openManager() {
-  show("screen-manager");
-  state.currentShipmentList = await db.listShipments().catch(() => []);
-  $("all-shipments").innerHTML = state.currentShipmentList.map((s, i) =>
-    `<li><button class="shipment-row" data-i="${i}">${esc(s.name)} — ${esc(s.createdBy)} — ${fmtDate(s.createdAt)}</button></li>`
-  ).join("") || "<li>لا توجد شحنات</li>";
-}
-
-$("all-shipments").onclick = (e) => {
-  const btn = e.target.closest(".shipment-row");
-  if (btn) openDetail(state.currentShipmentList[+btn.dataset.i]);
-};
-
-function fmtDate(ts) { return new Date(ts).toLocaleDateString("ar-EG"); }
-
-function shipmentText(s) {
-  return `شحنة: ${s.name}\nالموظف: ${s.createdBy}\nالتاريخ: ${fmtDate(s.createdAt)}\n\n`
-    + s.items.map(i => `${i.name || i.barcode} ${i.qty}`).join("\n");
-}
-
-let currentDetail = null;
-
-function openDetail(s) {
-  currentDetail = s;
-  $("detail-title").textContent = s.name;
-  $("detail-meta").textContent = `${s.createdBy} — ${fmtDate(s.createdAt)}`;
-  $("detail-items").innerHTML = s.items.map(i =>
-    `<tr><td>${esc(i.name || i.barcode)}</td><td dir="ltr">${esc(i.qty)}</td></tr>`).join("");
-  show("screen-detail");
-}
-
-$("btn-back-manager").onclick = openManager;
-
-$("btn-import").onclick = () => $("import-file").click();
-$("import-file").onchange = async (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
-  const buf = await file.arrayBuffer();
-  let text = new TextDecoder("utf-8").decode(buf);
-  // Excel on Arabic Windows exports windows-1256; UTF-8 decode of that yields replacement chars
-  if (text.includes("�")) text = new TextDecoder("windows-1256").decode(buf);
-  const rows = text.split(/\r?\n/).map(l => l.split(/[,;\t]/))
-    .filter(c => c.length >= 2 && /\d/.test(c[0]) && c[1].trim());
-  let n = 0;
-  try {
-    for (const c of rows) { await db.saveProductName(c[0].trim(), c.slice(1).join(" ").trim()); n++; }
-    toast(`تم استيراد ${n} صنف`);
-  } catch (err) {
-    console.error(err);
-    toast(`اتسجل ${n} صنف وبعدين حصلت مشكلة — جرّب تاني`);
-  }
-  e.target.value = "";
-};
-
-$("btn-copy").onclick = async () => {
-  try {
-    await navigator.clipboard.writeText(shipmentText(currentDetail));
-    toast("تم النسخ");
-  } catch (e) {
-    console.error(e);
-    toast("النسخ ما نفعش — انسخ من الشاشة");
-  }
-};
 
 let scanner = null;
 
