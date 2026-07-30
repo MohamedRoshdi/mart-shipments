@@ -71,10 +71,22 @@ export async function deleteShipment(id) {
   await fs.deleteDoc(fs.doc(dbRef, 'shipments', id));
 }
 
-// a product row is { name, qty } — qty is the stocktake quantity, absent until a sheet is
-// imported. Test mode keeps accepting the old plain-string map so older seeds still work.
+// A product row is { name, stock: {branch: qty}, qty? }. Each branch has its own sheet, so the
+// stocktake quantity is per branch; `qty` is the older shop-wide import, kept as the fallback
+// for every barcode a branch sheet has not covered yet. Test mode also still accepts the
+// plain-string form so older seeds keep working.
 const prodOf = (v) => (typeof v === 'string' ? { name: v } : (v || {}));
-const row = (barcode, v) => ({ barcode, name: prodOf(v).name, qty: prodOf(v).qty });
+const row = (barcode, v) => ({
+  barcode, name: prodOf(v).name, qty: prodOf(v).qty, stock: prodOf(v).stock || {},
+});
+
+// what the system says this branch holds; null when neither sheet mentioned the product
+export function stockFor(product, branch) {
+  if (!product) return null;
+  const b = product.stock && product.stock[branch];
+  if (Number.isFinite(b)) return b;
+  return Number.isFinite(product.qty) ? product.qty : null;
+}
 
 // one read serves both the shipment name and the stocktake quantity
 export async function getProduct(barcode) {
@@ -225,19 +237,23 @@ export async function saveProductName(barcode, name) {
   return writeProduct(barcode, { name });
 }
 
-// the stocktake sheet carries both columns; qty comes in as a number
-export async function saveProductRow(barcode, name, qty) {
-  return writeProduct(barcode, Number.isFinite(qty) ? { name, qty } : { name });
+// One branch's sheet: barcode, name, quantity. The write is a merge on the branch key, so
+// importing شبين الكوم never touches what قويسنا imported.
+export async function saveProductRow(barcode, name, qty, branch) {
+  if (!Number.isFinite(qty) || !branch) return writeProduct(barcode, { name });
+  return writeProduct(barcode, { name, stock: { [branch]: qty } });
 }
 
 async function writeProduct(barcode, patch) {
   if (TEST_MODE) {
     const map = lsObj('test-products');
-    map[barcode] = { ...prodOf(map[barcode]), ...patch };
+    const old = prodOf(map[barcode]);
+    map[barcode] = { ...old, ...patch, ...(patch.stock ? { stock: { ...old.stock, ...patch.stock } } : {}) };
     localStorage.setItem('test-products', JSON.stringify(map));
     return;
   }
   await live();
+  // Firestore merges map fields key by key, which is exactly the per-branch behaviour wanted
   fs.setDoc(fs.doc(dbRef, 'products', barcode), patch, { merge: true })
     .catch((e) => dispatchEvent(new CustomEvent('db-error', { detail: e })));
 }

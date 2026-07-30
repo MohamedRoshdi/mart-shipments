@@ -328,7 +328,8 @@ async function onBarcode(code) {
   const p = await db.getProduct(code);
   state.currentBarcode = code;
   state.currentName = (p && p.name) || "";
-  state.currentSys = p && Number.isFinite(p.qty) ? p.qty : null;
+  // each branch has its own sheet, so the number depends on the branch this count is for
+  state.currentSys = db.stockFor(p, state.branch);
   const known = state.currentName !== "";
   $("item-barcode").textContent = code;
   $("item-name").textContent = known ? state.currentName : "صنف غير مسجّل في ملف الأصناف";

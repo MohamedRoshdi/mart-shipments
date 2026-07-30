@@ -191,6 +191,8 @@ log("20. shipment deleted (cleanup ok):",
 /* ---- الجرد on the phone: the manager loads the quantities, the employee counts a shelf ---- */
 const sheet = join(tmpdir(), `stock-${SCODE}.csv`);
 writeFileSync(sheet, `﻿الباركود,اسم الصنف,الكمية\r\n${SCODE},صنف جرد موبايل,10\r\n`);
+// the employee counts in branchNames[1], so that branch's sheet is the one to load
+await mgr.tap(`#stock-branch button[data-stockbranch="${branchNames[1]}"]`);
 await mgr.setInputFiles("#stock-file", sheet);
 await mgr.waitForTimeout(SYNC);
 log("21. stock sheet imported:", await mgr.locator("#toast").innerText());

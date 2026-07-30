@@ -21,7 +21,7 @@ page owns the settings, the audit trail and the destructive tools. Arabic-only U
 5. **`db.js` is the only file that knows where data lives.** `app.js` and
    `manager.js` never touch Firestore or localStorage keys directly.
 6. **Bump `CACHE` in `sw.js` on every deploy.** Serving is cache-first, so phones
-   keep the old bundle until the cache name changes. Currently `mart-v21`.
+   keep the old bundle until the cache name changes. Currently `mart-v22`.
 7. **Deploy = push to master.** GitHub Pages serves the repo root. Firestore rules
    deploy separately: `npx firebase deploy --only firestore:rules --project shipments-alaela-mart`.
 
@@ -41,7 +41,7 @@ page owns the settings, the audit trail and the destructive tools. Arabic-only U
 | `firestore.rules` | shape validation; the only server-side guard that exists |
 | `SETUP.md` | Arabic guide for the shop owner |
 | `products-template.csv`, `stock-template.csv` | the two import shapes: barcode+name, and barcode+name+quantity |
-| `tests/app.spec.js` | 43 Playwright tests, all in localStorage mode |
+| `tests/app.spec.js` | 44 Playwright tests, all in localStorage mode |
 | `scripts/*.mjs` | live checks and screenshot helpers (see below) |
 
 ## Data model
@@ -55,10 +55,13 @@ page owns the settings, the audit trail and the destructive tools. Arabic-only U
 listed that product** — writing 0 would claim the system said zero. No `type`: a count is
 not a kind of shipment.
 
-`products/{barcode}` — `{ name, qty? }`. The barcode **is** the document id. `qty` is the
-system quantity a stocktake compares against; it arrives with the stocktake sheet import and
-is absent until then. Every product write is a **merge**, so renaming from the catalog screen
-cannot drop the quantity sitting next to the name.
+`products/{barcode}` — `{ name, stock?: {branch: qty}, qty? }`. The barcode **is** the document
+id. **Each branch has its own sheet**, so the system quantity is a map keyed by branch name;
+`qty` is the older shop-wide import (9,501 products carried it on 2026-07-30) and stays as the
+fallback for any barcode a branch sheet has not covered. `db.stockFor(product, branch)` is the
+one place that order is decided. Every product write is a **merge** — Firestore merges map
+fields key by key, so importing شبين الكوم never touches what قويسنا imported, and renaming
+from the catalog screen drops neither.
 
 `config/app` — `{ managerPin, adminPin, branches: [{name, pin}], shipmentTypes: [], users: [] }`.
 Each user is `{ name, pin, branches: [], perms: [] }`; `perms` holds ids from `auth.js` `PERMS`
@@ -81,7 +84,8 @@ Rules in force (all live-tested):
 - `counts`: the same shape as `shipments` minus `type`, `items` ≤ 500; `createdBy`,
   `createdAt` and `branch` immutable on update; delete allowed.
 - `products`: create/update/delete open, `name` 1–100 chars, barcode ≤ 32, optional
-  `qty` must be a number ≥ 0.
+  `qty` a number ≥ 0, optional `stock` a map of ≤ 10 branches (rules cannot iterate a map,
+  so the per-branch values are only guarded client-side).
 
 `createdAt` is `Date.now()` on purpose — `serverTimestamp()` reads back null in the
 local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
@@ -96,8 +100,13 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   `"count"`; `paintMode()` swaps the labels, hides `#new-type-row`, and the item sheet grows
   `#item-stock`. The same rule holds as for shipments: an unlisted barcode is refused. A count
   never touches `localStorage.draft` — only shipments have a draft.
-- **`sys` is read for free.** The system quantity lives on the product doc, so a scan still
-  costs the one `getProduct` read it always cost. Never add a second collection for it.
+- **`sys` is read for free, and it is per branch.** The quantities live on the product doc, so
+  a scan still costs the one `getProduct` read it always cost. `state.branch` (the branch the
+  count is stamped with, not `myBranch()`) picks which number the employee sees. Never add a
+  second collection for it.
+- **One chip drives both directions.** `stockBranch` in `manager.js` feeds the import *and* the
+  catalog export, so the file that comes out (`الباركود، الاسم، الكمية في <الفرع>`) is exactly
+  the file that goes back in. The import reads the **last** column as the quantity.
 - **The difference is computed, never stored.** `countDiff()` in both `app.js` and
   `manager.js` sums `qty - (sys || 0)`; an item with no `sys` counts as pure surplus, which
   is what an unlisted product on the shelf actually is.
@@ -167,7 +176,7 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
 ## Commands
 
 ```bash
-npx playwright test                 # 43 tests, localStorage mode, ~21s
+npx playwright test                 # 44 tests, localStorage mode, ~23s
 npx playwright test -g "catalog"    # one group
 python3 -m http.server 8080         # serve locally, then open /?test=1
 node scripts/make-icons.mjs         # regenerate the PWA icons

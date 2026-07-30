@@ -32,6 +32,7 @@ let tab = "ship";    // which list the screen is showing
 let filter = ALL;
 let typeFilter = ALL;
 let scopes = [];     // branches this user may see; empty = every branch
+let stockBranch = ""; // which branch's stocktake sheet is being imported or exported
 let current = null;  // the shipment being edited (a copy)
 let identity = "";   // who the audit rows are written as
 
@@ -83,6 +84,7 @@ function enterManager() {
   scopes = (s && s.branches) || [];                        // a scoped user never loads another branch
   identity = (s && s.name) || "مدير";
   filter = scopes.length === 1 ? scopes[0] : ALL;
+  stockBranch = myBranches()[0] || "";
   applyPerms();
   history.replaceState({ screen: "screen-manager" }, "");
   openManager();
@@ -114,6 +116,28 @@ $("btn-logout").onclick = () => {
 /* ---------- shipment list ---------- */
 
 const shortBranch = (b) => b.replace(/^فرع\s+/, ""); // chips stay one line; stored value keeps "فرع"
+
+// the branches this manager may act on; empty scope = the whole shop
+const myBranches = () => (scopes.length ? scopes : window.APP_CONFIG.branches.map(b => b.name));
+
+// one branch choice drives both the stocktake import and the sheet it exports, so the file
+// that comes out is the file that goes back in
+function renderStockBranch() {
+  const html = myBranches().map(b =>
+    `<button type="button" data-stockbranch="${escAttr(b)}" aria-pressed="${b === stockBranch}">${esc(shortBranch(b))}</button>`).join("");
+  $("stock-branch").innerHTML = html;
+  $("export-branch").innerHTML = html;
+}
+
+for (const id of ["stock-branch", "export-branch"]) {
+  $(id).onclick = (e) => {
+    const btn = e.target.closest("button[data-stockbranch]");
+    if (!btn) return;
+    stockBranch = btn.dataset.stockbranch;
+    renderStockBranch();
+    if (!$("screen-products").hidden) renderProducts();     // the quantity column follows the chip
+  };
+}
 
 function renderFilter() {
   // a branch manager sees their branch as a locked chip, not a filter
@@ -154,6 +178,7 @@ async function openManager() {
   if (scopes.length) counts = counts.filter(c => scopes.includes(c.branch));
   renderFilter();
   renderTypeFilter();
+  renderStockBranch();
   renderTabs();
   renderList();
 }
@@ -481,6 +506,15 @@ async function loadProducts() {
   }
 }
 
+// every branch that has a number for this product, plus the older shop-wide sheet
+function stockLine(p) {
+  const parts = myBranches()
+    .filter(b => Number.isFinite(p.stock[b]))
+    .map(b => `${shortBranch(b)} ${p.stock[b]}`);
+  if (!parts.length && Number.isFinite(p.qty)) parts.push(`كل الفروع ${p.qty}`);
+  return parts.length ? ` · في النظام: ${esc(parts.join(" · "))}` : "";
+}
+
 function renderProducts() {
   const found = products;
   const page = found.slice(0, PAGE);
@@ -491,7 +525,7 @@ function renderProducts() {
   $("products-list").innerHTML = page.map(p => `<li>
       <div class="card-main">
         <input class="product-name" type="text" maxlength="100" data-barcode="${escAttr(p.barcode)}" value="${escAttr(edits.get(p.barcode) ?? p.name)}">
-        <div class="code">${esc(p.barcode)}${Number.isFinite(p.qty) ? ` · في النظام ${esc(p.qty)}` : ""}</div>
+        <div class="code">${esc(p.barcode)}${stockLine(p)}</div>
       </div>
       <button class="del" data-delproduct="${escAttr(p.barcode)}" aria-label="حذف الصنف">×</button>
     </li>`).join("") || `<li class="empty">${searching ? "مفيش نتيجة — دوّر بأول الاسم أو بالباركود" : "مفيش أصناف — استورد ملف الأصناف الأول"}</li>`;
@@ -572,10 +606,10 @@ $("btn-export-products").onclick = async () => {
   toast("بنجهّز الملف...");
   const rows = await db.listAllProducts().catch(() => []);   // whole catalog, not the page on screen
   if (!rows.length) { toast("مفيش أصناف تتحمّل"); return; }
-  // third column doubles as the stocktake sheet: fill it in and import it back
-  downloadCsv("products.csv", [
-    ["الباركود", "اسم الصنف", "الكمية في النظام"],
-    ...rows.map(p => [p.barcode, p.name, Number.isFinite(p.qty) ? p.qty : ""]),
+  // the file that comes out is the file that goes back in: same three columns, one branch
+  downloadCsv(`أصناف-${safeName(stockBranch || "الكل")}.csv`, [
+    ["الباركود", "اسم الصنف", `الكمية في ${stockBranch || "النظام"}`],
+    ...rows.map(p => [p.barcode, p.name, db.stockFor(p, stockBranch) ?? ""]),
   ]);
   toast(`تم تحميل ${rows.length} صنف`);
 };
@@ -621,11 +655,13 @@ $("stock-file").onchange = async (e) => {
     .map(c => ({ barcode: cell(c[0]), name: c.slice(1, -1).map(cell).join(" ").trim(), qty: parseInt(cell(c[c.length - 1]), 10) }))
     .filter(r => r.barcode && /\d/.test(r.barcode) && r.name && Number.isFinite(r.qty) && r.qty >= 0);
   if (!rows.length) { toast("الملف مفيهوش صفوف صالحة — لازم: باركود، اسم، كمية"); e.target.value = ""; return; }
+  if (!stockBranch) { toast("اختار الفرع الأول"); e.target.value = ""; return; }
+  const branch = stockBranch;                    // a chip tapped mid-import must not move the rows
   let n = 0;
   try {
-    for (const r of rows) { await db.saveProductRow(r.barcode, r.name, r.qty); n++; }
-    db.logAction(identity, "استيراد كميات الجرد", `${n} صنف`);
-    toast(`تم استيراد كميات ${n} صنف`);
+    for (const r of rows) { await db.saveProductRow(r.barcode, r.name, r.qty, branch); n++; }
+    db.logAction(identity, "استيراد كميات الجرد", `${n} صنف · ${branch}`);
+    toast(`تم استيراد كميات ${n} صنف لـ${branch}`);
   } catch (err) {
     console.error(err);
     toast(`اتسجل ${n} صنف وبعدين حصلت مشكلة — جرّب تاني`);

@@ -380,7 +380,8 @@ test('catalog screen: list, search, rename, delete, export', async ({ page }) =>
     page.waitForEvent('download'),
     page.click('#btn-export-products'),
   ]))[0];
-  expect(dl.suggestedFilename()).toBe('products.csv');
+  // the catalog export is now one branch's stocktake sheet, named after it
+  expect(dl.suggestedFilename()).toMatch(/^أصناف-.+\.csv$/);
   const csv = require('fs').readFileSync(await dl.path(), 'utf8');
   expect(csv).toContain('"111","لبن المراعي 1 لتر"');
   expect(csv).not.toContain('جبنة');
@@ -808,21 +809,69 @@ test("draft survives reload", async ({ page }) => {
 const COUNTER = { name: 'سعيد', pin: '7733', branches: ['فرع قويسنا'], perms: ['emp', 'create', 'count', 'edit'] };
 const NO_COUNT = { name: 'سيد', pin: '2233', branches: ['فرع قويسنا'], perms: ['emp', 'create'] };
 
-test('stocktake sheet import writes the system quantity onto the product', async ({ page }) => {
+test('stocktake sheet import writes the quantity under the branch it was imported for', async ({ page }) => {
   await openManagerPage(page);
+  const names = await page.evaluate(() => window.APP_CONFIG.branches.map(b => b.name));
+  await page.click(`#stock-branch button[data-stockbranch="${names[0]}"]`);
   await page.setInputFiles('#stock-file', 'tests/fixtures/stock.csv');
-  await expect(page.locator('#toast')).toContainText('تم استيراد كميات 2 صنف');
-  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('test-products')));
-  expect(saved['6221031250057']).toEqual({ name: 'لبن المراعي', qty: 24 });
-  expect(saved['6224000123456']).toEqual({ name: 'جبنة بيضاء', qty: 8 });
+  await expect(page.locator('#toast')).toContainText(`تم استيراد كميات 2 صنف لـ${names[0]}`);
+  let saved = await page.evaluate(() => JSON.parse(localStorage.getItem('test-products')));
+  expect(saved['6221031250057']).toEqual({ name: 'لبن المراعي', stock: { [names[0]]: 24 } });
+  expect(saved['6224000123456']).toEqual({ name: 'جبنة بيضاء', stock: { [names[0]]: 8 } });
 
-  // renaming from the catalog screen must not drop the quantity sitting next to the name
+  // the other branch has its own sheet, and importing it must not touch the first one
+  await page.click(`#stock-branch button[data-stockbranch="${names[1]}"]`);
+  await page.setInputFiles('#stock-file', 'tests/fixtures/stock-b.csv');
+  await expect(page.locator('#toast')).toContainText(`تم استيراد كميات 1 صنف لـ${names[1]}`);
+  saved = await page.evaluate(() => JSON.parse(localStorage.getItem('test-products')));
+  expect(saved['6221031250057']).toEqual({ name: 'لبن المراعي', stock: { [names[0]]: 24, [names[1]]: 3 } });
+  expect(saved['6224000123456']).toEqual({ name: 'جبنة بيضاء', stock: { [names[0]]: 8 } });
+
+  // renaming from the catalog screen must not drop the quantities sitting next to the name
   await page.click('#btn-products');
   await page.fill('input[data-barcode="6221031250057"]', 'لبن المراعي 1 لتر');
   await page.click('#btn-save-products');
   await expect(page.locator('#toast')).toContainText('تم حفظ 1 اسم');
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem('test-products'))['6221031250057']))
-    .toEqual({ name: 'لبن المراعي 1 لتر', qty: 24 });
+    .toEqual({ name: 'لبن المراعي 1 لتر', stock: { [names[0]]: 24, [names[1]]: 3 } });
+
+  // and the exported sheet carries the chosen branch's column, ready to be filled in again
+  const exp = (await Promise.all([
+    page.waitForEvent('download'),
+    page.click('#btn-export-products'),
+  ]))[0];
+  const csv = require('fs').readFileSync(await exp.path(), 'utf8');
+  expect(csv).toContain(`"الكمية في ${names[1]}"`);
+  expect(csv).toContain('"6221031250057","لبن المراعي 1 لتر","3"');
+});
+
+test('the same barcode shows each branch its own quantity', async ({ page }) => {
+  await page.goto('/?test=1');
+  const names = await page.evaluate(() => window.APP_CONFIG.branches.map(b => b.name));
+  await page.evaluate((b) => {
+    localStorage.setItem('employeeName', 'أحمد');
+    localStorage.setItem('test-products', JSON.stringify({
+      '111': { name: 'لبن', stock: { [b[0]]: 10, [b[1]]: 4 } },
+      '222': { name: 'جبنة', qty: 7 },                 // only the old shop-wide sheet
+    }));
+  }, names);
+  await seedUsers(page, [{ name: 'محمود', pin: '6622', branches: names, perms: ['emp', 'count'] }]);
+  await page.fill('#login-pin', '6622');
+  await page.click('#btn-login');
+  await page.click('#btn-count');
+  await page.click(`#new-branch-picker button[data-newbranch="${names[1]}"]`);
+  await page.fill('#barcode-input', '111');
+  await page.click('#btn-lookup');
+  await expect(page.locator('#item-stock-qty')).toHaveText('4');      // شبين's own sheet
+  await page.click('#btn-cancel-item');
+  await page.click(`#new-branch-picker button[data-newbranch="${names[0]}"]`);
+  await page.fill('#barcode-input', '111');
+  await page.click('#btn-lookup');
+  await expect(page.locator('#item-stock-qty')).toHaveText('10');     // قويسنا's own sheet
+  await page.click('#btn-cancel-item');
+  await page.fill('#barcode-input', '222');                           // no branch sheet yet
+  await page.click('#btn-lookup');
+  await expect(page.locator('#item-stock-qty')).toHaveText('7');      // falls back to the old one
 });
 
 test('employee stocktake: the sheet shows what the system says, the save keeps both numbers', async ({ page }) => {

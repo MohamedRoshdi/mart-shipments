@@ -41,11 +41,13 @@ async function waitFor(locator, ms = 20000) {
   return false;
 }
 
-// 1. the stocktake sheet: barcode, name, system quantity
+// 1. the stocktake sheet: barcode, name, system quantity — for one branch
 await openManager();
+const BRANCH = await page.locator("#stock-branch button[data-stockbranch]").first().getAttribute("data-stockbranch");
+await page.click(`#stock-branch button[data-stockbranch="${BRANCH}"]`);
 await page.setInputFiles("#stock-file", sheet);
 await page.waitForTimeout(4000);
-log("1. import toast:", await page.locator("#toast").innerText());
+log("1. import toast:", await page.locator("#toast").innerText(), "| branch:", BRANCH);
 
 // 2. the catalog screen shows the quantity next to the barcode
 await page.click("#btn-products");
@@ -64,6 +66,10 @@ if (await page.locator("#screen-login:not([hidden])").count()) {
 }
 await page.waitForSelector("#screen-home:not([hidden])", { timeout: 20000 });
 await page.click("#btn-count");
+// the count has to be for the branch whose sheet was just imported
+if (await page.locator(`#new-branch-picker button[data-newbranch="${BRANCH}"]`).count()) {
+  await page.click(`#new-branch-picker button[data-newbranch="${BRANCH}"]`);
+}
 await page.fill("#shipment-name", COUNT);
 await page.fill("#barcode-input", CODE);
 await page.click("#btn-lookup");

@@ -62,8 +62,10 @@
         <li id="tool-stock">
           <div class="card-main">
             <div class="card-title">كميات الجرد</div>
-            <div class="meta">ملف Excel/CSV بثلاث خانات: الباركود، اسم الصنف، الكمية اللي في النظام. الكمية دي هي اللي بتظهر للموظف وهو بيجرد الرف.</div>
+            <div class="meta">لكل فرع ملفه. اختار الفرع الأول، وبعدين استورد ملف Excel/CSV بثلاث خانات:
+              الباركود، اسم الصنف، الكمية اللي في النظام. استيراد فرع مش بيمسح كميات الفرع التاني.</div>
           </div>
+          <div id="stock-branch" class="seg"></div>
           <div class="row-actions">
             <button id="btn-import-stock">استيراد الكميات</button>
             <a id="btn-stock-template" href="stock-template.csv" download>تحميل النموذج</a>
@@ -106,6 +108,8 @@
       <input id="product-search" type="text" maxlength="60" placeholder="ابحث باسم الصنف أو الباركود">
       <p id="products-count" class="meta"></p>
       <ul id="products-list"></ul>
+      <p class="meta">تحميل ملف الأصناف بيطلع بثلاث خانات جاهزة للجرد: الباركود، الاسم، وكمية الفرع اللي مختاره.</p>
+      <div id="export-branch" class="seg"></div>
       <div class="row-actions">
         <button id="btn-export-products">تحميل ملف الأصناف</button>
       </div>

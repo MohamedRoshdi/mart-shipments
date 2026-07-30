@@ -70,13 +70,16 @@ service cloud.firestore {
     match /products/{barcode} {
       allow read: if true;
       allow delete: if true;
-      // qty = the quantity the shop's system says is on the shelf; written by the stocktake import
+      // stock = { branch: quantity } from that branch's stocktake sheet; qty is the older
+      // shop-wide import, still read as the fallback
       allow create, update: if barcode.size() <= 32
-        && request.resource.data.keys().hasOnly(['name', 'qty'])
+        && request.resource.data.keys().hasOnly(['name', 'qty', 'stock'])
         && request.resource.data.name is string && request.resource.data.name.size() > 0
         && request.resource.data.name.size() <= 100
         && (!('qty' in request.resource.data)
-            || (request.resource.data.qty is number && request.resource.data.qty >= 0));
+            || (request.resource.data.qty is number && request.resource.data.qty >= 0))
+        && (!('stock' in request.resource.data)
+            || (request.resource.data.stock is map && request.resource.data.stock.size() <= 10));
     }
   }
 }
