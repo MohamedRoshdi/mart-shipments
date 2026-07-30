@@ -87,6 +87,14 @@ export async function listProducts() {
   return snap.docs.map((d) => ({ barcode: d.id, name: d.data().name }));
 }
 
+// the real catalog size, even when it is bigger than PRODUCT_CAP
+export async function countProducts() {
+  if (TEST_MODE) return Object.keys(lsObj('test-products')).length;
+  await live();
+  const snap = await fs.getCountFromServer(fs.collection(dbRef, 'products'));
+  return snap.data().count;
+}
+
 export async function deleteProduct(barcode) {
   if (TEST_MODE) {
     const map = lsObj('test-products');

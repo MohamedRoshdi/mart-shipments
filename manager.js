@@ -242,7 +242,8 @@ $("btn-save-edit").onclick = async () => {
 
 /* ---------- catalog: view, search, rename, delete, export ---------- */
 
-let products = [];              // whole catalog as loaded
+let products = [];              // catalog rows loaded (up to db.PRODUCT_CAP)
+let total = 0;                  // real catalog size, counted on the server
 const edits = new Map();        // barcode -> new name, pending save
 
 $("btn-products").onclick = async () => {
@@ -255,7 +256,12 @@ async function loadProducts() {
   edits.clear();
   products = await db.listProducts().catch(() => []);
   products.sort((a, b) => a.name.localeCompare(b.name, "ar"));
+  total = products.length;
   renderProducts();
+  if (products.length >= db.PRODUCT_CAP) {           // only then is the loaded count not the truth
+    total = await db.countProducts().catch(() => products.length);
+    renderProducts();
+  }
 }
 
 function matches() {
@@ -276,9 +282,9 @@ async function lookupMissingBarcode() {
 function renderProducts() {
   const found = matches();
   const page = found.slice(0, PAGE);
-  const capped = products.length >= db.PRODUCT_CAP ? ` (أول ${db.PRODUCT_CAP} صنف — دوّر بالباركود للباقي)` : "";
+  const capped = total > products.length ? ` (محمّل منهم ${products.length} — دوّر بالباركود للباقي)` : "";
   $("products-count").textContent = products.length
-    ? `${found.length} من ${products.length} صنف${capped}` + (found.length > PAGE ? ` — بيظهر أول ${PAGE}` : "")
+    ? `${found.length} من ${total} صنف${capped}` + (found.length > PAGE ? ` — بيظهر أول ${PAGE}` : "")
     : "";
   $("products-list").innerHTML = page.map(p => `<li>
       <div class="card-main">
