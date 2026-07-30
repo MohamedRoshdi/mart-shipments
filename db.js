@@ -304,3 +304,52 @@ export async function deleteCount(id) {
   await live();
   await fs.deleteDoc(fs.doc(dbRef, 'counts', id));
 }
+
+/* ---------- expiry (الصلاحيات): one row per product and date; months are derived, never stored ---------- */
+
+// the id has to survive two rows added in the same millisecond, which counts/shipments never risk
+const expiryId = (e) => `${e.createdAt}-${e.barcode}`;
+
+export async function saveExpiry(row) {
+  row.createdAt = Date.now();
+  if (TEST_MODE) {
+    const all = lsArr('test-expiry');
+    all.push({ ...row, _id: expiryId(row) });
+    localStorage.setItem('test-expiry', JSON.stringify(all));
+    return;
+  }
+  await live();
+  // same reasoning as saveShipment: awaiting the network would hang the UI while offline
+  fs.addDoc(fs.collection(dbRef, 'expiry'), row).catch((e) => dispatchEvent(new CustomEvent('db-error', { detail: e })));
+}
+
+// no orderBy: sorting by year+month+day on the server would need a composite index, and the
+// screen groups the rows into months anyway
+export async function listExpiry() {
+  if (TEST_MODE) return lsArr('test-expiry');
+  await live();
+  const snap = await fs.getDocs(fs.collection(dbRef, 'expiry'));
+  return snap.docs.map((d) => ({ ...d.data(), _id: d.id }));
+}
+
+// quantity or date only: a row moves to another month by changing its date, never by re-adding
+export async function updateExpiry(id, data) {
+  const patch = { qty: data.qty, day: data.day, month: data.month, year: data.year };
+  if (TEST_MODE) {
+    const all = lsArr('test-expiry').map((e) => (e._id === id ? { ...e, ...patch } : e));
+    localStorage.setItem('test-expiry', JSON.stringify(all));
+    return;
+  }
+  await live();
+  await fs.updateDoc(fs.doc(dbRef, 'expiry', id), patch);
+}
+
+export async function deleteExpiry(id) {
+  if (TEST_MODE) {
+    const keep = lsArr('test-expiry').filter((e) => e._id !== id);
+    localStorage.setItem('test-expiry', JSON.stringify(keep));
+    return;
+  }
+  await live();
+  await fs.deleteDoc(fs.doc(dbRef, 'expiry', id));
+}

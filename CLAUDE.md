@@ -1,9 +1,10 @@
 # mart-shipments — working notes for Claude
 
 Shipment-intake PWA for a two-branch Egyptian supermarket. Employees scan barcodes into a
-shipment on their phones, or count a shelf against the quantity the shop's system says
-(الجرد); a manager page reviews, edits, exports and manages the product catalog; an admin
-page owns the settings, the audit trail and the destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
+shipment on their phones, count a shelf against the quantity the shop's system says (الجرد),
+or record what is about to expire (الصلاحيات); a manager page reviews, edits, exports and
+manages the product catalog; an admin page owns the settings, the audit trail and the
+destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 
 ## Hard rules for this repo
 
@@ -21,7 +22,7 @@ page owns the settings, the audit trail and the destructive tools. Arabic-only U
 5. **`db.js` is the only file that knows where data lives.** `app.js` and
    `manager.js` never touch Firestore or localStorage keys directly.
 6. **Bump `CACHE` in `sw.js` on every deploy.** Serving is cache-first, so phones
-   keep the old bundle until the cache name changes. Currently `mart-v22`.
+   keep the old bundle until the cache name changes. Currently `mart-v23`.
 7. **Deploy = push to master.** GitHub Pages serves the repo root. Firestore rules
    deploy separately: `npx firebase deploy --only firestore:rules --project shipments-alaela-mart`.
 
@@ -29,10 +30,11 @@ page owns the settings, the audit trail and the destructive tools. Arabic-only U
 
 | File | Role |
 |---|---|
-| `index.html` / `app.js` | employee app: setup, home, new/edit shipment **or stocktake**, camera, item sheet |
-| `manager.html` / `manager.js` | manager app: PIN, shipments tab, stocktake tab, edit, catalog screen, import/export |
+| `index.html` / `app.js` | employee app: setup, home, new/edit shipment **or stocktake**, **الصلاحيات** (months + one month), camera, item sheet |
+| `manager.html` / `manager.js` | manager app: PIN, shipments tab, stocktake tab, **expiry tab**, edit, catalog screen, import/export |
 | `admin.html` / `admin.js` | admin app: users + permissions, settings (branches, PINs, types), audit trail, bulk delete, catalog wipe |
 | `auth.js` | permission list, PIN → identity, the 12-hour session shared by all three pages |
+| `expiry.js` | the pure part of الصلاحيات: month grouping, sorting, counters, the four colour states |
 | `db.js` | data layer; `?test=1` switches the whole app to localStorage |
 | `zip.js` | store-only ZIP writer, ~80 lines, no dependency; used by the folder export |
 | `style.css` | one stylesheet for all three pages |
@@ -41,7 +43,7 @@ page owns the settings, the audit trail and the destructive tools. Arabic-only U
 | `firestore.rules` | shape validation; the only server-side guard that exists |
 | `SETUP.md` | Arabic guide for the shop owner |
 | `products-template.csv`, `stock-template.csv` | the two import shapes: barcode+name, and barcode+name+quantity |
-| `tests/app.spec.js` | 44 Playwright tests, all in localStorage mode |
+| `tests/app.spec.js` | 50 Playwright tests, all in localStorage mode |
 | `scripts/*.mjs` | live checks and screenshot helpers (see below) |
 
 ## Data model
@@ -54,6 +56,12 @@ page owns the settings, the audit trail and the destructive tools. Arabic-only U
 `sys` what the imported sheet says the system holds. **`sys` is absent when the sheet never
 listed that product** — writing 0 would claim the system said zero. No `type`: a count is
 not a kind of shipment.
+
+`expiry/{auto}` — one row per product **and date** (الصلاحيات): `barcode`, `name`, `qty`,
+`day`, `month`, `year`, `branch`, `createdBy`, `createdAt`. **A month is never stored.**
+`expiry.js months()` groups the rows, so a month appears with its first row and disappears
+with its last one — nothing to create, nothing to clean up, and no empty months piling up.
+Re-scanning the same barcode with the same date grows that row instead of adding a second.
 
 `products/{barcode}` — `{ name, stock?: {branch: qty}, qty? }`. The barcode **is** the document
 id. **Each branch has its own sheet**, so the system quantity is a map keyed by branch name;
@@ -83,6 +91,9 @@ Rules in force (all live-tested):
 - delete: allowed on both collections (the owner asked for it).
 - `counts`: the same shape as `shipments` minus `type`, `items` ≤ 500; `createdBy`,
   `createdAt` and `branch` immutable on update; delete allowed.
+- `expiry`: create/delete open; `qty > 0`, `day` 1–31, `month` 1–12, `year` 2000–2100;
+  update may change name/qty/date only — `barcode`, `branch`, `createdBy`, `createdAt` are
+  immutable, so a row moves month but never changes product or branch.
 - `products`: create/update/delete open, `name` 1–100 chars, barcode ≤ 32, optional
   `qty` a number ≥ 0, optional `stock` a map of ≤ 10 branches (rules cannot iterate a map,
   so the per-branch values are only guarded client-side).
@@ -100,6 +111,17 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   `"count"`; `paintMode()` swaps the labels, hides `#new-type-row`, and the item sheet grows
   `#item-stock`. The same rule holds as for shipments: an unlisted barcode is refused. A count
   never touches `localStorage.draft` — only shipments have a draft.
+- **There is one scanner in `index.html`, and it moves.** `#scan-block` (scan button, reader,
+  live camera controls, manual barcode field) lives outside `main`; `render()` appends it into
+  `SLOTS[screen]` (`slot-new` / `slot-expiry`) and hides it everywhere else. A second reader
+  would mean a second camera stream and a second copy of every camera control. `navTo` stops
+  the camera for any screen that has no slot.
+- **الصلاحيات never counts a month, it derives one.** `ex.months(rows)` is the only place the
+  grouping, the two counters, the nearest-first order and the four colours are decided, and both
+  `app.js` and `manager.js` call it. Deleting the last row of a month leaves the screen through
+  `paintMonth()`'s `history.back()` — the month is gone, so there is nothing left to paint.
+  The colour is a border down the card edge (`li.exp-<status>`), never colour alone: the row
+  also says «فاضل ٣٥ يوم» / «فاتت بـ ٢٠ يوم».
 - **`sys` is read for free, and it is per branch.** The quantities live on the product doc, so
   a scan still costs the one `getProduct` read it always cost. `state.branch` (the branch the
   count is stamped with, not `myBranch()`) picks which number the employee sees. Never add a
@@ -176,7 +198,7 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
 ## Commands
 
 ```bash
-npx playwright test                 # 44 tests, localStorage mode, ~23s
+npx playwright test                 # 50 tests, localStorage mode, ~25s
 npx playwright test -g "catalog"    # one group
 python3 -m http.server 8080         # serve locally, then open /?test=1
 node scripts/make-icons.mjs         # regenerate the PWA icons
@@ -191,8 +213,10 @@ STAMP=$RANDOM node scripts/live-products.mjs     # catalog: import, rename, dele
 node scripts/live-search-name.mjs                # proves search reaches past the loaded page
 node scripts/live-admin.mjs                      # admin page, settings doc, audit trail, rule probes, ZIP
 STAMP=$RANDOM node scripts/live-count.mjs        # الجرد: stock sheet, count, difference, Excel, delete
+STAMP=$RANDOM node scripts/live-expiry.mjs       # الصلاحيات: record a date, merge, move month, Excel, delete
 BASE=http://localhost:8087 node scripts/live-camera.mjs   # camera list/start/stop/fallback on a fake device
 OUT=/tmp/shots node scripts/shots.mjs            # local screenshots (needs the server above)
+OUT=/tmp/shots BASE=http://localhost:8080 node scripts/shots-expiry.mjs   # home + الصلاحيات screens
 ```
 
 Writing live scripts: pull real barcodes from the catalog first — invented ones are
@@ -203,7 +227,8 @@ debounce, or it reports false negatives.
 ## Testing notes
 
 - Tests run with `?test=1`; `db.js` then uses `test-shipments` / `test-products` /
-  `test-counts` in localStorage. Seed `test-products` in any test that adds items, or the add
+  `test-counts` / `test-expiry` in localStorage. An `expiry` seed carries its own `_id`
+  (`saveExpiry` writes `createdAt-barcode`, because two rows can land in the same millisecond). Seed `test-products` in any test that adds items, or the add
   is refused (`setUp()` seeds `111`/`222` by default).
 - A `test-products` value may be a plain string **or** `{name, qty}` — the string form is kept
   so older seeds still work, and `qty` is what a stocktake compares against.

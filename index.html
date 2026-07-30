@@ -36,19 +36,30 @@
     </section>
 
     <section id="screen-home" hidden>
+      <div id="home-actions" class="actions">
+        <button id="btn-new" class="action">
+          <span class="action-title">شحنة جديدة</span>
+          <span class="action-sub">استلام بضاعة ومسح أصنافها</span>
+        </button>
+        <button id="btn-count" class="action" hidden>
+          <span class="action-title">جرد</span>
+          <span class="action-sub">عدّ الرف وقارنه بكمية النظام</span>
+        </button>
+        <button id="btn-expiry" class="action" hidden>
+          <span class="action-title">الصلاحيات</span>
+          <span class="action-sub">أصناف قرّبت تنتهي، مرتّبة بالشهر</span>
+        </button>
+      </div>
       <div id="home-links" class="row-actions" hidden>
         <a id="link-manager" href="manager.html" hidden>صفحة المدير</a>
         <a id="link-admin" href="admin.html" hidden>صفحة النظام</a>
         <button id="btn-logout" class="ghost" hidden>خروج</button>
       </div>
+      <h2>شحناتي</h2>
       <ul id="my-shipments"></ul>
       <div id="counts-block" hidden>
         <h2>الجرد</h2>
         <ul id="my-counts"></ul>
-      </div>
-      <div class="bottombar">
-        <button id="btn-new" class="primary big grow">+ شحنة جديدة</button>
-        <button id="btn-count" class="ghost big grow" hidden>+ جرد</button>
       </div>
     </section>
 
@@ -62,19 +73,7 @@
       </div>
       <h2 id="new-name-head">اسم الشحنة</h2>
       <input id="shipment-name" type="text" maxlength="100" placeholder="مثلاً: شحنة المراعي">
-      <button id="btn-scan" class="scan">امسح الباركود بالكاميرا</button>
-      <div id="reader" hidden></div>
-      <div id="cam-live" class="cam-live" hidden>
-        <button id="btn-torch" class="ghost" aria-pressed="false">الفلاش</button>
-        <label id="zoom-live-wrap" hidden>التقريب
-          <input id="zoom-live" type="range" min="1" max="5" step="0.5" dir="ltr">
-        </label>
-        <span id="cam-res" class="code"></span>
-      </div>
-      <div class="manual">
-        <input id="barcode-input" type="text" inputmode="numeric" maxlength="32" placeholder="أو اكتب الباركود" dir="ltr">
-        <button id="btn-lookup" class="ghost">بحث</button>
-      </div>
+      <div id="slot-new"></div>
       <h2>الأصناف</h2>
       <ul id="items-list"></ul>
       <div class="bottombar">
@@ -82,6 +81,31 @@
         <button id="btn-save-shipment" class="primary grow" disabled>حفظ الشحنة</button>
       </div>
     </section>
+
+    <section id="screen-expiry" hidden>
+      <h2>الفرع</h2>
+      <p id="exp-branch" class="branch-line"></p>
+      <div id="exp-branch-picker" class="seg" hidden></div>
+      <div id="slot-expiry"></div>
+      <input id="exp-search" type="text" maxlength="60" placeholder="أو دوّر على الصنف باسمه">
+      <ul id="exp-results" hidden></ul>
+      <h2>الشهور</h2>
+      <ul id="exp-months"></ul>
+      <p class="meta">الشهر بيتفتح لوحده مع أول صنف، وبيختفي لوحده لما يفضى.</p>
+    </section>
+
+    <section id="screen-month" hidden>
+      <p id="month-head" class="month-head"></p>
+      <p id="month-count" class="meta"></p>
+      <input id="month-search" type="text" maxlength="60" placeholder="ابحث باسم الصنف أو الباركود">
+      <ul id="month-items"></ul>
+      <p class="meta">لو الصلاحية اتكتبت غلط، غيّر التاريخ والصنف هينتقل لشهره الصح لوحده.</p>
+      <div class="bottombar">
+        <span id="month-dirty" class="count"></span>
+        <button id="btn-save-month" class="primary grow" disabled>حفظ التعديلات</button>
+      </div>
+    </section>
+
     <section id="screen-cam" hidden>
       <p class="meta">لو المسح بطيء أو مش بيقرأ على الموبايل ده، جرّب تغيّر الكاميرا الأول —
         بعض الموبايلات فيها أكتر من كاميرا خلفية وواحدة منهم مش بتعرف تقرّب على الباركود.</p>
@@ -115,6 +139,24 @@
     </section>
   </main>
 
+  <!-- one scanner in the page, moved into whichever screen needs it: a second reader would mean
+       a second camera stream and a second copy of every camera control -->
+  <div id="scan-block">
+    <button id="btn-scan" class="scan">امسح الباركود بالكاميرا</button>
+    <div id="reader" hidden></div>
+    <div id="cam-live" class="cam-live" hidden>
+      <button id="btn-torch" class="ghost" aria-pressed="false">الفلاش</button>
+      <label id="zoom-live-wrap" hidden>التقريب
+        <input id="zoom-live" type="range" min="1" max="5" step="0.5" dir="ltr">
+      </label>
+      <span id="cam-res" class="code"></span>
+    </div>
+    <div class="manual">
+      <input id="barcode-input" type="text" inputmode="numeric" maxlength="32" placeholder="أو اكتب الباركود" dir="ltr">
+      <button id="btn-lookup" class="ghost">بحث</button>
+    </div>
+  </div>
+
   <div id="scrim" hidden></div>
   <div id="item-form" class="sheet" hidden>
     <div class="handle"></div>
@@ -127,6 +169,10 @@
     </div>
     <p id="item-stock" class="stock-line" hidden>الكمية في النظام <span id="item-stock-qty" class="code"></span></p>
     <p id="qty-hint" class="meta" hidden>اكتب الكمية اللي لقيتها فعلاً على الرف.</p>
+    <div id="item-date-row" hidden>
+      <h2>تاريخ انتهاء الصلاحية</h2>
+      <input id="item-date" type="date" dir="ltr">
+    </div>
     <div id="qty-row" class="qty-row">
       <button id="qty-minus" aria-label="كمية أقل">−</button>
       <input id="item-qty" type="number" value="1" min="1" dir="ltr" aria-label="الكمية">

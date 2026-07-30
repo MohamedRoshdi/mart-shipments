@@ -1,5 +1,6 @@
 import * as db from "./db.js";
 import * as auth from "./auth.js";
+import * as ex from "./expiry.js";
 import { zipBlob } from "./zip.js";
 
 const $ = (id) => document.getElementById(id);
@@ -20,14 +21,18 @@ const TITLES = {
   "screen-manager": "الشحنات",
   "screen-detail": "تعديل شحنة",
   "screen-products": "الأصناف",
+  "screen-expiry-month": "الصلاحيات",
 };
-const DEEP = ["screen-detail", "screen-products"];   // screens you can go back from
+const DEEP = ["screen-detail", "screen-products", "screen-expiry-month"];   // screens you can go back from
 const PAGE = 50;                                     // rows rendered at once; search narrows the rest
 
 let all = [];        // everything read from the database
 let shown = [];      // after the branch filter — row indexes point here
 let counts = [];     // stocktake sessions (الجرد), same scope rules as shipments
 let shownCounts = [];
+let expRows = [];    // الصلاحيات: one row per product and date, grouped into months on screen
+let monthKey = "";   // the month open in the deep screen
+const expEdits = new Map();   // row id -> pending { qty, day, month, year }
 let tab = "ship";    // which list the screen is showing
 let filter = ALL;
 let typeFilter = ALL;
@@ -98,8 +103,13 @@ function applyPerms() {
   $("tool-stock").hidden = !canDo("import");
   $("tool-export").hidden = !canDo("download");
   $("counts-exports").hidden = !canDo("download");
-  $("list-tabs").hidden = !canDo("count");     // one list left = no need for tabs
+  $("expiry-exports").hidden = !canDo("download");
+  $("m-exports").hidden = !canDo("download");
+  $("list-tabs").hidden = !(canDo("count") || canDo("expiry"));   // one list left = no need for tabs
+  $("list-tabs").querySelector('[data-tab="count"]').hidden = !canDo("count");
+  $("list-tabs").querySelector('[data-tab="expiry"]').hidden = !canDo("expiry");
   if (!canDo("count") && tab === "count") tab = "ship";
+  if (!canDo("expiry") && tab === "expiry") tab = "ship";
   $("tool-admin").hidden = !canDo("adm");
   $("btn-save-edit").hidden = !canDo("edit");
   $("detail-exports").hidden = !canDo("download");
@@ -176,6 +186,8 @@ async function openManager() {
   if (scopes.length) all = all.filter(s => scopes.includes(s.branch));   // never load another branch
   counts = canDo("count") ? await db.listCounts().catch(() => []) : [];
   if (scopes.length) counts = counts.filter(c => scopes.includes(c.branch));
+  expRows = canDo("expiry") ? await db.listExpiry().catch(() => []) : [];
+  if (scopes.length) expRows = expRows.filter(e => !e.branch || scopes.includes(e.branch));
   renderFilter();
   renderTypeFilter();
   renderStockBranch();
@@ -189,6 +201,7 @@ function renderTabs() {
   $("type-filter-row").hidden = tab !== "ship";   // a stocktake has no shipment type
   $("ships-block").hidden = tab !== "ship";
   $("counts-block").hidden = tab !== "count";
+  $("expiry-block").hidden = tab !== "expiry";
 }
 
 $("list-tabs").onclick = (e) => {
@@ -201,6 +214,7 @@ $("list-tabs").onclick = (e) => {
 
 function renderList() {
   if (tab === "count") { renderCounts(); return; }
+  if (tab === "expiry") { renderMonths(); return; }
   shown = all.filter(s => (filter === ALL || s.branch === filter)
     && (typeFilter === ALL || s.type === typeFilter));
   $("all-shipments").innerHTML = shown.map((s, i) => `<li>
@@ -284,6 +298,161 @@ $("all-counts").onclick = async (e) => {
     }
     openManager();
   }
+};
+
+/* ---------- الصلاحيات (expiry): months are derived from the rows, never stored ---------- */
+
+const expInScope = () => expRows.filter(e => filter === ALL || !e.branch || e.branch === filter);
+
+function renderMonths() {
+  const ms = ex.months(expInScope());
+  $("all-months").innerHTML = ms.map(m => `<li class="exp exp-${m.status}">
+      <div class="card-main">
+        <div class="card-title">${esc(m.label)}</div>
+        <div class="meta">${m.count} صنف · ${m.qty} قطعة · ${esc(ex.daysWord(m.days))}</div>
+      </div>
+      <div class="row-actions">
+        <button data-month="${escAttr(m.key)}">عرض</button>
+        ${canDo("download") ? `<button data-monthcsv="${escAttr(m.key)}">Excel</button>` : ""}
+      </div>
+    </li>`).join("") || `<li class="empty">${filter === ALL ? "مفيش صلاحيات مسجّلة" : "مفيش صلاحيات في الفرع ده"}</li>`;
+}
+
+$("all-months").onclick = (e) => {
+  const open = e.target.closest("button[data-month]");
+  if (open) { openMonth(open.dataset.month); return; }
+  const csv = e.target.closest("button[data-monthcsv]");
+  if (csv) exportMonth(csv.dataset.monthcsv);
+};
+
+const monthRows = () => expInScope().filter(e => ex.monthKey(e) === monthKey);
+
+function openMonth(key) {
+  monthKey = key;
+  expEdits.clear();
+  $("m-search").value = "";
+  history.pushState({ screen: "screen-expiry-month" }, "");
+  render("screen-expiry-month");
+  paintMonth();
+}
+
+function paintMonth() {
+  const m = ex.months(monthRows())[0];
+  if (!m) { history.back(); return; }         // the last row left → the month is gone
+  $("m-head").textContent = m.label;
+  $("screen-title").textContent = m.label;
+  $("m-count").textContent = `${m.count} صنف · ${m.qty} قطعة · ${ex.STATUS_LABEL[m.status]}`;
+  renderMonthItems();
+}
+
+function renderMonthItems() {
+  const m = ex.months(monthRows())[0];
+  if (!m) return;
+  $("m-items").innerHTML = ex.search(m.items, $("m-search").value).map(e => {
+    const days = ex.daysLeft(e);
+    return `<li class="exp exp-${ex.statusOf(days)}">
+      <div class="card-main">
+        <div class="card-title">${esc(e.name || "بدون اسم")}</div>
+        <div class="code">${esc(e.barcode)}${e.branch ? ` · ${esc(shortBranch(e.branch))}` : ""}</div>
+        <div class="meta">${esc(ex.daysWord(days))}</div>
+        <input class="date-cell" type="date" dir="ltr" data-edate="${escAttr(e._id)}"
+          value="${escAttr(ex.isoOf(e))}" ${canDo("edit") ? "" : "disabled"}>
+      </div>
+      <input class="qty-cell" type="number" min="1" dir="ltr" data-eqty="${escAttr(e._id)}"
+        value="${Number(e.qty) || 1}" ${canDo("edit") ? "" : "readonly"}>
+      ${canDo("del") ? `<button class="del" data-delexp="${escAttr(e._id)}" aria-label="حذف الصنف">×</button>` : ""}
+    </li>`;
+  }).join("") || `<li class="empty">مفيش نتيجة في الشهر ده</li>`;
+  updateMonthDirty();
+}
+
+function updateMonthDirty() {
+  $("m-dirty").textContent = expEdits.size ? `${expEdits.size} تعديل` : "";
+  $("btn-save-month").disabled = expEdits.size === 0;
+  $("btn-save-month").hidden = !canDo("edit");
+}
+
+$("m-search").oninput = renderMonthItems;
+
+// one pending patch per row: a quantity edit must not throw away a date edit on the same row
+function editOf(id) {
+  const row = expRows.find(e => e._id === id);
+  return expEdits.get(id) || { qty: Number(row.qty) || 1, day: row.day, month: row.month, year: row.year };
+}
+
+$("m-items").oninput = (e) => {
+  const qtyInput = e.target.closest("input[data-eqty]");
+  if (qtyInput) {
+    const id = qtyInput.dataset.eqty;
+    expEdits.set(id, { ...editOf(id), qty: Math.max(1, parseInt(qtyInput.value, 10) || 1) });
+    updateMonthDirty();
+    return;
+  }
+  const dateInput = e.target.closest("input[data-edate]");
+  if (!dateInput) return;
+  const d = ex.fromIso(dateInput.value);
+  if (!d) return;                            // half-typed date: wait for a whole one
+  expEdits.set(dateInput.dataset.edate, { ...editOf(dateInput.dataset.edate), ...d });
+  updateMonthDirty();
+};
+
+$("m-items").onclick = async (e) => {
+  const btn = e.target.closest("button[data-delexp]");
+  if (!btn) return;
+  const row = expRows.find(x => x._id === btn.dataset.delexp);
+  if (!confirm(`حذف «${row.name}» من صلاحيات الشهر ده؟`)) return;
+  try {
+    await db.deleteExpiry(row._id);
+    db.logAction(identity, "حذف صلاحية", `${row.barcode} — ${row.name}`);
+    expEdits.delete(row._id);
+    toast("تم الحذف");
+  } catch (err) {
+    console.error(err);
+    toast("الحذف ما نفعش — جرّب تاني");
+  }
+  await reloadExpiry();
+};
+
+$("btn-save-month").onclick = async () => {
+  const pending = [...expEdits];
+  let n = 0;
+  try {
+    for (const [id, patch] of pending) { await db.updateExpiry(id, patch); expEdits.delete(id); n++; }
+    if (n) db.logAction(identity, "تعديل صلاحيات", `${n} صنف`);
+    toast(`تم حفظ ${n} تعديل`);
+  } catch (err) {
+    console.error(err);
+    toast(`اتحفظ ${n} تعديل وبعدين حصلت مشكلة — جرّب تاني`);
+  }
+  await reloadExpiry();      // a row whose date moved is in another month now, and may empty this one
+};
+
+async function reloadExpiry() {
+  expRows = await db.listExpiry().catch(() => []);
+  if (scopes.length) expRows = expRows.filter(e => !e.branch || scopes.includes(e.branch));
+  paintMonth();
+}
+
+const expiryRows = (rows) => [
+  ["الفرع", "الباركود", "اسم الصنف", "الكمية", "تاريخ الصلاحية", "الحالة", "الموظف"],
+  ...rows.map(e => [e.branch || "", e.barcode, e.name || "", e.qty,
+    ex.isoOf(e), ex.STATUS_LABEL[ex.statusOf(ex.daysLeft(e))], e.createdBy || ""]),
+];
+
+function exportMonth(key) {
+  const m = ex.months(expInScope()).find(x => x.key === key);
+  if (!m) { toast("مفيش أصناف في الشهر ده"); return; }
+  downloadCsv(`صلاحيات-${safeName(m.label)}.csv`, expiryRows(m.items));
+  toast("تم تحميل ملف Excel");
+}
+
+$("btn-export-month").onclick = () => exportMonth(monthKey);
+
+$("btn-export-expiry").onclick = () => {
+  const rows = ex.months(expInScope()).flatMap(m => m.items);   // nearest month first, like the screen
+  if (!rows.length) { toast("مفيش صلاحيات تتحمّل"); return; }
+  downloadCsv(`صلاحيات-${filter === ALL ? "all" : safeName(filter)}.csv`, expiryRows(rows));
+  toast("تم تحميل ملف Excel");
 };
 
 /* ---------- copy + download ---------- */

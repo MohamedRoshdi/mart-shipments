@@ -1011,3 +1011,151 @@ test('camera settings: resolution and continuous focus stick per phone', async (
   await expect(page.locator('#res-picker button[data-res="fhd"]')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.locator('#btn-focus')).toHaveAttribute('aria-pressed', 'false');
 });
+
+/* ---------- الصلاحيات ---------- */
+
+// fixed dates on purpose: the month a row belongs to must not depend on the day the tests run
+const EXP_ROWS = [
+  { _id: 'e1', barcode: '111', name: 'لبن', qty: 5, day: 14, month: 9, year: 2026,
+    branch: 'فرع قويسنا', createdBy: 'أحمد', createdAt: 1753700000000 },
+  { _id: 'e2', barcode: '222', name: 'جبنة', qty: 2, day: 3, month: 9, year: 2026,
+    branch: 'فرع قويسنا', createdBy: 'أحمد', createdAt: 1753700000001 },
+  { _id: 'e3', barcode: '111', name: 'لبن', qty: 4, day: 20, month: 10, year: 2026,
+    branch: 'فرع قويسنا', createdBy: 'أحمد', createdAt: 1753700000002 },
+];
+
+async function openExpiry(page, rows = []) {
+  await page.goto('/?test=1');
+  await page.evaluate((r) => {
+    localStorage.setItem('employeeName', 'أحمد');
+    localStorage.setItem('test-products', JSON.stringify({ '111': 'لبن', '222': 'جبنة' }));
+    localStorage.setItem('test-expiry', JSON.stringify(r));
+  }, rows);
+  await page.reload();
+  await page.click('#btn-expiry');
+}
+
+test('الصلاحيات: a scan opens the month, a second scan of the same date grows the same row', async ({ page }) => {
+  await openExpiry(page);
+  await expect(page.locator('#exp-months li')).toContainText('لسه مفيش صلاحيات');
+
+  await page.fill('#barcode-input', '999');                        // not in the catalog
+  await page.click('#btn-lookup');
+  await expect(page.locator('#item-warn-line')).toContainText('مش هيتسجّل في الصلاحيات');
+  await expect(page.locator('#btn-add-item')).toBeHidden();
+  await page.click('#btn-cancel-item');
+
+  await page.fill('#barcode-input', '111');
+  await page.click('#btn-lookup');
+  await expect(page.locator('#item-date-row')).toBeVisible();
+  await page.click('#btn-add-item');                               // no date yet
+  await expect(page.locator('#toast')).toContainText('حدّد تاريخ انتهاء الصلاحية');
+  await page.fill('#item-date', '2026-09-14');
+  await page.fill('#item-qty', '5');
+  await page.click('#btn-add-item');
+  await expect(page.locator('#toast')).toContainText('سبتمبر 2026');
+  await expect(page.locator('#exp-months li')).toContainText('سبتمبر 2026');
+  await expect(page.locator('#exp-months li')).toContainText('1 صنف · 5 قطعة');
+
+  await page.fill('#barcode-input', '111');                        // same product, same date
+  await page.click('#btn-lookup');
+  await page.fill('#item-qty', '3');
+  await page.click('#btn-add-item');
+  await expect(page.locator('#exp-months li')).toHaveCount(1);     // one month, one row, more pieces
+  await expect(page.locator('#exp-months li')).toContainText('1 صنف · 8 قطعة');
+  const rows = await page.evaluate(() => JSON.parse(localStorage.getItem('test-expiry')));
+  expect(rows).toHaveLength(1);
+  expect(rows[0]).toMatchObject({ barcode: '111', name: 'لبن', qty: 8, day: 14, month: 9, year: 2026, branch: 'فرع قويسنا' });
+});
+
+test('الصلاحيات: months are sorted nearest first and carry both counters', async ({ page }) => {
+  await openExpiry(page, EXP_ROWS);
+  await expect(page.locator('#exp-months li')).toHaveCount(2);      // a month exists only while it has rows
+  await expect(page.locator('#exp-months li').nth(0)).toContainText('سبتمبر 2026');
+  await expect(page.locator('#exp-months li').nth(0)).toContainText('2 صنف · 7 قطعة');
+  await expect(page.locator('#exp-months li').nth(1)).toContainText('أكتوبر 2026');
+  await expect(page.locator('#exp-months li').nth(1)).toContainText('1 صنف · 4 قطعة');
+});
+
+test('الصلاحيات: the month screen searches, fixes a quantity and moves a wrong date', async ({ page }) => {
+  await openExpiry(page, EXP_ROWS);
+  await page.click('#exp-months button[data-month="2026-09"]');
+  await expect(page.locator('#month-head')).toHaveText('سبتمبر 2026');
+  await expect(page.locator('#month-items li')).toHaveCount(2);
+
+  await page.fill('#month-search', 'جبن');                          // search inside the month
+  await expect(page.locator('#month-items li')).toHaveCount(1);
+  await expect(page.locator('#month-items li')).toContainText('جبنة');
+  await page.fill('#month-search', '');
+
+  await page.fill('#month-items input[data-eqty="e1"]', '9');
+  await expect(page.locator('#month-dirty')).toHaveText('1 تعديل');
+  await page.fill('#month-items input[data-edate="e2"]', '2026-11-03');   // wrong month, fixed
+  await expect(page.locator('#month-dirty')).toHaveText('2 تعديل');
+  await page.click('#btn-save-month');
+  await expect(page.locator('#toast')).toContainText('تم حفظ 2 تعديل');
+  await expect(page.locator('#month-items li')).toHaveCount(1);           // the cheese left this month
+  await expect(page.locator('#month-count')).toContainText('1 صنف · 9 قطعة');
+
+  await page.click('#btn-back');
+  await expect(page.locator('#exp-months li')).toHaveCount(3);
+  await expect(page.locator('#exp-months li').nth(2)).toContainText('نوفمبر 2026');
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('test-expiry')));
+  expect(saved.find(e => e._id === 'e1').qty).toBe(9);
+  expect(saved.find(e => e._id === 'e2')).toMatchObject({ day: 3, month: 11, year: 2026, name: 'جبنة' });
+});
+
+test('الصلاحيات: deleting the last row of a month takes the month off the screen', async ({ page }) => {
+  await openExpiry(page, [EXP_ROWS[2]]);
+  page.on('dialog', (d) => d.accept());
+  await page.click('#exp-months button[data-month="2026-10"]');
+  await page.click('#month-items button[data-delexp="e3"]');
+  await expect(page.locator('#screen-expiry')).toBeVisible();       // back on the months list
+  await expect(page.locator('#exp-months li')).toContainText('لسه مفيش صلاحيات');
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('test-expiry')))).toHaveLength(0);
+});
+
+test('الصلاحيات: the permission gates the card', async ({ page }) => {
+  await page.goto('/?test=1');
+  await seedUsers(page, [
+    { name: 'سيد', pin: '2233', branches: ['فرع قويسنا'], perms: ['emp', 'create'] },
+    { name: 'هدى', pin: '3344', branches: ['فرع قويسنا'], perms: ['emp', 'expiry', 'edit', 'del'] },
+  ]);
+  await page.fill('#login-pin', '2233');
+  await page.click('#btn-login');
+  await expect(page.locator('#btn-expiry')).toBeHidden();
+  await signOut(page);
+  await page.goto('/?test=1');
+  await page.fill('#login-pin', '3344');
+  await page.click('#btn-login');
+  await expect(page.locator('#btn-expiry')).toBeVisible();
+});
+
+test('manager: the expiry tab groups by month, exports Excel and deletes a row', async ({ page }) => {
+  await openManagerPage(page);
+  await page.evaluate((r) => localStorage.setItem('test-expiry', JSON.stringify(r)), EXP_ROWS);
+  await page.reload();
+  await expect(page.locator('#expiry-block')).toBeHidden();          // the shipments tab opens first
+  await page.click('#list-tabs button[data-tab="expiry"]');
+  await expect(page.locator('#all-months li')).toHaveCount(2);
+  await expect(page.locator('#all-months li').nth(0)).toContainText('سبتمبر 2026');
+  await expect(page.locator('#all-months li').nth(0)).toContainText('2 صنف · 7 قطعة');
+
+  const dl = (await Promise.all([
+    page.waitForEvent('download'),
+    page.click('#all-months button[data-monthcsv="2026-09"]'),
+  ]))[0];
+  expect(dl.suggestedFilename()).toBe('صلاحيات-سبتمبر 2026.csv');
+  const csv = require('fs').readFileSync(await dl.path(), 'utf8');
+  expect(csv).toContain('"الفرع","الباركود","اسم الصنف","الكمية","تاريخ الصلاحية","الحالة","الموظف"');
+  expect(csv).toContain('"فرع قويسنا","222","جبنة","2","2026-09-03"');
+
+  await page.click('#all-months button[data-month="2026-09"]');
+  await expect(page.locator('#m-head')).toHaveText('سبتمبر 2026');
+  page.on('dialog', (d) => d.accept());
+  await page.click('#m-items button[data-delexp="e2"]');
+  await expect(page.locator('#toast')).toContainText('تم الحذف');
+  await expect(page.locator('#m-items li')).toHaveCount(1);
+  await page.click('#btn-back');
+  await expect(page.locator('#all-months li').nth(0)).toContainText('1 صنف · 5 قطعة');
+});

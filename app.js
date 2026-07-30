@@ -1,5 +1,6 @@
 import * as db from "./db.js";
 import * as auth from "./auth.js";
+import * as ex from "./expiry.js";
 
 const $ = (id) => document.getElementById(id);
 const esc = (t) => { const d = document.createElement("div"); d.textContent = t; return d.innerHTML; };
@@ -21,29 +22,40 @@ const TITLES = {
   "screen-name": "بيانات الموظف",
   "screen-home": "شحناتي",
   "screen-new": "شحنة جديدة",
+  "screen-expiry": "الصلاحيات",
+  "screen-month": "الصلاحيات",
   "screen-cam": "إعدادات الكاميرا",
 };
+
+// the one scanner block lives inside whichever of these screens is open
+const SLOTS = { "screen-new": "slot-new", "screen-expiry": "slot-expiry" };
 
 const types = () => window.APP_CONFIG.shipmentTypes;
 
 const state = {
   items: [], currentBarcode: null, currentName: "", currentSys: null, editingId: null,
   mine: [], myCounts: [],
-  // "ship" = a delivery being received, "count" = a stocktake (جرد) against the system quantity
+  // "ship" = a delivery being received, "count" = a stocktake (جرد) against the system quantity,
+  // "expiry" = recording an expiry date (الصلاحيات), one saved row per product and date
   mode: "ship",
+  expRows: [], monthKey: "", expEdits: new Map(),
   branch: myBranch(), type: types()[0],
 };
 
 const counting = () => state.mode === "count";
+const expiring = () => state.mode === "expiry";
 
 /* ---------- navigation: one screen at a time, phone back button works ---------- */
 
 function render(id) {
   document.querySelectorAll("main > section").forEach(s => s.hidden = true);
   $(id).hidden = false;
+  const slot = SLOTS[id];
+  if (slot) $(slot).append($("scan-block"));       // move, never copy: one camera, one set of controls
+  $("scan-block").hidden = !slot;
   $("screen-title").textContent = (id === "screen-new" && counting()) ? "جرد" : (TITLES[id] || "شحنات المحل");
   $("btn-back").hidden = id === "screen-home" || id === "screen-login" || (id === "screen-name" && !myName());
-  $("btn-cam").hidden = !(id === "screen-home" || id === "screen-new");
+  $("btn-cam").hidden = !(id === "screen-home" || id === "screen-new" || id === "screen-expiry");
   $("who").hidden = !myName() || id !== "screen-home";
   if (myName()) $("who").textContent = `${myName()} · ${myBranch()}`;
   if (id === "screen-home") renderHomeLinks();
@@ -52,7 +64,7 @@ function render(id) {
 }
 
 function navTo(id) {
-  if (id !== "screen-new") stopScan();   // leaving the scanner screen must release the camera
+  if (!SLOTS[id]) stopScan();            // leaving a scanner screen must release the camera
   history.pushState({ screen: id }, "");
   render(id);
 }
@@ -104,6 +116,7 @@ function renderHomeLinks() {
   $("btn-logout").hidden = !s;
   $("btn-new").hidden = !canDo("create");
   $("btn-count").hidden = !canDo("count");
+  $("btn-expiry").hidden = !canDo("expiry");
   $("counts-block").hidden = !canDo("count");
   $("who").disabled = !!s;                 // a signed-in user changes their name from the admin page
 }
@@ -207,24 +220,31 @@ function allowedBranches() {
   return mine.length ? mine : all;
 }
 
-// one branch → a line of text like before; more than one → the employee picks per shipment
+// one branch → a line of text like before; more than one → the employee picks per shipment,
+// and the الصلاحيات screen carries the same choice so a row lands in the right branch
 function renderNewBranch() {
   const mine = allowedBranches();
   const multi = mine.length > 1 && !!auth.session();
-  $("new-branch").hidden = multi;
-  $("new-branch-picker").hidden = !multi;
-  if (!multi) { $("new-branch").textContent = state.branch; return; }
-  $("new-branch-picker").innerHTML = mine.map(b =>
+  const html = mine.map(b =>
     `<button type="button" data-newbranch="${escAttr(b)}" aria-pressed="${b === state.branch}">${esc(shortBranch(b))}</button>`).join("");
+  for (const [line, picker] of [["new-branch", "new-branch-picker"], ["exp-branch", "exp-branch-picker"]]) {
+    $(line).hidden = multi;
+    $(line).textContent = state.branch;
+    $(picker).hidden = !multi;
+    $(picker).innerHTML = html;
+  }
 }
 
-$("new-branch-picker").onclick = (e) => {
-  const btn = e.target.closest("button[data-newbranch]");
-  if (!btn) return;
-  state.branch = btn.dataset.newbranch;
-  localStorage.setItem("employeeBranch", state.branch);   // next shipment starts on the same branch
-  renderNewBranch();
-};
+for (const id of ["new-branch-picker", "exp-branch-picker"]) {
+  $(id).onclick = async (e) => {
+    const btn = e.target.closest("button[data-newbranch]");
+    if (!btn) return;
+    state.branch = btn.dataset.newbranch;
+    localStorage.setItem("employeeBranch", state.branch);   // next shipment starts on the same branch
+    renderNewBranch();
+    if (!$("screen-expiry").hidden) await loadExpiry();      // the list is per branch
+  };
+}
 
 function renderTypePicker() {
   renderNewBranch();
@@ -324,6 +344,13 @@ $("btn-lookup").onclick = () => {
   if (code) onBarcode(code).catch(() => toast("حصلت مشكلة — جرّب تاني"));
 };
 
+// the refusal wording names the list the employee is actually filling
+const WARN = {
+  ship: "الباركود ده مش موجود في ملف الأصناف، والصنف مش هيتسجّل في الشحنة.",
+  count: "الباركود ده مش موجود في ملف الأصناف، والصنف مش هيتسجّل في الجرد.",
+  expiry: "الباركود ده مش موجود في ملف الأصناف، والصنف مش هيتسجّل في الصلاحيات.",
+};
+
 async function onBarcode(code) {
   const p = await db.getProduct(code);
   state.currentBarcode = code;
@@ -335,19 +362,22 @@ async function onBarcode(code) {
   $("item-name").textContent = known ? state.currentName : "صنف غير مسجّل في ملف الأصناف";
   $("item-name").classList.toggle("unknown", !known);
   $("item-warn").hidden = known;                 // full explanation instead of a silent add
-  $("item-warn-line").textContent = counting()
-    ? "الباركود ده مش موجود في ملف الأصناف، والصنف مش هيتسجّل في الجرد."
-    : "الباركود ده مش موجود في ملف الأصناف، والصنف مش هيتسجّل في الشحنة.";
+  $("item-warn-line").textContent = WARN[state.mode];
   // the whole point of a stocktake: the employee sees what the system claims before he types
   $("item-stock").hidden = !(known && counting());
   $("item-stock-qty").textContent = state.currentSys === null ? "غير مسجّلة" : state.currentSys;
   // .code is dir=ltr for numbers; Arabic words inside it come out spaced wrong
   $("item-stock-qty").classList.toggle("code", state.currentSys !== null);
-  $("qty-hint").hidden = !(known && counting());
+  $("qty-hint").hidden = !(known && (counting() || expiring()));
+  $("qty-hint").textContent = expiring()
+    ? "اكتب عدد القطع اللي بتنتهي في التاريخ ده."
+    : "اكتب الكمية اللي لقيتها فعلاً على الرف.";
+  // the date stays as it was between scans: a shelf is usually one batch with one date
+  $("item-date-row").hidden = !(known && expiring());
   $("qty-row").hidden = !known;                  // nothing to count if the item cannot be added
   $("btn-add-item").hidden = !known;             // only catalog items can enter a shipment
   $("btn-add-item").disabled = !known;
-  $("btn-add-item").textContent = counting() ? "تسجيل الكمية" : "إضافة الصنف";
+  $("btn-add-item").textContent = counting() ? "تسجيل الكمية" : (expiring() ? "تسجيل الصلاحية" : "إضافة الصنف");
   $("item-qty").value = 1;
   showSheet(true);
 }
@@ -380,12 +410,13 @@ $("scrim").onclick = hideSheet;
 $("qty-plus").onclick = () => { $("item-qty").value = +$("item-qty").value + 1; };
 $("qty-minus").onclick = () => { $("item-qty").value = Math.max(1, +$("item-qty").value - 1); };
 
-$("btn-add-item").onclick = () => {
+$("btn-add-item").onclick = async () => {
   const name = state.currentName;      // names come from the imported catalog only
   const qty = Math.max(1, parseInt($("item-qty").value, 10) || 1);
   const barcode = state.currentBarcode;
   if (!barcode) return;
   if (!name) { toast("الصنف مش في ملف الأصناف — مش هينفع يتسجّل"); return; }
+  if (expiring()) { await addExpiry(barcode, name, qty); return; }
   const dup = state.items.find(i => i.barcode === barcode);
   // a second scan of the same item means more of it was found, in both modes
   if (dup) dup.qty += qty;
@@ -449,6 +480,198 @@ $("btn-save-shipment").onclick = async () => {
   toast(counting() ? "تم حفظ الجرد" : (editing ? "تم حفظ التعديلات" : "تم حفظ الشحنة"));
   history.replaceState({ screen: "screen-home" }, "");
   goHome();
+};
+
+/* ---------- الصلاحيات: months exist only while a row carries their date ---------- */
+
+$("btn-expiry").onclick = async () => {
+  state.mode = "expiry";
+  state.editingId = null;
+  state.items = [];
+  state.currentBarcode = null;
+  renderNewBranch();
+  $("exp-search").value = "";
+  $("exp-results").hidden = true;
+  $("barcode-input").value = "";
+  navTo("screen-expiry");
+  await loadExpiry();
+};
+
+async function loadExpiry() {
+  const rows = await db.listExpiry().catch(() => []);
+  // a row with no branch is from before branches were stamped; it stays visible everywhere
+  state.expRows = rows.filter(e => !e.branch || e.branch === state.branch);
+  renderMonths();
+}
+
+function renderMonths() {
+  const ms = ex.months(state.expRows);
+  $("exp-months").innerHTML = ms.map(m => `<li class="exp exp-${m.status}">
+      <div class="card-main">
+        <div class="card-title">${esc(m.label)}</div>
+        <div class="meta">${m.count} صنف · ${m.qty} قطعة · ${esc(ex.daysWord(m.days))}</div>
+      </div>
+      <button class="ghost" data-month="${escAttr(m.key)}">فتح</button>
+    </li>`).join("") || `<li class="empty">لسه مفيش صلاحيات — امسح أول صنف وحدّد تاريخه</li>`;
+}
+
+$("exp-months").onclick = (e) => {
+  const btn = e.target.closest("button[data-month]");
+  if (btn) openMonth(btn.dataset.month);
+};
+
+async function addExpiry(barcode, name, qty) {
+  const d = ex.fromIso($("item-date").value);
+  if (!d) { toast("حدّد تاريخ انتهاء الصلاحية الأول"); return; }
+  // the same product with the same date is more of the same batch, not a second row
+  const dup = state.expRows.find(e => e.barcode === barcode
+    && e.year === d.year && e.month === d.month && e.day === d.day);
+  try {
+    if (dup) await db.updateExpiry(dup._id, { ...dup, qty: (Number(dup.qty) || 0) + qty });
+    else await db.saveExpiry({ barcode, name, qty, ...d, branch: state.branch, createdBy: myName() });
+  } catch (err) {
+    console.error(err);
+    toast("الحفظ ما نفعش — حاول تاني");
+    return;
+  }
+  hideSheet();
+  $("barcode-input").value = "";
+  toast(`تم تسجيل ${name} في ${ex.monthLabel(d.year, d.month)}`);   // toast writes textContent
+  await loadExpiry();
+}
+
+/* --- one month: search, edit the quantity, move the date, delete --- */
+
+const monthRows = () => state.expRows.filter(e => ex.monthKey(e) === state.monthKey);
+
+function openMonth(key) {
+  state.monthKey = key;
+  state.expEdits = new Map();
+  $("month-search").value = "";
+  navTo("screen-month");
+  paintMonth();
+}
+
+function paintMonth() {
+  const m = ex.months(monthRows())[0];
+  if (!m) { history.back(); return; }        // the last row left → the month is not there any more
+  $("month-head").textContent = m.label;
+  $("screen-title").textContent = m.label;
+  $("month-count").textContent = `${m.count} صنف · ${m.qty} قطعة · ${ex.STATUS_LABEL[m.status]}`;
+  renderMonthItems();
+}
+
+function renderMonthItems() {
+  const m = ex.months(monthRows())[0];
+  if (!m) return;
+  const rows = ex.search(m.items, $("month-search").value);
+  $("month-items").innerHTML = rows.map(e => {
+    const days = ex.daysLeft(e);
+    return `<li class="exp exp-${ex.statusOf(days)}">
+      <div class="card-main">
+        <div class="card-title">${esc(e.name || "بدون اسم")}</div>
+        <div class="code">${esc(e.barcode)}</div>
+        <div class="meta">${esc(ex.daysWord(days))}</div>
+        <input class="date-cell" type="date" dir="ltr" data-edate="${escAttr(e._id)}"
+          value="${escAttr(ex.isoOf(e))}" ${canDo("edit") ? "" : "disabled"}>
+      </div>
+      <input class="qty-cell" type="number" min="1" dir="ltr" data-eqty="${escAttr(e._id)}"
+        value="${Number(e.qty) || 1}" ${canDo("edit") ? "" : "readonly"}>
+      ${canDo("del") ? `<button class="del" data-delexp="${escAttr(e._id)}" aria-label="حذف الصنف">×</button>` : ""}
+    </li>`;
+  }).join("") || `<li class="empty">مفيش نتيجة في الشهر ده</li>`;
+  updateMonthDirty();
+}
+
+function updateMonthDirty() {
+  $("month-dirty").textContent = state.expEdits.size ? `${state.expEdits.size} تعديل` : "";
+  $("btn-save-month").disabled = state.expEdits.size === 0;
+  $("btn-save-month").hidden = !canDo("edit");
+}
+
+$("month-search").oninput = renderMonthItems;
+
+// one pending patch per row: typing a quantity must not throw away a date change on the same row
+function editOf(id) {
+  const row = state.expRows.find(e => e._id === id);
+  return state.expEdits.get(id) || { qty: Number(row.qty) || 1, day: row.day, month: row.month, year: row.year };
+}
+
+$("month-items").oninput = (e) => {
+  const qtyInput = e.target.closest("input[data-eqty]");
+  if (qtyInput) {
+    const id = qtyInput.dataset.eqty;
+    state.expEdits.set(id, { ...editOf(id), qty: Math.max(1, parseInt(qtyInput.value, 10) || 1) });
+    updateMonthDirty();
+    return;
+  }
+  const dateInput = e.target.closest("input[data-edate]");
+  if (!dateInput) return;
+  const d = ex.fromIso(dateInput.value);
+  if (!d) return;                          // half-typed date: wait for a whole one
+  const id = dateInput.dataset.edate;
+  state.expEdits.set(id, { ...editOf(id), ...d });
+  updateMonthDirty();
+};
+
+$("month-items").onclick = async (e) => {
+  const btn = e.target.closest("button[data-delexp]");
+  if (!btn) return;
+  const row = state.expRows.find(x => x._id === btn.dataset.delexp);
+  if (!confirm(`حذف «${row.name}» من صلاحيات الشهر ده؟`)) return;
+  try {
+    await db.deleteExpiry(row._id);
+    state.expEdits.delete(row._id);
+    toast("تم الحذف");
+  } catch (err) {
+    console.error(err);
+    toast("الحذف ما نفعش — جرّب تاني");
+  }
+  await loadExpiry();
+  paintMonth();
+};
+
+$("btn-save-month").onclick = async () => {
+  const pending = [...state.expEdits];
+  let n = 0;
+  try {
+    for (const [id, patch] of pending) { await db.updateExpiry(id, patch); state.expEdits.delete(id); n++; }
+    toast(`تم حفظ ${n} تعديل`);
+  } catch (err) {
+    console.error(err);
+    toast(`اتحفظ ${n} تعديل وبعدين حصلت مشكلة — جرّب تاني`);
+  }
+  await loadExpiry();
+  paintMonth();          // a row whose date moved is now in another month, and may empty this one
+};
+
+/* --- adding by name: the barcode field stays numeric, the search is its own box --- */
+
+let expSearchTimer = null;
+
+$("exp-search").oninput = () => {
+  clearTimeout(expSearchTimer);
+  expSearchTimer = setTimeout(runExpSearch, 250);   // one query per pause, not per keystroke
+};
+
+async function runExpSearch() {
+  const q = $("exp-search").value.trim();
+  if (q.length < 2) { $("exp-results").hidden = true; return; }
+  const hits = (await db.searchProducts(q).catch(() => [])).slice(0, 8);
+  if ($("exp-search").value.trim() !== q) return;   // a newer search already ran
+  $("exp-results").hidden = false;
+  $("exp-results").innerHTML = hits.map(p => `<li>
+      <div class="card-main">
+        <div class="card-title">${esc(p.name)}</div>
+        <div class="code">${esc(p.barcode)}</div>
+      </div>
+      <button class="ghost" data-pick="${escAttr(p.barcode)}">اختار</button>
+    </li>`).join("") || `<li class="empty">مفيش نتيجة — دوّر بأول الاسم</li>`;
+}
+
+$("exp-results").onclick = (e) => {
+  const btn = e.target.closest("button[data-pick]");
+  if (btn) onBarcode(btn.dataset.pick).catch(() => toast("حصلت مشكلة — جرّب تاني"));
 };
 
 /* ---------- camera ---------- */
@@ -668,6 +891,7 @@ const ENTER = {
   "branch-pin": "save-name",
   "barcode-input": "btn-lookup",
   "item-qty": "btn-add-item",
+  "item-date": "btn-add-item",
 };
 
 addEventListener("keydown", (e) => {

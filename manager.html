@@ -27,6 +27,7 @@
       <div id="list-tabs" class="seg">
         <button type="button" data-tab="ship" aria-pressed="true">الشحنات</button>
         <button type="button" data-tab="count" aria-pressed="false">الجرد</button>
+        <button type="button" data-tab="expiry" aria-pressed="false">الصلاحيات</button>
       </div>
       <h2>الفرع</h2>
       <div id="branch-filter" class="seg"></div>
@@ -43,6 +44,13 @@
         <ul id="all-counts"></ul>
         <div id="counts-exports" class="row-actions">
           <button id="btn-export-counts">تحميل كل الجرد Excel</button>
+        </div>
+      </div>
+      <div id="expiry-block" hidden>
+        <h2>الصلاحيات</h2>
+        <ul id="all-months"></ul>
+        <div id="expiry-exports" class="row-actions">
+          <button id="btn-export-expiry">تحميل كل الصلاحيات Excel</button>
         </div>
       </div>
 
@@ -116,6 +124,20 @@
       <div class="bottombar">
         <span id="products-dirty" class="count"></span>
         <button id="btn-save-products" class="primary grow" disabled>حفظ تعديل الأسماء</button>
+      </div>
+    </section>
+
+    <section id="screen-expiry-month" hidden>
+      <p id="m-head" class="month-head"></p>
+      <p id="m-count" class="meta"></p>
+      <input id="m-search" type="text" maxlength="60" placeholder="ابحث باسم الصنف أو الباركود">
+      <ul id="m-items"></ul>
+      <div id="m-exports" class="row-actions">
+        <button id="btn-export-month">Excel للشهر ده</button>
+      </div>
+      <div class="bottombar">
+        <span id="m-dirty" class="count"></span>
+        <button id="btn-save-month" class="primary grow" disabled>حفظ التعديلات</button>
       </div>
     </section>
 

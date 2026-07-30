@@ -106,10 +106,53 @@ input[type=text], input[type=password], input[type=number] {
 }
 input::placeholder { color: #93a0a8; }
 
+input[type=date] {
+  inline-size: 100%;
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  font-family: var(--mono);
+}
+
+/* ---------- home: one card per job, the receiving one leading ---------- */
+.actions { display: grid; gap: 10px; }
+.action {
+  display: grid;
+  gap: 3px;
+  text-align: start;
+  padding: 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-inline-start: 5px solid var(--amber);
+}
+.action-title { font-weight: 700; font-size: 1.06rem; }
+.action-sub { font-size: .78rem; color: var(--ink-2); }
+#btn-new { background: var(--amber); border-color: var(--amber-2); }
+#btn-new .action-sub { color: #6d4b00; }
+
+/* ---------- expiry: how close the date is, read as a colour down the edge of the card ---------- */
+li.exp { border-inline-start-width: 6px; }
+li.exp-ok { border-inline-start-color: var(--good); }
+li.exp-near { border-inline-start-color: #dcae00; }
+li.exp-soon { border-inline-start-color: #e07400; }
+li.exp-expired { border-inline-start-color: var(--bad); }
+li.exp-expired .card-title { color: var(--bad); }
+.month-head { font-size: 1.2rem; font-weight: 700; }
+.date-cell { margin-block-start: 6px; padding: 8px; font-size: .9rem; }
+
 /* segmented picker: branch choice, branch filter */
 .seg { display: flex; gap: 8px; flex-wrap: wrap; }
 .seg button { flex: 1 1 auto; background: var(--surface); border: 1px solid var(--line); padding-inline: 10px; white-space: nowrap; }
 .branch-line { font-weight: 700; }
+/* three lists behind one row of tabs: it has to stay reachable without scrolling back up */
+#list-tabs {
+  position: sticky;
+  inset-block-start: calc(var(--bar) + env(safe-area-inset-top));
+  z-index: 10;
+  padding-block: 8px;
+  background: var(--bg);
+}
 .seg button[aria-pressed=true] { background: var(--ink); color: #fff; border-color: var(--ink); }
 
 /* ---------- scan button: sweep line echoes the scanner ---------- */
