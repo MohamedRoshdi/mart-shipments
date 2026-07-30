@@ -38,7 +38,7 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 | `db.js` | data layer; `?test=1` switches the whole app to localStorage |
 | `zip.js` | store-only ZIP writer, ~80 lines, no dependency; used by the folder export |
 | `style.css` | one stylesheet for all three pages |
-| `sw.js`, `manifest.json`, `manifest-manager.json`, `manifest-admin.json` | three installable PWAs (employee + manager + admin) |
+| `sw.js`, `manifest.json` | **one** installable PWA, on the main URL. `manager.html` and `admin.html` carry no manifest: the PIN routes people to their screen (`auth.landingPage`), and the home screen links to the other two. Dropped 2026-07-31 on the owner's call — a phone with three near-identical icons was the confusing part. |
 | `firebase-config.js` | Firebase keys **plus** `APP_CONFIG`: PINs (incl. `adminPin`), branches, shipment types |
 | `firestore.rules` | shape validation; the only server-side guard that exists |
 | `SETUP.md` | Arabic guide for the shop owner |

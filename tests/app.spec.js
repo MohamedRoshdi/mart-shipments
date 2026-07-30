@@ -444,10 +444,12 @@ test('scanner lib loads', async ({ page }) => {
 test('PWA: manifest served, service worker registers', async ({ page }) => {
   const res = await page.request.get('/manifest.json');
   expect(res.ok()).toBeTruthy();
-  const resManager = await page.request.get('/manifest-manager.json');
-  expect(resManager.ok()).toBeTruthy();
-  const resAdmin = await page.request.get('/manifest-admin.json');
-  expect(resAdmin.ok()).toBeTruthy();
+  // one installable app, on the main URL: the manager and admin pages are reached from it,
+  // so they carry no manifest of their own any more
+  for (const page_ of ['manager.html', 'admin.html']) {
+    const html = await (await page.request.get('/' + page_)).text();
+    expect(html).not.toContain('rel="manifest"');
+  }
   const resTemplate = await page.request.get('/products-template.csv');
   expect(resTemplate.ok()).toBeTruthy();
   const resStock = await page.request.get('/stock-template.csv');

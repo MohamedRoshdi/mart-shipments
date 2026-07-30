@@ -303,11 +303,14 @@ log("34. temp user removed:", (await adm.locator("#users-list li.user-card").cou
   "| users left:", await adm.locator("#users-list li.user-card").count());
 
 /* ---- PWA signals on the phone ---- */
+// one installable app only: the manager and admin pages must NOT offer their own icon
 const pwa = await page.evaluate(async () => {
   const reg = await navigator.serviceWorker.ready;
   const m = await fetch("manifest.json").then(r => r.json());
-  const a = await fetch("manifest-admin.json").then(r => r.json());
-  return { sw: !!reg.active, name: m.name, display: m.display, admin: a.short_name, adminStart: a.start_url };
+  const mgrHtml = await fetch("manager.html").then(r => r.text());
+  const admHtml = await fetch("admin.html").then(r => r.text());
+  return { sw: !!reg.active, name: m.name, display: m.display,
+    extraManifests: /rel="manifest"/.test(mgrHtml) || /rel="manifest"/.test(admHtml) };
 });
 log("35. PWA:", JSON.stringify(pwa));
 
