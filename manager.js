@@ -2,6 +2,8 @@ import * as db from "./db.js";
 
 const $ = (id) => document.getElementById(id);
 const esc = (t) => { const d = document.createElement("div"); d.textContent = t; return d.innerHTML; };
+// attribute context needs the quotes escaped too — catalog text is publicly writable
+const escAttr = (t) => esc(t).replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 const fmtDate = (ts) => new Date(ts).toLocaleDateString("ar-EG");
 const ALL = "الكل";
 
@@ -11,7 +13,14 @@ function toast(msg) {
   setTimeout(() => $("toast").classList.remove("show"), 2200);
 }
 
-const TITLES = { "screen-pin": "شاشة المدير", "screen-manager": "الشحنات", "screen-detail": "تعديل شحنة" };
+const TITLES = {
+  "screen-pin": "شاشة المدير",
+  "screen-manager": "الشحنات",
+  "screen-detail": "تعديل شحنة",
+  "screen-products": "الأصناف",
+};
+const DEEP = ["screen-detail", "screen-products"];   // screens you can go back from
+const PAGE = 50;                                     // rows rendered at once; search narrows the rest
 
 let all = [];        // everything read from the database
 let shown = [];      // after the branch filter — row indexes point here
@@ -25,13 +34,13 @@ function render(id) {
   document.querySelectorAll("main > section").forEach(s => s.hidden = true);
   $(id).hidden = false;
   $("screen-title").textContent = TITLES[id] || "شاشة المدير";
-  $("btn-back").hidden = id !== "screen-detail";
+  $("btn-back").hidden = !DEEP.includes(id);
   scrollTo(0, 0);
 }
 
 addEventListener("popstate", (ev) => {
   const id = (ev.state && ev.state.screen) || "screen-manager";
-  if (id === "screen-detail") render(id); else openManager();
+  if (DEEP.includes(id)) render(id); else openManager();
 });
 
 $("btn-back").onclick = () => history.back();
@@ -229,6 +238,107 @@ $("btn-save-edit").onclick = async () => {
     console.error(err);
     toast("الحفظ ما نفعش — جرّب تاني");
   }
+};
+
+/* ---------- catalog: view, search, rename, delete, export ---------- */
+
+let products = [];              // whole catalog as loaded
+const edits = new Map();        // barcode -> new name, pending save
+
+$("btn-products").onclick = async () => {
+  history.pushState({ screen: "screen-products" }, "");
+  render("screen-products");
+  await loadProducts();
+};
+
+async function loadProducts() {
+  edits.clear();
+  products = await db.listProducts().catch(() => []);
+  products.sort((a, b) => a.name.localeCompare(b.name, "ar"));
+  renderProducts();
+}
+
+function matches() {
+  const q = $("product-search").value.trim().toLowerCase();
+  return q ? products.filter(p => p.name.toLowerCase().includes(q) || p.barcode.includes(q)) : products;
+}
+
+function renderProducts() {
+  const found = matches();
+  const page = found.slice(0, PAGE);
+  $("products-count").textContent = products.length
+    ? `${found.length} من ${products.length} صنف` + (found.length > PAGE ? ` — بيظهر أول ${PAGE}، دوّر للباقي` : "")
+    : "";
+  $("products-list").innerHTML = page.map(p => `<li>
+      <div class="card-main">
+        <input class="product-name" type="text" maxlength="100" data-barcode="${escAttr(p.barcode)}" value="${escAttr(edits.get(p.barcode) ?? p.name)}">
+        <div class="code">${esc(p.barcode)}</div>
+      </div>
+      <button class="del" data-delproduct="${escAttr(p.barcode)}" aria-label="حذف الصنف">×</button>
+    </li>`).join("") || `<li class="empty">${products.length ? "مفيش نتيجة للبحث" : "مفيش أصناف — استورد ملف الأصناف الأول"}</li>`;
+  updateDirty();
+}
+
+function updateDirty() {
+  $("products-dirty").textContent = edits.size ? `${edits.size} تعديل` : "";
+  $("btn-save-products").disabled = edits.size === 0;
+}
+
+$("product-search").oninput = renderProducts;
+
+$("products-list").oninput = (e) => {
+  const inp = e.target.closest("input[data-barcode]");
+  if (!inp) return;
+  const p = products.find(x => x.barcode === inp.dataset.barcode);
+  const val = inp.value.trim();
+  if (val && val !== p.name) edits.set(p.barcode, val); else edits.delete(p.barcode);
+  updateDirty();
+};
+
+$("products-list").onclick = async (e) => {
+  const btn = e.target.closest("button[data-delproduct]");
+  if (!btn) return;
+  const barcode = btn.dataset.delproduct;
+  const p = products.find(x => x.barcode === barcode);
+  if (!confirm(`حذف «${p.name}» من ملف الأصناف؟`)) return;
+  try {
+    await db.deleteProduct(barcode);
+    products = products.filter(x => x.barcode !== barcode);
+    edits.delete(barcode);
+    renderProducts();
+    toast("تم حذف الصنف");
+  } catch (err) {
+    console.error(err);
+    toast("الحذف ما نفعش — جرّب تاني");
+  }
+};
+
+$("btn-save-products").onclick = async () => {
+  const pending = [...edits];
+  let n = 0;
+  try {
+    for (const [barcode, name] of pending) {
+      await db.saveProductName(barcode, name);
+      const p = products.find(x => x.barcode === barcode);
+      if (p) p.name = name;
+      edits.delete(barcode);
+      n++;
+    }
+    toast(`تم حفظ ${n} اسم`);
+  } catch (err) {
+    console.error(err);
+    toast(`اتحفظ ${n} اسم وبعدين حصلت مشكلة — جرّب تاني`);
+  }
+  renderProducts();
+};
+
+$("btn-export-products").onclick = () => {
+  if (!products.length) { toast("مفيش أصناف تتحمّل"); return; }
+  downloadCsv("products.csv", [
+    ["الباركود", "اسم الصنف"],
+    ...products.map(p => [p.barcode, p.name]),
+  ]);
+  toast("تم تحميل ملف الأصناف");
 };
 
 /* ---------- catalog import ---------- */

@@ -63,6 +63,26 @@ export async function getProductName(barcode) {
   return snap.exists() ? snap.data().name : null;
 }
 
+export async function listProducts() {
+  if (TEST_MODE) {
+    return Object.entries(lsObj('test-products')).map(([barcode, name]) => ({ barcode, name }));
+  }
+  // ponytail: pulls up to 2000 products and filters in the browser; move to a
+  // server-side prefix query (orderBy + startAt) if the catalog outgrows that
+  const snap = await fs.getDocs(fs.query(fs.collection(dbRef, 'products'), fs.limit(2000)));
+  return snap.docs.map((d) => ({ barcode: d.id, name: d.data().name }));
+}
+
+export async function deleteProduct(barcode) {
+  if (TEST_MODE) {
+    const map = lsObj('test-products');
+    delete map[barcode];
+    localStorage.setItem('test-products', JSON.stringify(map));
+    return;
+  }
+  await fs.deleteDoc(fs.doc(dbRef, 'products', barcode));
+}
+
 export async function saveProductName(barcode, name) {
   if (TEST_MODE) {
     const map = lsObj('test-products');

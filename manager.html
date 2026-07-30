@@ -36,6 +36,7 @@
             <div class="meta">استورد ملف Excel/CSV مرة واحدة، والأسماء تظهر لوحدها مع كل مسح</div>
           </div>
           <div class="row-actions">
+            <button id="btn-products" class="primary">عرض الأصناف</button>
             <button id="btn-import">استيراد ملف</button>
             <a id="btn-template" href="products-template.csv" download>تحميل النموذج</a>
           </div>
@@ -52,6 +53,19 @@
           </div>
         </li>
       </ul>
+    </section>
+
+    <section id="screen-products" hidden>
+      <input id="product-search" type="text" maxlength="60" placeholder="ابحث باسم الصنف أو الباركود">
+      <p id="products-count" class="meta"></p>
+      <ul id="products-list"></ul>
+      <div class="row-actions">
+        <button id="btn-export-products">تحميل ملف الأصناف</button>
+      </div>
+      <div class="bottombar">
+        <span id="products-dirty" class="count"></span>
+        <button id="btn-save-products" class="primary grow" disabled>حفظ تعديل الأسماء</button>
+      </div>
     </section>
 
     <section id="screen-detail" hidden>

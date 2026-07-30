@@ -48,5 +48,19 @@ await page.click('button[data-act="view"]');
 await page.waitForTimeout(300);
 await shot("6-detail");
 
+// catalog screen
+await page.evaluate(() => localStorage.setItem("test-products", JSON.stringify({
+  "6221031250057": "لبن المراعي كامل الدسم 1 لتر",
+  "6223001360155": "عصير جهينة مانجو 1 لتر",
+  "6224007850005": "أرز الضحى 1 كيلو",
+  "6221048001234": "زيت عافية 700 مل",
+})));
+await page.goto("http://localhost:8080/manager.html?test=1");
+await page.fill("#pin-input", "1994");
+await page.click("#btn-pin");
+await page.click("#btn-products");
+await page.waitForTimeout(400);
+await shot("7-products");
+
 await browser.close();
 console.log("shots in " + OUT);

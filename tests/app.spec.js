@@ -247,6 +247,62 @@ test('manager page: download one shipment and all shipments, CSV and TXT', async
   expect(detailTxt.suggestedFilename()).toBe('شحنة المراعي.txt');
 });
 
+test('catalog screen: list, search, rename, delete, export', async ({ page }) => {
+  await page.goto('/manager.html?test=1');
+  await page.evaluate(() => localStorage.setItem('test-products', JSON.stringify({
+    '111': 'لبن المراعي', '222': 'جبنة بيضاء', '333': 'أرز الضحى',
+  })));
+  await page.fill('#pin-input', await page.evaluate(() => window.APP_CONFIG.managerPin));
+  await page.click('#btn-pin');
+  await page.click('#btn-products');
+  await expect(page.locator('#products-list li')).toHaveCount(3);
+  await expect(page.locator('#products-count')).toHaveText('3 من 3 صنف');
+
+  await page.fill('#product-search', 'جبنة');                 // search by name
+  await expect(page.locator('#products-list li')).toHaveCount(1);
+  await page.fill('#product-search', '333');                  // search by barcode
+  await expect(page.locator('#products-list li')).toHaveCount(1);
+  await expect(page.locator('input[data-barcode="333"]')).toHaveValue('أرز الضحى');
+  await page.fill('#product-search', '');
+
+  await page.fill('input[data-barcode="111"]', 'لبن المراعي 1 لتر');   // rename
+  await expect(page.locator('#products-dirty')).toHaveText('1 تعديل');
+  await page.click('#btn-save-products');
+  await expect(page.locator('#btn-save-products')).toBeDisabled();
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('test-products'))['111']))
+    .toBe('لبن المراعي 1 لتر');
+
+  page.on('dialog', (d) => d.accept());                       // delete
+  await page.click('button[data-delproduct="222"]');
+  await expect(page.locator('#products-list li')).toHaveCount(2);
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('test-products'))['222'])).toBeUndefined();
+
+  const dl = (await Promise.all([                             // export catalog
+    page.waitForEvent('download'),
+    page.click('#btn-export-products'),
+  ]))[0];
+  expect(dl.suggestedFilename()).toBe('products.csv');
+  const csv = require('fs').readFileSync(await dl.path(), 'utf8');
+  expect(csv).toContain('"111","لبن المراعي 1 لتر"');
+  expect(csv).not.toContain('جبنة');
+
+  await page.goBack();                                        // back returns to shipments
+  await expect(page.locator('#screen-manager')).toBeVisible();
+});
+
+test('catalog screen: a quote in a product name cannot break the row markup', async ({ page }) => {
+  await page.goto('/manager.html?test=1');
+  await page.evaluate(() => localStorage.setItem('test-products', JSON.stringify({
+    '444': 'صنف" onfocus="window.__xss=1" x="',
+  })));
+  await page.fill('#pin-input', await page.evaluate(() => window.APP_CONFIG.managerPin));
+  await page.click('#btn-pin');
+  await page.click('#btn-products');
+  await page.locator('input[data-barcode="444"]').focus();
+  expect(await page.evaluate(() => window.__xss)).toBeUndefined();
+  await expect(page.locator('input[data-barcode="444"]')).toHaveValue('صنف" onfocus="window.__xss=1" x="');
+});
+
 test('back button and phone back return to the previous screen', async ({ page }) => {
   await page.goto('/?test=1');
   await page.evaluate(() => localStorage.setItem('employeeName', 'أحمد'));

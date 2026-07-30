@@ -216,6 +216,7 @@ td:last-child {
   border-start-end-radius: 12px;
   border-end-end-radius: 12px;
 }
+input.product-name { padding: 10px; font-weight: 600; }
 input.qty-cell {
   inline-size: 76px;
   padding: 8px;
