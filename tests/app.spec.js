@@ -571,6 +571,45 @@ test('manager: ZIP export puts each shipment in a folder named after its type', 
   expect(raw).toContain('111\t3');
 });
 
+test('camera settings: reachable from the app bar and the choices stick', async ({ page }) => {
+  await page.goto('/?test=1');
+  await page.evaluate(() => localStorage.setItem('employeeName', 'أحمد'));
+  await page.reload();
+  await expect(page.locator('#btn-cam')).toBeVisible();          // in the app bar, not buried
+  await page.click('#btn-cam');
+  await expect(page.locator('#screen-cam')).toBeVisible();
+  await expect(page.locator('#cam-note')).not.toBeEmpty();       // headless has no camera: a message, not a crash
+
+  await page.click('button[data-box="large"]');
+  await page.fill('#cam-zoom', '2.5');
+  await page.click('#btn-torch-default');
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('camSettings'))))
+    .toEqual({ deviceId: '', box: 'large', torch: true, zoom: 2.5 });
+  await expect(page.locator('#cam-zoom-val')).toHaveText('×2.5');
+
+  await page.goBack();                                           // phone back leaves the settings
+  await expect(page.locator('#screen-home')).toBeVisible();
+  await page.click('#btn-cam');                                  // and they survive the trip
+  await expect(page.locator('button[data-box="large"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#btn-torch-default')).toHaveAttribute('aria-pressed', 'true');
+});
+
+test('camera settings: the scanner screen keeps its controls hidden until a camera runs', async ({ page }) => {
+  await page.goto('/?test=1');
+  await page.evaluate(() => { localStorage.setItem('employeeName', 'أحمد'); localStorage.setItem('test-products', JSON.stringify({ '111': 'لبن' })); });
+  await page.reload();
+  await page.click('#btn-new');
+  await expect(page.locator('#cam-live')).toBeHidden();          // no torch/zoom bar without a track
+  await expect(page.locator('#reader')).toBeHidden();
+  await page.click('#btn-scan');                                 // headless: camera fails, app stays usable
+  await expect(page.locator('#toast')).toContainText('الكاميرا مش متاحة');
+  await expect(page.locator('#cam-live')).toBeHidden();
+  await page.fill('#barcode-input', '111');                      // manual entry still works after that
+  await page.click('#btn-lookup');
+  await page.click('#btn-add-item');
+  await expect(page.locator('#items-list li:not(.empty)')).toHaveCount(1);
+});
+
 test("draft survives reload", async ({ page }) => {
   await page.goto("/?test=1");
   await page.evaluate(() => { localStorage.setItem('employeeName', 'أحمد'); localStorage.setItem('test-products', JSON.stringify({ '111': 'لبن', '222': 'جبنة' })); });

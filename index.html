@@ -12,6 +12,7 @@
   <header class="appbar">
     <button id="btn-back" class="icon-btn btn-back" hidden aria-label="رجوع">→</button>
     <h1 id="screen-title">شحنات المحل</h1>
+    <button id="btn-cam" class="icon-btn" hidden>الكاميرا</button>
     <button id="who" class="who" hidden></button>
     <span id="sync-state" class="sync"></span>
   </header>
@@ -43,6 +44,12 @@
       <input id="shipment-name" type="text" maxlength="100" placeholder="مثلاً: شحنة المراعي">
       <button id="btn-scan" class="scan">امسح الباركود بالكاميرا</button>
       <div id="reader" hidden></div>
+      <div id="cam-live" class="cam-live" hidden>
+        <button id="btn-torch" class="ghost" aria-pressed="false">الفلاش</button>
+        <label id="zoom-live-wrap" hidden>التقريب
+          <input id="zoom-live" type="range" min="1" max="5" step="0.5" dir="ltr">
+        </label>
+      </div>
       <div class="manual">
         <input id="barcode-input" type="text" inputmode="numeric" maxlength="32" placeholder="أو اكتب الباركود" dir="ltr">
         <button id="btn-lookup" class="ghost">بحث</button>
@@ -53,6 +60,28 @@
         <span id="items-count" class="count"></span>
         <button id="btn-save-shipment" class="primary grow" disabled>حفظ الشحنة</button>
       </div>
+    </section>
+    <section id="screen-cam" hidden>
+      <p class="meta">لو المسح بطيء أو مش بيقرأ على الموبايل ده، جرّب تغيّر الكاميرا الأول —
+        بعض الموبايلات فيها أكتر من كاميرا خلفية وواحدة منهم مش بتعرف تقرّب على الباركود.</p>
+
+      <h2>الكاميرا</h2>
+      <div id="cam-list" class="seg"></div>
+      <p id="cam-note" class="meta"></p>
+
+      <h2>حجم منطقة المسح</h2>
+      <div id="box-picker" class="seg"></div>
+
+      <h2>التقريب</h2>
+      <label class="zoom-row">
+        <input id="cam-zoom" type="range" min="1" max="5" step="0.5" dir="ltr">
+        <span id="cam-zoom-val" class="code"></span>
+      </label>
+      <p class="meta">التقريب بيساعد لو الباركود صغير. لو الصورة بقت مشوّشة، رجّعه لـ 1.</p>
+
+      <h2>الفلاش</h2>
+      <button id="btn-torch-default" class="ghost" aria-pressed="false">يفتح مع بداية المسح</button>
+      <p class="meta">الفلاش بينفع في الرفوف الضلمة. ينفع تفتحه وتقفله وإنت ماسح كمان.</p>
     </section>
   </main>
 

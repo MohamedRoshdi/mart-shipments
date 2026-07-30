@@ -1,11 +1,14 @@
 // Full flow on the LIVE site in mobile emulation (Pixel 5, touch, mobile UA). Self-cleaning.
 import { chromium, devices } from "@playwright/test";
+import { readFileSync, mkdirSync } from "fs";
 
 const BASE = "https://mohamedroshdi.github.io/mart-shipments";
 const STAMP = "فحص-موبايل-" + process.env.STAMP;
 const OUT = process.env.OUT || "/tmp/shots";
 const SYNC = 4000;
 const log = (...a) => console.log("[mobile]", ...a);
+
+mkdirSync(OUT, { recursive: true });
 
 const browser = await chromium.launch();
 const ctx = await browser.newContext({
@@ -138,12 +141,45 @@ await mgr.waitForTimeout(SYNC);
 log("17. deleted (cleanup ok):",
   !(await mgr.locator("#all-shipments li").allInnerTexts()).some(t => t.includes(STAMP)));
 
+/* ---- ZIP export on the phone: one folder per shipment type ---- */
+const zip = (await Promise.all([mgr.waitForEvent("download"), mgr.tap("#btn-export-zip")]))[0];
+const zipPath = `${OUT}/m-shipments.zip`;
+await zip.saveAs(zipPath);
+const zipBytes = readFileSync(zipPath);
+log("18. zip:", zip.suggestedFilename(), zipBytes.length, "bytes | signature ok:",
+  zipBytes[0] === 0x50 && zipBytes[1] === 0x4b);
+
+/* ---- admin page on the phone ---- */
+const adm = await ctx.newPage();
+adm.on("pageerror", (e) => console.log("[pageerror:admin]", e.message));
+adm.on("dialog", (d) => d.dismiss());                        // never confirm a destructive tool here
+await adm.goto(BASE + "/admin.html", { waitUntil: "load" });
+await adm.fill("#pin-input", "7007");
+await adm.press("#pin-input", "Enter");                       // PIN by Enter
+await adm.waitForSelector("#screen-admin:not([hidden])", { timeout: 20000 });
+log("19. admin PIN by Enter → settings:", !(await adm.locator("#screen-admin").isHidden()));
+log("20. branches:", await adm.locator("#branches-list li").count(),
+  "| types:", await adm.locator("#types-list li").count(),
+  "| bulk button:", await adm.locator("#btn-bulk-delete").innerText());
+await adm.screenshot({ path: `${OUT}/m-7-admin.png` });
+
+await adm.tap("#btn-logs");
+await adm.waitForTimeout(5000);
+const logRows = await adm.locator("#logs-list li").allInnerTexts();
+log("21. audit trail rows:", logRows.length,
+  "| this run's delete is in it:", logRows.some(t => t.includes(STAMP)));
+log("    newest:", (logRows[0] || "").replace(/\n/g, " | "));
+await adm.screenshot({ path: `${OUT}/m-8-logs.png` });
+await adm.goBack();
+log("22. back from logs → settings:", !(await adm.locator("#screen-admin").isHidden()));
+
 /* ---- PWA signals on the phone ---- */
 const pwa = await page.evaluate(async () => {
   const reg = await navigator.serviceWorker.ready;
   const m = await fetch("manifest.json").then(r => r.json());
-  return { sw: !!reg.active, name: m.name, display: m.display };
+  const a = await fetch("manifest-admin.json").then(r => r.json());
+  return { sw: !!reg.active, name: m.name, display: m.display, admin: a.short_name, adminStart: a.start_url };
 });
-log("18. PWA:", JSON.stringify(pwa));
+log("23. PWA:", JSON.stringify(pwa));
 
 await browser.close();

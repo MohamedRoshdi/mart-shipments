@@ -2,6 +2,7 @@ import * as db from "./db.js";
 
 const $ = (id) => document.getElementById(id);
 const esc = (t) => { const d = document.createElement("div"); d.textContent = t; return d.innerHTML; };
+const escAttr = (t) => esc(t).replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 const branches = () => window.APP_CONFIG.branches;
 const branchByName = (n) => branches().find(b => b.name === n);
 const myName = () => localStorage.getItem("employeeName");
@@ -18,6 +19,7 @@ const TITLES = {
   "screen-name": "بيانات الموظف",
   "screen-home": "شحناتي",
   "screen-new": "شحنة جديدة",
+  "screen-cam": "إعدادات الكاميرا",
 };
 
 const types = () => window.APP_CONFIG.shipmentTypes;
@@ -34,6 +36,7 @@ function render(id) {
   $(id).hidden = false;
   $("screen-title").textContent = TITLES[id] || "شحنات المحل";
   $("btn-back").hidden = id === "screen-home" || (id === "screen-name" && !myName());
+  $("btn-cam").hidden = !(id === "screen-home" || id === "screen-new");
   $("who").hidden = !myName() || id !== "screen-home";
   if (myName()) $("who").textContent = `${myName()} · ${myBranch()}`;
   hideSheet();
@@ -41,6 +44,7 @@ function render(id) {
 }
 
 function navTo(id) {
+  if (id !== "screen-new") stopScan();   // leaving the scanner screen must release the camera
   history.pushState({ screen: id }, "");
   render(id);
 }
@@ -255,21 +259,88 @@ $("btn-save-shipment").onclick = async () => {
 
 let scanner = null;
 
-$("btn-scan").onclick = async () => {
-  if (scanner) { await stopScan(); return; }
+// per-phone camera preferences: a shop phone with three back lenses often defaults to the
+// one that cannot focus close up, which reads as "the scanner is broken on this phone"
+const CAM_DEFAULTS = { deviceId: "", box: "med", torch: false, zoom: 1 };
+const camCfg = () => ({ ...CAM_DEFAULTS, ...JSON.parse(localStorage.getItem("camSettings") || "{}") });
+const saveCam = (patch) => localStorage.setItem("camSettings", JSON.stringify({ ...camCfg(), ...patch }));
+
+const BOXES = { small: { w: 220, h: 130 }, med: { w: 300, h: 170 }, large: { w: 340, h: 220 } };
+const BOX_LABELS = { small: "صغير", med: "متوسط", large: "كبير" };
+
+// retail barcodes + QR only: fewer formats to try per frame means a faster read
+const FMT = window.Html5QrcodeSupportedFormats;
+const FORMATS = FMT
+  ? [FMT.EAN_13, FMT.EAN_8, FMT.UPC_A, FMT.UPC_E, FMT.UPC_EAN_EXTENSION,
+     FMT.CODE_128, FMT.CODE_39, FMT.ITF, FMT.QR_CODE].filter((f) => f !== undefined)
+  : undefined;
+
+$("btn-scan").onclick = () => (scanner ? stopScan() : startScan());
+
+async function startScan(retried = false) {
+  if (scanner) return;
+  const s = camCfg();
+  const box = BOXES[s.box] || BOXES.med;
   $("reader").hidden = false;
-  scanner = new Html5Qrcode("reader");
+  // the native detector on Android is much faster than the JS decoder when it exists
+  scanner = new Html5Qrcode("reader", {
+    formatsToSupport: FORMATS,
+    experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+  });
   try {
     await scanner.start(
-      { facingMode: "environment" },
-      { fps: 10, qrbox: { width: 250, height: 150 } },
+      s.deviceId && !retried ? { deviceId: { exact: s.deviceId } } : { facingMode: "environment" },
+      { fps: 12, qrbox: { width: Math.min(box.w, innerWidth - 48), height: box.h } },
       async (text) => { await stopScan(); beep(); onBarcode(text.trim()).catch(() => toast("حصلت مشكلة — جرّب تاني")); }
     );
   } catch (err) {
     console.error(err);
     await stopScan();
+    if (s.deviceId && !retried) {          // saved camera is not on this phone any more
+      saveCam({ deviceId: "" });
+      toast("الكاميرا المحفوظة مش موجودة — رجّعنا التلقائي");
+      return startScan(true);
+    }
     toast("الكاميرا مش متاحة — اكتب الباركود بإيدك");
+    return;
   }
+  await applyTrack();
+}
+
+const constrain = (adv) => (scanner
+  ? scanner.applyVideoConstraints({ advanced: [adv] }).catch((e) => console.error(e))
+  : Promise.resolve());
+
+// torch and zoom only exist on some phones; the controls appear only when the track has them
+async function applyTrack() {
+  const s = camCfg();
+  let caps = {};
+  try { caps = scanner.getRunningTrackCapabilities() || {}; } catch (e) { console.error(e); }
+  $("btn-torch").hidden = !caps.torch;
+  $("zoom-live-wrap").hidden = !caps.zoom;
+  $("cam-live").hidden = !(caps.torch || caps.zoom);
+  if (caps.zoom) {
+    const z = Math.min(Math.max(s.zoom, caps.zoom.min), caps.zoom.max);
+    Object.assign($("zoom-live"), { min: caps.zoom.min, max: caps.zoom.max, step: caps.zoom.step || 0.5, value: z });
+    await constrain({ zoom: z });
+  }
+  if (caps.torch) {
+    $("btn-torch").setAttribute("aria-pressed", String(!!s.torch));
+    await constrain({ torch: !!s.torch });
+  }
+}
+
+$("btn-torch").onclick = async () => {
+  const on = $("btn-torch").getAttribute("aria-pressed") !== "true";
+  $("btn-torch").setAttribute("aria-pressed", String(on));
+  saveCam({ torch: on });
+  await constrain({ torch: on });
+};
+
+$("zoom-live").oninput = async () => {
+  const z = +$("zoom-live").value;
+  saveCam({ zoom: z });
+  await constrain({ zoom: z });
 };
 
 async function stopScan() {
@@ -278,7 +349,61 @@ async function stopScan() {
     scanner = null;
   }
   $("reader").hidden = true;
+  $("cam-live").hidden = true;
 }
+
+
+$("btn-cam").onclick = () => { navTo("screen-cam"); renderCamScreen(); };
+
+async function renderCamScreen() {
+  const s = camCfg();
+  $("box-picker").innerHTML = Object.keys(BOXES).map(k =>
+    `<button type="button" data-box="${k}" aria-pressed="${k === s.box}">${BOX_LABELS[k]}</button>`).join("");
+  $("cam-zoom").value = s.zoom;
+  $("cam-zoom-val").textContent = `×${s.zoom}`;
+  $("btn-torch-default").setAttribute("aria-pressed", String(!!s.torch));
+
+  $("cam-note").textContent = "بندوّر على الكاميرات...";
+  $("cam-list").innerHTML = "";
+  let cams = [];
+  try { cams = await Html5Qrcode.getCameras(); } catch (e) { console.error(e); }
+  if (!cams.length) {
+    $("cam-note").textContent = "مفيش كاميرا متاحة، أو إذن الكاميرا مرفوض. اسمح بالكاميرا للموقع من إعدادات المتصفح وافتح الصفحة تاني.";
+    return;
+  }
+  $("cam-note").textContent = `${cams.length} كاميرا على الموبايل ده. لو مش عارف مين مين، جرّب واحدة واحدة على باركود صغير.`;
+  $("cam-list").innerHTML = [
+    `<button type="button" data-cam="" aria-pressed="${!s.deviceId}">تلقائي</button>`,
+    ...cams.map((c, i) => `<button type="button" data-cam="${escAttr(c.id)}" aria-pressed="${c.id === s.deviceId}">${esc(c.label || `كاميرا ${i + 1}`)}</button>`),
+  ].join("");
+}
+
+$("cam-list").onclick = (e) => {
+  const btn = e.target.closest("button[data-cam]");
+  if (!btn) return;
+  saveCam({ deviceId: btn.dataset.cam });
+  renderCamScreen();
+  toast("اتحفظت — جرّب المسح تاني");
+};
+
+$("box-picker").onclick = (e) => {
+  const btn = e.target.closest("button[data-box]");
+  if (!btn) return;
+  saveCam({ box: btn.dataset.box });
+  renderCamScreen();
+};
+
+$("cam-zoom").oninput = () => {
+  const z = +$("cam-zoom").value;
+  saveCam({ zoom: z });
+  $("cam-zoom-val").textContent = `×${z}`;
+};
+
+$("btn-torch-default").onclick = () => {
+  const on = $("btn-torch-default").getAttribute("aria-pressed") !== "true";
+  $("btn-torch-default").setAttribute("aria-pressed", String(on));
+  saveCam({ torch: on });
+};
 
 let beepCtx = null;
 

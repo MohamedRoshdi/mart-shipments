@@ -303,6 +303,17 @@ body.sheet-open .bottombar { display: none; }
 }
 .qty-row button { inline-size: 62px; block-size: 56px; font-size: 1.6rem; padding: 0; }
 
+/* ---------- camera controls ---------- */
+.cam-live { display: flex; gap: 12px; align-items: center; margin-block-start: 10px; }
+.cam-live button[aria-pressed=true] { background: var(--amber); border-color: var(--amber); }
+.cam-live label { flex: 1; display: flex; gap: 8px; align-items: center; font-size: .82rem; color: var(--ink-2); }
+.zoom-row { display: flex; gap: 12px; align-items: center; }
+input[type=range] { flex: 1; inline-size: 100%; accent-color: var(--amber); block-size: 40px; }
+#box-picker button[aria-pressed=true], #cam-list button[aria-pressed=true] { background: var(--ink); color: #fff; }
+#btn-torch-default[aria-pressed=true] { background: var(--amber); border-color: var(--amber); }
+#cam-list { display: grid; gap: 8px; }
+#cam-list button { text-align: start; }
+
 /* ---------- toast ---------- */
 #toast {
   position: fixed;

@@ -21,6 +21,7 @@ const TITLES = { "screen-pin": "النظام", "screen-admin": "إعدادات �
 let cfg = null;        // working copy of the settings
 let dirty = false;
 let shipments = [];    // loaded once, for the bulk-delete count
+let shipmentsLoaded = false;
 let bulkBranch = ALL;
 let bulkType = ALL;
 
@@ -52,6 +53,7 @@ $("btn-pin").onclick = async () => {
   render("screen-admin");
   renderAll();
   shipments = await db.listShipments().catch(() => []);
+  shipmentsLoaded = true;
   renderBulk();
 };
 
@@ -180,7 +182,10 @@ function renderBulk() {
   };
   chips("bulk-branch", [ALL, ...cfg.branches.map(b => b.name)], bulkBranch, "bulkbranch");
   chips("bulk-type", [ALL, ...cfg.shipmentTypes], bulkType, "bulktype");
-  $("btn-bulk-delete").textContent = `حذف المطابق (${matching().length})`;
+  // a count of 0 before the list arrives reads as "nothing to delete" — say what is happening
+  $("btn-bulk-delete").textContent = shipmentsLoaded
+    ? `حذف المطابق (${matching().length})`
+    : "بنعد الشحنات...";
 }
 
 function matching() {
@@ -203,6 +208,7 @@ $("bulk-type").onclick = (e) => {
 };
 
 $("btn-bulk-delete").onclick = async () => {
+  if (!shipmentsLoaded) { toast("استنى لحد ما الشحنات تحمّل"); return; }
   const hit = matching();
   if (!hit.length) { toast("مفيش شحنات مطابقة"); return; }
   if (!confirm(`حذف ${hit.length} شحنة (${bulkBranch} · ${bulkType})؟ مش هينفع ترجّعها.`)) return;

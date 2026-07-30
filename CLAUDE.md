@@ -21,7 +21,7 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 5. **`db.js` is the only file that knows where data lives.** `app.js` and
    `manager.js` never touch Firestore or localStorage keys directly.
 6. **Bump `CACHE` in `sw.js` on every deploy.** Serving is cache-first, so phones
-   keep the old bundle until the cache name changes. Currently `mart-v15`.
+   keep the old bundle until the cache name changes. Currently `mart-v16`.
 7. **Deploy = push to master.** GitHub Pages serves the repo root. Firestore rules
    deploy separately: `npx firebase deploy --only firestore:rules --project shipments-alaela-mart`.
 
@@ -74,6 +74,13 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   refusal sheet (`#item-warn`), hides the qty stepper and the add button, and
   `btn-add-item` also refuses when called programmatically. Item names are never
   typed by employees — they come from `products` only.
+- **Camera preferences are per phone, in `localStorage.camSettings`** (`{deviceId, box, torch, zoom}`),
+  never in Firestore — the whole point is that one shop phone needs a different lens than another.
+  `startScan(retried)` falls back to `facingMode: environment` and clears the saved `deviceId`
+  when `{deviceId:{exact}}` fails, so a swapped phone cannot leave the scanner dead.
+  Torch and zoom go through `applyVideoConstraints({advanced:[…]})` and only appear when
+  `getRunningTrackCapabilities()` reports them. `navTo` calls `stopScan()` for any screen other
+  than `screen-new`, otherwise the camera keeps running behind the settings screen.
 - **`window.APP_CONFIG` is mutated at boot, not read fresh.** `app.js` awaits the merge
   inside its boot IIFE; `manager.js` and `admin.js` paint the PIN screen first and make the
   PIN handler `await cfgReady`. Anything that reads branches/types before that merge sees
@@ -107,7 +114,7 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
 ## Commands
 
 ```bash
-npx playwright test                 # 27 tests, localStorage mode, ~12s
+npx playwright test                 # 29 tests, localStorage mode, ~19s
 npx playwright test -g "catalog"    # one group
 python3 -m http.server 8080         # serve locally, then open /?test=1
 node scripts/make-icons.mjs         # regenerate the PWA icons
@@ -121,6 +128,7 @@ STAMP=$RANDOM node scripts/live-mobile.mjs       # same, Pixel 5 emulation + PWA
 STAMP=$RANDOM node scripts/live-products.mjs     # catalog: import, rename, delete
 node scripts/live-search-name.mjs                # proves search reaches past the loaded page
 node scripts/live-admin.mjs                      # admin page, settings doc, audit trail, rule probes, ZIP
+BASE=http://localhost:8087 node scripts/live-camera.mjs   # camera list/start/stop/fallback on a fake device
 OUT=/tmp/shots node scripts/shots.mjs            # local screenshots (needs the server above)
 ```
 
@@ -159,4 +167,6 @@ debounce, or it reports false negatives.
   audit rows, so a live check of that collection cannot clean up after itself.
 - Catalog search matches the **start** of a name; mid-word search needs a search service.
 - The sync chip reports connectivity (`navigator.onLine`), not real sync state.
-- Camera scanning can only be verified on a physical phone.
+- Camera *decoding* can only be verified on a physical phone. `scripts/live-camera.mjs` proves
+  the plumbing (camera list, chosen device, start/stop, release, ghost-camera fallback) with
+  Chromium's `--use-fake-device-for-media-stream`; that fake stream never contains a barcode.
