@@ -125,11 +125,13 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   `.row-actions button.primary` when a row button must be amber.
 - **The item sheet owns the screen while open** (scrim + `body.sheet-open` hides
   the bottom bar). Anything behind it is unclickable — dismiss with `#btn-cancel-item`.
-- **Branch is chosen once per phone** and requires the branch PIN, at setup and on
-  every change. Shipments carry that branch; the manager cannot move a shipment
-  between branches.
-- **Manager scope:** logging in with a branch PIN filters the list *before* render
-  and disables the branch chip. Only the master PIN sees every branch.
+- **Two ways in, both still live.** With users configured, the PIN alone identifies the
+  person and the branch comes from their account. With no users (or a legacy branch PIN),
+  the old flow stands: the branch is chosen once per phone against the branch PIN, and the
+  employee types their name. Shipments always carry a branch and the manager can never move
+  one between branches (the rules forbid it).
+- **Manager scope filters before render**, never after: `openManager()` drops other branches
+  out of `all`, so a scoped user's page never holds data they may not see.
 - Catalog screen loads `PRODUCT_CAP = 300` rows; search is **server-side prefix**
   on name and on document id (50 hits each). Prefix, not substring. `countProducts()`
   gives the honest total. Export uses `listAllProducts()` — one deliberate full read.
@@ -147,7 +149,7 @@ Live checks against **production Firestore** (each cleans up after itself):
 
 ```bash
 STAMP=$RANDOM node scripts/live-check.mjs        # employee → manager full loop
-STAMP=$RANDOM node scripts/live-mobile.mjs       # same, Pixel 5 emulation + PWA signals
+STAMP=$RANDOM node scripts/live-mobile.mjs       # Pixel 5, 3 contexts: admin makes a user, employee scans, manager checks
 STAMP=$RANDOM node scripts/live-products.mjs     # catalog: import, rename, delete
 node scripts/live-search-name.mjs                # proves search reaches past the loaded page
 node scripts/live-admin.mjs                      # admin page, settings doc, audit trail, rule probes, ZIP
@@ -168,11 +170,22 @@ debounce, or it reports false negatives.
 - Empty states render an `li.empty`, so count assertions use
   `#items-list li:not(.empty)`.
 - Product names live in `value=""`, so assert with `toHaveValue`, not `toContainText`.
+- **A session survives navigation between pages.** A test that wants a PIN screen calls
+  `signOut(page)` *before* `goto` — clearing it after landing loses the race with the
+  redirect. `openManagerPage()`/`openAdmin()` already do this.
+- `seedUsers()` writes `test-config` and then reloads, because `window.APP_CONFIG` is merged
+  once at boot; seeding without a reload leaves the page on the shipped config.
+- Playwright URL globs do not match a query string: use `waitForURL(/manager\.html/)`, not
+  `'**/manager.html'`, since every in-app navigation keeps `?test=1`.
 
 ## Deployment facts
 
 - App: https://mohamedroshdi.github.io/mart-shipments/
 - Manager: https://mohamedroshdi.github.io/mart-shipments/manager.html
+- Admin: https://mohamedroshdi.github.io/mart-shipments/admin.html (PIN `7007` in the code)
+- Production has **3 real users** (measured 2026-07-30), all on `فرع قويسنا`, created by the
+  owner from the admin page. Any live script that saves the settings rewrites that list —
+  read it back before assuming a run was harmless.
 - Repo: https://github.com/MohamedRoshdi/mart-shipments (public — the URL is the
   only real protection; PINs are client-side gates, not security)
 - Firebase project `shipments-alaela-mart`, Firestore `(default)` in `eur3`,
