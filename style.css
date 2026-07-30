@@ -105,8 +105,9 @@ input[type=text], input[type=password], input[type=number] {
 input::placeholder { color: #93a0a8; }
 
 /* segmented picker: branch choice, branch filter */
-.seg { display: flex; gap: 8px; }
-.seg button { flex: 1; background: var(--surface); border: 1px solid var(--line); padding-inline: 8px; white-space: nowrap; }
+.seg { display: flex; gap: 8px; flex-wrap: wrap; }
+.seg button { flex: 1 1 auto; background: var(--surface); border: 1px solid var(--line); padding-inline: 10px; white-space: nowrap; }
+.branch-line { font-weight: 700; }
 .seg button[aria-pressed=true] { background: var(--ink); color: #fff; border-color: var(--ink); }
 
 /* ---------- scan button: sweep line echoes the scanner ---------- */

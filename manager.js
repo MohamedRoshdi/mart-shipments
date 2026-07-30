@@ -25,6 +25,7 @@ const PAGE = 50;                                     // rows rendered at once; s
 let all = [];        // everything read from the database
 let shown = [];      // after the branch filter — row indexes point here
 let filter = ALL;
+let typeFilter = ALL;
 let scope = null;    // null = master PIN (all branches); otherwise locked to one branch
 let current = null;  // the shipment being edited (a copy)
 
@@ -79,21 +80,36 @@ $("branch-filter").onclick = (e) => {
   renderList();
 };
 
+function renderTypeFilter() {
+  $("type-filter").innerHTML = [ALL, ...window.APP_CONFIG.shipmentTypes].map(t =>
+    `<button type="button" data-typefilter="${esc(t)}" aria-pressed="${t === typeFilter}">${esc(t)}</button>`).join("");
+}
+
+$("type-filter").onclick = (e) => {
+  const btn = e.target.closest("button[data-typefilter]");
+  if (!btn) return;
+  typeFilter = btn.dataset.typefilter;
+  renderTypeFilter();
+  renderList();
+};
+
 async function openManager() {
   render("screen-manager");
   if (scope) $("screen-title").textContent = shortBranch(scope);
   all = await db.listShipments().catch(() => []);
   if (scope) all = all.filter(s => s.branch === scope);   // branch managers never load other branches
   renderFilter();
+  renderTypeFilter();
   renderList();
 }
 
 function renderList() {
-  shown = filter === ALL ? all : all.filter(s => s.branch === filter);
+  shown = all.filter(s => (filter === ALL || s.branch === filter)
+    && (typeFilter === ALL || s.type === typeFilter));
   $("all-shipments").innerHTML = shown.map((s, i) => `<li>
       <div class="card-main">
         <div class="card-title">${esc(s.name)}</div>
-        <div class="meta">${esc(s.branch || "بدون فرع")} · ${esc(s.createdBy)} · ${fmtDate(s.createdAt)} · ${s.items.length} صنف</div>
+        <div class="meta">${esc(s.type || "بدون نوع")} · ${esc(s.branch || "بدون فرع")} · ${esc(s.createdBy)} · ${fmtDate(s.createdAt)} · ${s.items.length} صنف</div>
       </div>
       <div class="row-actions">
         <button data-act="view" data-i="${i}">عرض</button>
@@ -177,9 +193,9 @@ const exportName = (ext) => `shipments-${filter === ALL ? "all" : safeName(filte
 $("btn-export-all").onclick = () => {
   if (!shown.length) { toast("مفيش شحنات تتحمّل"); return; }
   downloadCsv(exportName("csv"), [
-    ["الفرع", "الشحنة", "الموظف", "التاريخ", "الباركود", "اسم الصنف", "الكمية"],
+    ["الفرع", "نوع الشحنة", "الشحنة", "الموظف", "التاريخ", "الباركود", "اسم الصنف", "الكمية"],
     ...shown.flatMap(s => s.items.map(i =>
-      [s.branch || "", s.name, s.createdBy, fmtDate(s.createdAt), i.barcode, i.name || "", i.qty])),
+      [s.branch || "", s.type || "", s.name, s.createdBy, fmtDate(s.createdAt), i.barcode, i.name || "", i.qty])),
   ]);
   toast("تم تحميل ملف Excel");
 };
@@ -196,10 +212,23 @@ function openDetail(s) {
   current = { ...s, items: s.items.map(i => ({ ...i })) }; // edit a copy: back = discard
   $("detail-name").value = s.name;
   $("detail-meta").textContent = `${s.branch || "بدون فرع"} · ${s.createdBy} · ${fmtDate(s.createdAt)}`;
+  renderDetailType();
   renderDetailItems();
   history.pushState({ screen: "screen-detail" }, "");
   render("screen-detail");
 }
+
+function renderDetailType() {
+  $("detail-type").innerHTML = window.APP_CONFIG.shipmentTypes.map(t =>
+    `<button type="button" data-detailtype="${esc(t)}" aria-pressed="${t === current.type}">${esc(t)}</button>`).join("");
+}
+
+$("detail-type").onclick = (e) => {
+  const btn = e.target.closest("button[data-detailtype]");
+  if (!btn) return;
+  current.type = btn.dataset.detailtype;
+  renderDetailType();
+};
 
 function renderDetailItems() {
   $("detail-items").innerHTML = current.items.map((i, idx) => `<tr>
@@ -230,7 +259,7 @@ $("btn-save-edit").onclick = async () => {
   const name = $("detail-name").value.trim();
   if (!name) { toast("اكتب اسم الشحنة"); return; }
   try {
-    await db.updateShipment(current._id, { name, items: current.items });
+    await db.updateShipment(current._id, { name, items: current.items, type: current.type });
     toast("تم حفظ التعديلات");
     history.replaceState({ screen: "screen-manager" }, "");
     openManager();
@@ -242,8 +271,7 @@ $("btn-save-edit").onclick = async () => {
 
 /* ---------- catalog: view, search, rename, delete, export ---------- */
 
-let products = [];              // catalog rows loaded (up to db.PRODUCT_CAP)
-let total = 0;                  // real catalog size, counted on the server
+let products = [];              // the whole catalog, loaded once per screen open
 const edits = new Map();        // barcode -> new name, pending save
 
 $("btn-products").onclick = async () => {
@@ -254,30 +282,33 @@ $("btn-products").onclick = async () => {
 
 async function loadProducts() {
   edits.clear();
-  products = await db.listProducts().catch(() => []);
+  $("products-count").textContent = "بنجيب الأصناف...";
+  products = await db.listAllProducts().catch(() => []);
   products.sort((a, b) => a.name.localeCompare(b.name, "ar"));
-  total = products.length;
   renderProducts();
-  if (products.length >= db.PRODUCT_CAP) {           // only then is the loaded count not the truth
-    total = await db.countProducts().catch(() => products.length);
-    renderProducts();
-  }
+}
+
+// whole catalog is in memory, so search is a plain substring match on name or barcode
+function matches() {
+  const q = $("product-search").value.trim().toLowerCase();
+  return q ? products.filter(p => p.name.toLowerCase().includes(q) || p.barcode.includes(q)) : products;
 }
 
 function renderProducts() {
-  const found = products;
+  const found = matches();
   const page = found.slice(0, PAGE);
   const searching = $("product-search").value.trim() !== "";
-  $("products-count").textContent = searching
-    ? `${found.length} نتيجة` + (found.length > PAGE ? ` — بيظهر أول ${PAGE}` : "")
-    : (total ? `${total} صنف` + (total > products.length ? ` — بيظهر أول ${products.length}، دوّر عن الباقي` : "") : "");
+  $("products-count").textContent = products.length
+    ? (searching ? `${found.length} نتيجة من ${products.length} صنف` : `${products.length} صنف`)
+      + (found.length > PAGE ? ` — بيظهر أول ${PAGE}` : "")
+    : "";
   $("products-list").innerHTML = page.map(p => `<li>
       <div class="card-main">
         <input class="product-name" type="text" maxlength="100" data-barcode="${escAttr(p.barcode)}" value="${escAttr(edits.get(p.barcode) ?? p.name)}">
         <div class="code">${esc(p.barcode)}</div>
       </div>
       <button class="del" data-delproduct="${escAttr(p.barcode)}" aria-label="حذف الصنف">×</button>
-    </li>`).join("") || `<li class="empty">${searching ? "مفيش نتيجة — البحث بأول الاسم أو بالباركود" : "مفيش أصناف — استورد ملف الأصناف الأول"}</li>`;
+    </li>`).join("") || `<li class="empty">${searching ? "مفيش نتيجة للبحث" : "مفيش أصناف — استورد ملف الأصناف الأول"}</li>`;
   updateDirty();
 }
 
@@ -286,22 +317,7 @@ function updateDirty() {
   $("btn-save-products").disabled = edits.size === 0;
 }
 
-let searchTimer = null;
-
-$("product-search").oninput = () => {
-  clearTimeout(searchTimer);
-  searchTimer = setTimeout(runSearch, 250);   // one query per pause, not per keystroke
-};
-
-async function runSearch() {
-  const q = $("product-search").value.trim();
-  if (!q) { await loadProducts(); return; }
-  const hits = await db.searchProducts(q).catch(() => []);
-  if ($("product-search").value.trim() !== q) return;   // a newer search already ran
-  products = hits.sort((a, b) => a.name.localeCompare(b.name, "ar"));
-  edits.clear();
-  renderProducts();
-}
+$("product-search").oninput = renderProducts;
 
 $("products-list").oninput = (e) => {
   const inp = e.target.closest("input[data-barcode]");
@@ -349,15 +365,13 @@ $("btn-save-products").onclick = async () => {
   renderProducts();
 };
 
-$("btn-export-products").onclick = async () => {
-  toast("بنجهّز الملف...");
-  const rows = await db.listAllProducts().catch(() => []);   // the whole catalog, not the page on screen
-  if (!rows.length) { toast("مفيش أصناف تتحمّل"); return; }
-  downloadCsv("products.csv", [
+$("btn-export-products").onclick = () => {
+  if (!products.length) { toast("مفيش أصناف تتحمّل"); return; }
+  downloadCsv("products.csv", [                        // the loaded list is the whole catalog
     ["الباركود", "اسم الصنف"],
-    ...rows.map(p => [p.barcode, p.name]),
+    ...products.map(p => [p.barcode, p.name]),
   ]);
-  toast(`تم تحميل ${rows.length} صنف`);
+  toast(`تم تحميل ${products.length} صنف`);
 };
 
 /* ---------- catalog import ---------- */

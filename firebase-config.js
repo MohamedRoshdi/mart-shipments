@@ -12,5 +12,6 @@ window.APP_CONFIG = {
   branches: [
     { name: 'فرع قويسنا', pin: '1010' },
     { name: 'فرع شبين الكوم', pin: '2020' }
-  ]
+  ],
+  shipmentTypes: ['إذن استلام', 'إذن مرتجع', 'تحويل فرع']
 };

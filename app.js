@@ -20,7 +20,12 @@ const TITLES = {
   "screen-new": "شحنة جديدة",
 };
 
-const state = { items: [], currentBarcode: null, currentName: "", editingId: null, mine: [], branch: myBranch() };
+const types = () => window.APP_CONFIG.shipmentTypes;
+
+const state = {
+  items: [], currentBarcode: null, currentName: "", editingId: null, mine: [],
+  branch: myBranch(), type: types()[0],
+};
 
 /* ---------- navigation: one screen at a time, phone back button works ---------- */
 
@@ -49,7 +54,7 @@ async function goHome() {
   $("my-shipments").innerHTML = state.mine.map((s, i) => `<li>
       <div class="card-main">
         <div class="card-title">${esc(s.name)}</div>
-        <div class="meta">${esc(s.branch || "")} · ${fmtDate(s.createdAt)} · ${s.items.length} صنف</div>
+        <div class="meta">${esc(s.type || "")} · ${esc(s.branch || "")} · ${fmtDate(s.createdAt)} · ${s.items.length} صنف</div>
       </div>
       <button class="ghost" data-edit="${i}">تعديل</button>
     </li>`).join("") || `<li class="empty">لسه مفيش شحنات — ابدأ بـ «شحنة جديدة»</li>`;
@@ -95,14 +100,30 @@ $("save-name").onclick = () => {
 
 function saveDraft() {
   if (state.editingId) return; // editing a saved shipment must not overwrite the unsaved draft
-  localStorage.setItem("draft", JSON.stringify({ name: $("shipment-name").value, items: state.items }));
+  localStorage.setItem("draft", JSON.stringify({ name: $("shipment-name").value, items: state.items, type: state.type }));
 }
+
+function renderTypePicker() {
+  $("new-branch").textContent = myBranch();
+  $("type-picker").innerHTML = types().map(t =>
+    `<button type="button" data-type="${esc(t)}" aria-pressed="${t === state.type}">${esc(t)}</button>`).join("");
+}
+
+$("type-picker").onclick = (e) => {
+  const btn = e.target.closest("button[data-type]");
+  if (!btn) return;
+  state.type = btn.dataset.type;
+  renderTypePicker();
+  saveDraft();
+};
 
 $("btn-new").onclick = () => {
   const draft = JSON.parse(localStorage.getItem("draft") || "null");
   state.editingId = null;
   state.items = (draft && draft.items) || [];
   state.currentBarcode = null;
+  state.type = (draft && draft.type) || types()[0];
+  renderTypePicker();
   $("shipment-name").value = (draft && draft.name) || "";
   $("barcode-input").value = "";
   $("btn-save-shipment").textContent = "حفظ الشحنة";
@@ -120,6 +141,8 @@ function openShipment(s) {
   state.editingId = s._id;
   state.items = s.items.map(i => ({ ...i }));
   state.currentBarcode = null;
+  state.type = s.type || types()[0];
+  renderTypePicker();
   $("shipment-name").value = s.name;
   $("barcode-input").value = "";
   $("btn-save-shipment").textContent = "حفظ التعديلات";
@@ -199,8 +222,8 @@ $("btn-save-shipment").onclick = async () => {
   if (!name) { toast("اكتب اسم الشحنة الأول"); return; }
   const editing = state.editingId;
   try {
-    if (editing) await db.updateShipment(editing, { name, items: state.items });
-    else await db.saveShipment({ name, createdBy: myName(), branch: myBranch(), items: state.items });
+    if (editing) await db.updateShipment(editing, { name, items: state.items, type: state.type });
+    else await db.saveShipment({ name, createdBy: myName(), branch: myBranch(), type: state.type, items: state.items });
   } catch (e) {
     console.error(e);
     toast("الحفظ ما نفعش — حاول تاني");

@@ -189,6 +189,49 @@ test('branch: picked at setup, stamped on shipment, filters manager list', async
   await expect(page.locator('#all-shipments li')).toContainText('شحنة شبين');
 });
 
+test('shipment type: picked under the branch, saved, filtered and editable', async ({ page }) => {
+  await page.goto('/?test=1');
+  const [t1, t2, t3] = await page.evaluate(() => window.APP_CONFIG.shipmentTypes);
+  expect([t1, t2, t3]).toEqual(['إذن استلام', 'إذن مرتجع', 'تحويل فرع']);
+  const branch = await setUp(page);
+  await page.click('#btn-new');
+  await expect(page.locator('#new-branch')).toHaveText(branch.name);       // branch shown above the type
+  await expect(page.locator(`#type-picker button[data-type="${t1}"]`)).toHaveAttribute('aria-pressed', 'true');
+  await page.click(`#type-picker button[data-type="${t2}"]`);              // إذن مرتجع
+  await page.fill('#shipment-name', 'مرتجع المراعي');
+  await page.fill('#barcode-input', '111');
+  await page.click('#btn-lookup');
+  await page.click('#btn-add-item');
+  await page.click('#btn-save-shipment');
+  await expect(page.locator('#my-shipments li')).toContainText(t2);
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('test-shipments'))[0].type)).toBe(t2);
+
+  await page.goto('/manager.html?test=1');
+  await page.fill('#pin-input', await page.evaluate(() => window.APP_CONFIG.managerPin));
+  await page.click('#btn-pin');
+  await expect(page.locator('#all-shipments li')).toContainText(t2);
+  await page.click(`button[data-typefilter="${t1}"]`);                     // wrong type → empty
+  await expect(page.locator('#all-shipments li')).toContainText('مفيش شحنات');
+  await page.click(`button[data-typefilter="${t2}"]`);
+  await expect(page.locator('#all-shipments li')).toHaveCount(1);
+
+  await page.click('button[data-act="view"]');                            // manager corrects the type
+  await expect(page.locator(`#detail-type button[data-detailtype="${t2}"]`)).toHaveAttribute('aria-pressed', 'true');
+  await page.click(`#detail-type button[data-detailtype="${t3}"]`);
+  await page.click('#btn-save-edit');
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('test-shipments'))[0].type)).toBe(t3);
+  await expect(page.locator('#all-shipments li')).toContainText('مفيش شحنات');   // filter still on t2
+
+  await page.click(`button[data-typefilter="${t3}"]`);
+  const exp = (await Promise.all([
+    page.waitForEvent('download'),
+    page.click('#btn-export-all'),
+  ]))[0];
+  const csv = require('fs').readFileSync(await exp.path(), 'utf8');
+  expect(csv).toContain('"الفرع","نوع الشحنة","الشحنة"');
+  expect(csv).toContain(`"${t3}"`);
+});
+
 test('branch PIN on the manager page shows only that branch', async ({ page }) => {
   await page.goto('/manager.html?test=1');
   const cfg = await page.evaluate(() => window.APP_CONFIG.branches);
@@ -235,7 +278,7 @@ test('manager page: download one shipment and all shipments, CSV and TXT', async
   const all = await grab('#btn-export-all');
   expect(all.suggestedFilename()).toBe('shipments-all.csv');
   const allText = require('fs').readFileSync(await all.path(), 'utf8');
-  expect(allText).toContain('"الفرع","الشحنة","الموظف","التاريخ","الباركود","اسم الصنف","الكمية"');
+  expect(allText).toContain('"الفرع","نوع الشحنة","الشحنة","الموظف","التاريخ","الباركود","اسم الصنف","الكمية"');
   expect(allText).toContain('"شحنة المراعي","أحمد"');
 
   const allTxt = await grab('#btn-export-all-txt');
@@ -260,12 +303,12 @@ test('catalog screen: list, search, rename, delete, export', async ({ page }) =>
 
   await page.fill('#product-search', 'جبنة');                 // search by name
   await expect(page.locator('#products-list li')).toHaveCount(1);
-  await expect(page.locator('#products-count')).toHaveText('1 نتيجة');
+  await expect(page.locator('#products-count')).toHaveText('1 نتيجة من 3 صنف');
   await page.fill('#product-search', '333');                  // search by barcode
   await expect(page.locator('#products-list li')).toHaveCount(1);
   await expect(page.locator('input[data-barcode="333"]')).toHaveValue('أرز الضحى');
   await page.fill('#product-search', 'لا يوجد كده');           // no hit → guidance, not a dead end
-  await expect(page.locator('#products-list li.empty')).toContainText('البحث بأول الاسم أو بالباركود');
+  await expect(page.locator('#products-list li.empty')).toContainText('مفيش نتيجة للبحث');
   await page.fill('#product-search', '');
   await expect(page.locator('#products-list li')).toHaveCount(3);
 
