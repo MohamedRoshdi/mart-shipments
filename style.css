@@ -276,6 +276,8 @@ body.sheet-open .bottombar { display: none; }
 @media (prefers-reduced-motion: reduce) { .sheet { animation: none; } }
 .sheet > * + * { margin-block-start: 12px; }
 .handle { inline-size: 44px; block-size: 5px; border-radius: 99px; background: var(--line); margin: 0 auto; }
+.item-label { font-size: 1.15rem; font-weight: 700; }
+.item-label.unknown { color: var(--ink-2); font-weight: 600; font-size: .95rem; }
 .qty-row { display: flex; gap: 12px; align-items: center; }
 .qty-row input {
   text-align: center;

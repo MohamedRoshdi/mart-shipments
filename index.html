@@ -22,6 +22,8 @@
       <input id="employee-name" type="text" maxlength="50" placeholder="اكتب اسمك">
       <h2>الفرع</h2>
       <div id="branch-picker" class="seg"></div>
+      <h2>الرقم السري للفرع</h2>
+      <input id="branch-pin" type="password" inputmode="numeric" maxlength="8" dir="ltr" placeholder="••••">
       <button id="save-name" class="primary big">حفظ</button>
     </section>
 
@@ -53,8 +55,8 @@
   <div id="scrim" hidden></div>
   <div id="item-form" class="sheet" hidden>
     <div class="handle"></div>
+    <p id="item-name" class="item-label"></p>
     <p class="meta">الباركود <span id="item-barcode" class="code"></span></p>
-    <input id="item-name" type="text" maxlength="100" placeholder="اسم الصنف (اختياري)">
     <div class="qty-row">
       <button id="qty-minus" aria-label="كمية أقل">−</button>
       <input id="item-qty" type="number" value="1" min="1" dir="ltr" aria-label="الكمية">

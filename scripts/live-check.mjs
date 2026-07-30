@@ -10,23 +10,26 @@ const ctx = await browser.newContext({ permissions: ["clipboard-read", "clipboar
 const page = await ctx.newPage();
 page.on("pageerror", (e) => console.log("[pageerror]", e.message));
 
-async function addItem(p, barcode, name) {
+async function addItem(p, barcode) {
   await p.fill("#barcode-input", barcode);
   await p.click("#btn-lookup");
   await p.waitForSelector("#item-form:not([hidden])");
-  await p.fill("#item-name", name);
-  await p.click("#btn-add-item");
+  await p.click("#btn-add-item");                 // name comes from the imported catalog, not typed
   await p.waitForSelector("#item-form", { state: "hidden" });
 }
 
 // 1. employee creates a shipment against REAL Firestore, deletes one item first
 await page.goto(BASE + "/", { waitUntil: "load" });
+const branch = await page.evaluate(() => window.APP_CONFIG.branches[0]);
 await page.fill("#employee-name", "فحص آلي");
+await page.click(`button[data-branch="${branch.name}"]`);
+await page.fill("#branch-pin", branch.pin);
 await page.click("#save-name");
+await page.waitForSelector("#screen-home:not([hidden])");
 await page.click("#btn-new");
 await page.fill("#shipment-name", STAMP);
-await addItem(page, "1111111111111", "صنف أ");
-await addItem(page, "2222222222222", "صنف ب");
+await addItem(page, "1111111111111");
+await addItem(page, "2222222222222");
 log("1. items after two scans:", await page.locator("#items-list li").count());
 await page.click('button[data-del="1"]');
 log("2. items after deleting one:", await page.locator("#items-list li").count());
@@ -45,7 +48,7 @@ await page.waitForSelector("#screen-new:not([hidden])");
 log("4. edit screen loaded name/items:",
   await page.locator("#shipment-name").inputValue(), "/", await page.locator("#items-list li").count());
 await page.fill("#shipment-name", STAMP + "-معدلة");
-await addItem(page, "3333333333333", "صنف ج");
+await addItem(page, "3333333333333");
 await page.click("#btn-save-shipment");
 await page.waitForSelector("#screen-home:not([hidden])");
 await page.waitForTimeout(SYNC);

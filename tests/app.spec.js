@@ -1,10 +1,24 @@
 const { test, expect } = require('@playwright/test');
 
-test('first open asks name, saves, shows home', async ({ page }) => {
+// setup now needs the branch PIN; helper keeps every test honest about that
+async function setUp(page, name = 'أحمد', branchIndex = 0) {
+  const b = (await page.evaluate(() => window.APP_CONFIG.branches))[branchIndex];
+  await page.fill('#employee-name', name);
+  await page.click(`button[data-branch="${b.name}"]`);
+  await page.fill('#branch-pin', b.pin);
+  await page.click('#save-name');
+  return b;
+}
+
+test('first open asks name, branch and branch PIN', async ({ page }) => {
   await page.goto('/?test=1');
   await expect(page.locator('#screen-name')).toBeVisible();
   await page.fill('#employee-name', 'أحمد');
+  await page.fill('#branch-pin', '0000');           // wrong branch PIN
   await page.click('#save-name');
+  await expect(page.locator('#screen-name')).toBeVisible();
+  await expect(page.locator('#toast')).toContainText('الرقم السري للفرع غلط');
+  await setUp(page);
   await expect(page.locator('#screen-home')).toBeVisible();
   await page.reload();
   await expect(page.locator('#screen-home')).toBeVisible();
@@ -23,26 +37,42 @@ test('db test mode roundtrip', async ({ page }) => {
   expect(result).toEqual({ name: 'لبن', count: 1, first: 'ش١' });
 });
 
-test('create shipment: catalog memory + duplicate merge', async ({ page }) => {
+test('create shipment: name shown from catalog as a label, duplicate merge', async ({ page }) => {
   await page.goto('/?test=1');
-  await page.evaluate(() => localStorage.setItem('employeeName', 'أحمد'));
+  await page.evaluate(() => {
+    localStorage.setItem('employeeName', 'أحمد');
+    localStorage.setItem('test-products', JSON.stringify({ '6221031250057': 'لبن كامل الدسم' }));
+  });
   await page.reload();
   await page.click('#btn-new');
   await page.fill('#shipment-name', 'شحنة المراعي');
   await page.fill('#barcode-input', '6221031250057');
   await page.click('#btn-lookup');
-  await page.fill('#item-name', 'لبن كامل الدسم');
+  await expect(page.locator('#item-name')).toHaveText('لبن كامل الدسم'); // label, not an input
+  expect(await page.locator('#item-name').evaluate(el => el.tagName)).not.toBe('INPUT');
   await page.click('#qty-plus'); // qty = 2
   await page.click('#btn-add-item');
   await page.fill('#barcode-input', '6221031250057');
   await page.click('#btn-lookup');
-  await expect(page.locator('#item-name')).toHaveValue('لبن كامل الدسم'); // catalog remembered
   await page.click('#btn-add-item'); // qty 1 more → merge to 3
   await expect(page.locator('#items-list li:not(.empty)')).toHaveCount(1);
   await expect(page.locator('#items-list li:not(.empty)')).toContainText('3');
   await page.click('#btn-save-shipment');
   await expect(page.locator('#screen-home')).toBeVisible();
   await expect(page.locator('#my-shipments li')).toContainText('شحنة المراعي');
+});
+
+test('unknown barcode shows a clear label and still records the item', async ({ page }) => {
+  await page.goto('/?test=1');
+  await page.evaluate(() => localStorage.setItem('employeeName', 'أحمد'));
+  await page.reload();
+  await page.click('#btn-new');
+  await page.fill('#shipment-name', 'شحنة');
+  await page.fill('#barcode-input', '9990001112223');
+  await page.click('#btn-lookup');
+  await expect(page.locator('#item-name')).toHaveText('صنف غير مسجّل في ملف الأصناف');
+  await page.click('#btn-add-item');
+  await expect(page.locator('#items-list li:not(.empty)')).toContainText('9990001112223');
 });
 
 async function openManagerPage(page) {
@@ -97,7 +127,6 @@ test('employee: remove scanned item before saving', async ({ page }) => {
   await page.fill('#shipment-name', 'شحنة');
   await page.fill('#barcode-input', '111');
   await page.click('#btn-lookup');
-  await page.fill('#item-name', 'صنف غلط');
   await page.click('#btn-add-item');
   await expect(page.locator('#items-list li:not(.empty)')).toHaveCount(1);
   await page.click('button[data-del="0"]');
@@ -136,11 +165,9 @@ test('manager page: delete removes shipment', async ({ page }) => {
 
 test('branch: picked at setup, stamped on shipment, filters manager list', async ({ page }) => {
   await page.goto('/?test=1');
-  const [b1, b2] = await page.evaluate(() => window.APP_CONFIG.branches);
-  expect([b1, b2]).toEqual(['فرع قويسنا', 'فرع شبين الكوم']);
-  await page.fill('#employee-name', 'أحمد');
-  await page.click(`button[data-branch="${b2}"]`);
-  await page.click('#save-name');
+  const cfg = await page.evaluate(() => window.APP_CONFIG.branches);
+  expect(cfg.map(b => b.name)).toEqual(['فرع قويسنا', 'فرع شبين الكوم']);
+  const b2 = (await setUp(page, 'أحمد', 1)).name;
   await expect(page.locator('#who')).toContainText(b2);
   await page.click('#btn-new');
   await page.fill('#shipment-name', 'شحنة شبين');
@@ -156,31 +183,68 @@ test('branch: picked at setup, stamped on shipment, filters manager list', async
   await page.fill('#pin-input', await page.evaluate(() => window.APP_CONFIG.managerPin));
   await page.click('#btn-pin');
   await expect(page.locator('#all-shipments li')).toHaveCount(1);
-  await page.click(`button[data-branch="${b1}"]`);          // other branch → empty
+  await page.click(`button[data-branch="${cfg[0].name}"]`);   // other branch → empty
   await expect(page.locator('#all-shipments li')).toContainText('مفيش شحنات');
   await page.click(`button[data-branch="${b2}"]`);
   await expect(page.locator('#all-shipments li')).toContainText('شحنة شبين');
 });
 
-test('manager page: download one shipment and all shipments as CSV', async ({ page }) => {
-  await openManagerPage(page);
-  const one = await Promise.all([
+test('branch PIN on the manager page shows only that branch', async ({ page }) => {
+  await page.goto('/manager.html?test=1');
+  const cfg = await page.evaluate(() => window.APP_CONFIG.branches);
+  await page.evaluate((names) => {
+    localStorage.setItem('test-shipments', JSON.stringify([
+      { name: 'شحنة قويسنا', createdBy: 'أحمد', branch: names[0], createdAt: 1753700000000,
+        items: [{ barcode: '111', name: 'لبن', qty: 1 }] },
+      { name: 'شحنة شبين', createdBy: 'سيد', branch: names[1], createdAt: 1753600000000,
+        items: [{ barcode: '222', name: 'جبنة', qty: 2 }] },
+    ]));
+  }, cfg.map(b => b.name));
+  await page.fill('#pin-input', cfg[1].pin);                  // شبين الكوم manager
+  await page.click('#btn-pin');
+  await expect(page.locator('#all-shipments li')).toHaveCount(1);
+  await expect(page.locator('#all-shipments li')).toContainText('شحنة شبين');
+  await expect(page.locator('#screen-title')).toHaveText('شبين الكوم');
+  await expect(page.locator('#branch-filter button')).toHaveCount(1);   // no cross-branch filter
+  await expect(page.locator('#branch-filter button')).toBeDisabled();
+  const exp = await Promise.all([
     page.waitForEvent('download'),
-    page.click('button[data-act="download"]'),
+    page.click('#btn-export-all'),
   ]).then(([d]) => d);
+  expect(exp.suggestedFilename()).toBe('shipments-فرع شبين الكوم.csv');
+  expect(require('fs').readFileSync(await exp.path(), 'utf8')).not.toContain('قويسنا');
+});
+
+test('manager page: download one shipment and all shipments, CSV and TXT', async ({ page }) => {
+  await openManagerPage(page);
+  const grab = async (selector) => (await Promise.all([
+    page.waitForEvent('download'),
+    page.click(selector),
+  ]))[0];
+
+  const one = await grab('button[data-act="download"]');
   expect(one.suggestedFilename()).toBe('شحنة المراعي.csv');
   const oneText = require('fs').readFileSync(await one.path(), 'utf8');
   expect(oneText.startsWith('﻿')).toBe(true);            // Excel needs the BOM for Arabic
   expect(oneText).toContain('"6221031250057","لبن","3"');
 
-  const all = await Promise.all([
-    page.waitForEvent('download'),
-    page.click('#btn-export-all'),
-  ]).then(([d]) => d);
+  const oneTxt = await grab('button[data-act="txt"]');
+  expect(oneTxt.suggestedFilename()).toBe('شحنة المراعي.txt');
+  expect(require('fs').readFileSync(await oneTxt.path(), 'utf8')).toBe('6221031250057\t3');
+
+  const all = await grab('#btn-export-all');
   expect(all.suggestedFilename()).toBe('shipments-all.csv');
   const allText = require('fs').readFileSync(await all.path(), 'utf8');
   expect(allText).toContain('"الفرع","الشحنة","الموظف","التاريخ","الباركود","اسم الصنف","الكمية"');
   expect(allText).toContain('"شحنة المراعي","أحمد"');
+
+  const allTxt = await grab('#btn-export-all-txt');
+  expect(allTxt.suggestedFilename()).toBe('shipments-all.txt');
+  expect(require('fs').readFileSync(await allTxt.path(), 'utf8')).toBe('6221031250057\t3');
+
+  await page.click('button[data-act="view"]');
+  const detailTxt = await grab('#btn-download-txt');
+  expect(detailTxt.suggestedFilename()).toBe('شحنة المراعي.txt');
 });
 
 test('back button and phone back return to the previous screen', async ({ page }) => {
@@ -235,19 +299,7 @@ test("catalog CSV import on manager page autofills names in employee app", async
   await page.click("#btn-new");
   await page.fill("#barcode-input", "6221031250057");
   await page.click("#btn-lookup");
-  await expect(page.locator("#item-name")).toHaveValue("لبن المراعي");
-});
-
-test("item without name saves showing barcode", async ({ page }) => {
-  await page.goto("/?test=1");
-  await page.evaluate(() => localStorage.setItem("employeeName", "أحمد"));
-  await page.reload();
-  await page.click("#btn-new");
-  await page.fill("#shipment-name", "شحنة بدون أسماء");
-  await page.fill("#barcode-input", "9990001112223");
-  await page.click("#btn-lookup");
-  await page.click("#btn-add-item");
-  await expect(page.locator('#items-list li:not(.empty)')).toContainText("9990001112223");
+  await expect(page.locator("#item-name")).toHaveText("لبن المراعي");
 });
 
 test("draft survives reload", async ({ page }) => {
@@ -258,7 +310,6 @@ test("draft survives reload", async ({ page }) => {
   await page.fill("#shipment-name", "مسودة");
   await page.fill("#barcode-input", "111");
   await page.click("#btn-lookup");
-  await page.fill("#item-name", "صنف");
   await page.click("#btn-add-item");
   await page.reload();
   await page.click("#btn-new");

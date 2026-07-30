@@ -9,6 +9,7 @@ const shot = (n) => page.screenshot({ path: `${OUT}/${n}.png` });
 // setup
 await page.goto("http://localhost:8080/?test=1");
 await page.fill("#employee-name", "أحمد");
+await page.fill("#branch-pin", "••••");
 await shot("1-setup");
 
 // home with shipments

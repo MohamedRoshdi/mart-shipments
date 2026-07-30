@@ -3,8 +3,9 @@ import * as db from "./db.js";
 const $ = (id) => document.getElementById(id);
 const esc = (t) => { const d = document.createElement("div"); d.textContent = t; return d.innerHTML; };
 const branches = () => window.APP_CONFIG.branches;
+const branchByName = (n) => branches().find(b => b.name === n);
 const myName = () => localStorage.getItem("employeeName");
-const myBranch = () => localStorage.getItem("employeeBranch") || branches()[0];
+const myBranch = () => localStorage.getItem("employeeBranch") || branches()[0].name;
 const fmtDate = (ts) => new Date(ts).toLocaleDateString("ar-EG");
 
 function toast(msg) {
@@ -19,7 +20,7 @@ const TITLES = {
   "screen-new": "شحنة جديدة",
 };
 
-const state = { items: [], currentBarcode: null, editingId: null, mine: [], branch: myBranch() };
+const state = { items: [], currentBarcode: null, currentName: "", editingId: null, mine: [], branch: myBranch() };
 
 /* ---------- navigation: one screen at a time, phone back button works ---------- */
 
@@ -68,7 +69,7 @@ const shortBranch = (b) => b.replace(/^فرع\s+/, ""); // chips stay one line; 
 
 function renderBranchPicker() {
   $("branch-picker").innerHTML = branches().map(b =>
-    `<button type="button" data-branch="${esc(b)}" aria-pressed="${b === state.branch}">${esc(shortBranch(b))}</button>`).join("");
+    `<button type="button" data-branch="${esc(b.name)}" aria-pressed="${b.name === state.branch}">${esc(shortBranch(b.name))}</button>`).join("");
 }
 
 $("branch-picker").onclick = (e) => {
@@ -81,8 +82,11 @@ $("branch-picker").onclick = (e) => {
 $("save-name").onclick = () => {
   const n = $("employee-name").value.trim();
   if (!n) { toast("اكتب اسمك الأول"); return; }
+  const branch = branchByName(state.branch);
+  if (!branch || $("branch-pin").value !== branch.pin) { toast("الرقم السري للفرع غلط"); return; }
   localStorage.setItem("employeeName", n);
-  localStorage.setItem("employeeBranch", state.branch);
+  localStorage.setItem("employeeBranch", branch.name);
+  $("branch-pin").value = "";
   history.replaceState({ screen: "screen-home" }, "");
   goHome();
 };
@@ -132,12 +136,12 @@ $("btn-lookup").onclick = () => {
 
 async function onBarcode(code) {
   state.currentBarcode = code;
+  state.currentName = await db.getProductName(code) || "";
   $("item-barcode").textContent = code;
-  const known = await db.getProductName(code);
-  $("item-name").value = known || "";
+  $("item-name").textContent = state.currentName || "صنف غير مسجّل في ملف الأصناف";
+  $("item-name").classList.toggle("unknown", !state.currentName);
   $("item-qty").value = 1;
   showSheet(true);
-  if (!known) $("item-name").focus();
 }
 
 function showSheet(open) {
@@ -149,6 +153,7 @@ function showSheet(open) {
 function hideSheet() {
   showSheet(false);
   state.currentBarcode = null;
+  state.currentName = "";
 }
 
 $("btn-cancel-item").onclick = hideSheet;
@@ -156,13 +161,11 @@ $("scrim").onclick = hideSheet;
 $("qty-plus").onclick = () => { $("item-qty").value = +$("item-qty").value + 1; };
 $("qty-minus").onclick = () => { $("item-qty").value = Math.max(1, +$("item-qty").value - 1); };
 
-$("btn-add-item").onclick = async () => {
-  const name = $("item-name").value.trim();
+$("btn-add-item").onclick = () => {
+  const name = state.currentName;      // names come from the imported catalog only
   const qty = Math.max(1, parseInt($("item-qty").value, 10) || 1);
   const barcode = state.currentBarcode;
   if (!barcode) return;
-  const existing = await db.getProductName(barcode);
-  if (name && existing !== name) await db.saveProductName(barcode, name);
   const dup = state.items.find(i => i.barcode === barcode);
   if (dup) dup.qty += qty; else state.items.push({ barcode, name, qty });
   hideSheet();

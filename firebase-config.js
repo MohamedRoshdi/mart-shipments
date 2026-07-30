@@ -8,6 +8,9 @@ window.FIREBASE_CONFIG = {
   messagingSenderId: "430785723659"
 };
 window.APP_CONFIG = {
-  managerPin: '1994',
-  branches: ['فرع قويسنا', 'فرع شبين الكوم']
+  managerPin: '1994',                 // يشوف كل الفروع
+  branches: [
+    { name: 'فرع قويسنا', pin: '1010' },
+    { name: 'فرع شبين الكوم', pin: '2020' }
+  ]
 };

@@ -16,6 +16,7 @@ const TITLES = { "screen-pin": "شاشة المدير", "screen-manager": "ال�
 let all = [];        // everything read from the database
 let shown = [];      // after the branch filter — row indexes point here
 let filter = ALL;
+let scope = null;    // null = master PIN (all branches); otherwise locked to one branch
 let current = null;  // the shipment being edited (a copy)
 
 /* ---------- navigation ---------- */
@@ -38,7 +39,14 @@ $("btn-back").onclick = () => history.back();
 /* ---------- unlock ---------- */
 
 $("btn-pin").onclick = () => {
-  if ($("pin-input").value !== window.APP_CONFIG.managerPin) { toast("الرقم السري غلط"); return; }
+  const cfg = window.APP_CONFIG;
+  const entered = $("pin-input").value;
+  const branch = cfg.branches.find(b => b.pin === entered);
+  if (entered === cfg.managerPin) scope = null;            // master: every branch
+  else if (branch) scope = branch.name;                    // branch manager: their branch only
+  else { toast("الرقم السري غلط"); return; }
+  filter = scope || ALL;
+  $("pin-input").value = "";
   history.replaceState({ screen: "screen-manager" }, "");
   openManager();
 };
@@ -48,8 +56,10 @@ $("btn-pin").onclick = () => {
 const shortBranch = (b) => b.replace(/^فرع\s+/, ""); // chips stay one line; stored value keeps "فرع"
 
 function renderFilter() {
-  $("branch-filter").innerHTML = [ALL, ...window.APP_CONFIG.branches].map(b =>
-    `<button type="button" data-branch="${esc(b)}" aria-pressed="${b === filter}">${esc(shortBranch(b))}</button>`).join("");
+  // a branch manager sees their branch as a locked chip, not a filter
+  const opts = scope ? [scope] : [ALL, ...window.APP_CONFIG.branches.map(b => b.name)];
+  $("branch-filter").innerHTML = opts.map(b =>
+    `<button type="button" data-branch="${esc(b)}" aria-pressed="${b === filter}" ${scope ? "disabled" : ""}>${esc(shortBranch(b))}</button>`).join("");
 }
 
 $("branch-filter").onclick = (e) => {
@@ -62,7 +72,9 @@ $("branch-filter").onclick = (e) => {
 
 async function openManager() {
   render("screen-manager");
+  if (scope) $("screen-title").textContent = shortBranch(scope);
   all = await db.listShipments().catch(() => []);
+  if (scope) all = all.filter(s => s.branch === scope);   // branch managers never load other branches
   renderFilter();
   renderList();
 }
@@ -77,7 +89,8 @@ function renderList() {
       <div class="row-actions">
         <button data-act="view" data-i="${i}">عرض</button>
         <button data-act="copy" data-i="${i}">نسخ</button>
-        <button data-act="download" data-i="${i}">تحميل</button>
+        <button data-act="download" data-i="${i}">Excel</button>
+        <button data-act="txt" data-i="${i}">TXT</button>
         <button data-act="del" data-i="${i}" class="danger">حذف</button>
       </div>
     </li>`).join("") || `<li class="empty">مفيش شحنات في الفرع ده</li>`;
@@ -90,6 +103,7 @@ $("all-shipments").onclick = async (e) => {
   if (btn.dataset.act === "view") openDetail(s);
   else if (btn.dataset.act === "copy") copyShipment(s);
   else if (btn.dataset.act === "download") downloadShipment(s);
+  else if (btn.dataset.act === "txt") downloadShipmentTxt(s);
   else if (btn.dataset.act === "del") {
     if (!confirm(`حذف «${s.name}»؟ مش هينفع ترجّعها.`)) return;
     try {
@@ -117,16 +131,22 @@ async function copyShipment(s) {
   }
 }
 
-// BOM + CRLF so Excel opens the Arabic columns correctly
-function downloadCsv(filename, rows) {
-  const csv = "﻿" + rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\r\n");
-  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+function download(filename, text, type) {
+  const url = URL.createObjectURL(new Blob([text], { type }));
   const a = document.createElement("a");
   a.href = url;
   a.download = filename;
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
+
+// BOM + CRLF so Excel opens the Arabic columns correctly
+function downloadCsv(filename, rows) {
+  const csv = "﻿" + rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\r\n");
+  download(filename, csv, "text/csv;charset=utf-8");
+}
+
+const downloadTxt = (filename, text) => download(filename, text, "text/plain;charset=utf-8");
 
 function safeName(t) { return String(t).replace(/[\\/:*?"<>|]/g, "-").slice(0, 60); }
 
@@ -135,17 +155,30 @@ function downloadShipment(s) {
     ["الباركود", "اسم الصنف", "الكمية"],
     ...s.items.map(i => [i.barcode, i.name || "", i.qty]),
   ]);
-  toast("تم تحميل الملف");
+  toast("تم تحميل ملف Excel");
 }
+
+function downloadShipmentTxt(s) {
+  downloadTxt(`${safeName(s.name)}.txt`, shipmentText(s));   // barcode TAB qty, same as the copy button
+  toast("تم تحميل ملف TXT");
+}
+
+const exportName = (ext) => `shipments-${filter === ALL ? "all" : safeName(filter)}.${ext}`;
 
 $("btn-export-all").onclick = () => {
   if (!shown.length) { toast("مفيش شحنات تتحمّل"); return; }
-  downloadCsv(`shipments-${filter === ALL ? "all" : safeName(filter)}.csv`, [
+  downloadCsv(exportName("csv"), [
     ["الفرع", "الشحنة", "الموظف", "التاريخ", "الباركود", "اسم الصنف", "الكمية"],
     ...shown.flatMap(s => s.items.map(i =>
       [s.branch || "", s.name, s.createdBy, fmtDate(s.createdAt), i.barcode, i.name || "", i.qty])),
   ]);
-  toast("تم تحميل الملف");
+  toast("تم تحميل ملف Excel");
+};
+
+$("btn-export-all-txt").onclick = () => {
+  if (!shown.length) { toast("مفيش شحنات تتحمّل"); return; }
+  downloadTxt(exportName("txt"), shown.map(s => shipmentText(s)).join("\n"));
+  toast("تم تحميل ملف TXT");
 };
 
 /* ---------- edit one shipment ---------- */
@@ -180,7 +213,9 @@ $("detail-items").onclick = (e) => {
 };
 
 $("btn-copy").onclick = () => copyShipment(current);
-$("btn-download").onclick = () => downloadShipment({ ...current, name: $("detail-name").value.trim() || current.name });
+const detailShipment = () => ({ ...current, name: $("detail-name").value.trim() || current.name });
+$("btn-download").onclick = () => downloadShipment(detailShipment());
+$("btn-download-txt").onclick = () => downloadShipmentTxt(detailShipment());
 
 $("btn-save-edit").onclick = async () => {
   const name = $("detail-name").value.trim();
