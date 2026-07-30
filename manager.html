@@ -33,7 +33,7 @@
 
       <h2>أدوات</h2>
       <ul>
-        <li>
+        <li id="tool-import">
           <div class="card-main">
             <div class="card-title">أسماء الأصناف</div>
             <div class="meta">استورد ملف Excel/CSV مرة واحدة، والأسماء تظهر لوحدها مع كل مسح. لعرض الأصناف وتعديلها استخدم زرار «الأصناف» فوق.</div>
@@ -44,7 +44,7 @@
           </div>
           <input id="import-file" type="file" accept=".csv,text/csv" hidden>
         </li>
-        <li>
+        <li id="tool-export">
           <div class="card-main">
             <div class="card-title">تصدير الشحنات</div>
             <div class="meta">Excel أو TXT: كل الشحنات الظاهرة في ملف واحد. ZIP: كل شحنة في ملف لوحدها، جوه مجلد باسم نوع الشحنة.</div>
@@ -55,13 +55,22 @@
             <button id="btn-export-zip">ZIP بالمجلدات</button>
           </div>
         </li>
-        <li>
+        <li id="tool-admin">
           <div class="card-main">
             <div class="card-title">إعدادات النظام</div>
             <div class="meta">للأدمن بس: الفروع والأرقام السرية وأنواع الشحنات وآخر العمليات</div>
           </div>
           <div class="row-actions">
-            <a href="admin.html">فتح صفحة النظام</a>
+            <a id="link-admin-page" href="admin.html">فتح صفحة النظام</a>
+          </div>
+        </li>
+        <li id="tool-logout" hidden>
+          <div class="card-main">
+            <div class="card-title">الخروج</div>
+            <div class="meta">تقفل الجلسة وترجع لشاشة الرقم السري</div>
+          </div>
+          <div class="row-actions">
+            <button id="btn-logout" class="ghost">خروج</button>
           </div>
         </li>
       </ul>
@@ -88,7 +97,7 @@
       <p id="detail-meta" class="meta"></p>
       <h2>الأصناف</h2>
       <table><tbody id="detail-items"></tbody></table>
-      <div class="row-actions">
+      <div id="detail-exports" class="row-actions">
         <button id="btn-copy">نسخ</button>
         <button id="btn-download">Excel</button>
         <button id="btn-download-txt">TXT</button>

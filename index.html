@@ -18,6 +18,13 @@
   </header>
 
   <main>
+    <section id="screen-login" hidden>
+      <h2>الرقم السري</h2>
+      <input id="login-pin" type="password" inputmode="numeric" maxlength="8" dir="ltr" placeholder="••••">
+      <button id="btn-login" class="primary big">دخول</button>
+      <p class="meta">اكتب رقمك السري وهيفتح لك المكان بتاعك على طول.</p>
+    </section>
+
     <section id="screen-name" hidden>
       <h2>الموظف</h2>
       <input id="employee-name" type="text" maxlength="50" placeholder="اكتب اسمك">
@@ -29,6 +36,11 @@
     </section>
 
     <section id="screen-home" hidden>
+      <div id="home-links" class="row-actions" hidden>
+        <a id="link-manager" href="manager.html" hidden>صفحة المدير</a>
+        <a id="link-admin" href="admin.html" hidden>صفحة النظام</a>
+        <button id="btn-logout" class="ghost" hidden>خروج</button>
+      </div>
       <ul id="my-shipments"></ul>
       <div class="bottombar">
         <button id="btn-new" class="primary big">+ شحنة جديدة</button>

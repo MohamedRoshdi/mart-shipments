@@ -21,7 +21,7 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 5. **`db.js` is the only file that knows where data lives.** `app.js` and
    `manager.js` never touch Firestore or localStorage keys directly.
 6. **Bump `CACHE` in `sw.js` on every deploy.** Serving is cache-first, so phones
-   keep the old bundle until the cache name changes. Currently `mart-v16`.
+   keep the old bundle until the cache name changes. Currently `mart-v17`.
 7. **Deploy = push to master.** GitHub Pages serves the repo root. Firestore rules
    deploy separately: `npx firebase deploy --only firestore:rules --project shipments-alaela-mart`.
 
@@ -31,7 +31,8 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 |---|---|
 | `index.html` / `app.js` | employee app: setup, home, new/edit shipment, camera, item sheet |
 | `manager.html` / `manager.js` | manager app: PIN, shipment list, shipment edit, catalog screen, import/export |
-| `admin.html` / `admin.js` | admin app: settings (branches, PINs, types), audit trail, bulk delete, catalog wipe |
+| `admin.html` / `admin.js` | admin app: users + permissions, settings (branches, PINs, types), audit trail, bulk delete, catalog wipe |
+| `auth.js` | permission list, PIN → identity, the 12-hour session shared by all three pages |
 | `db.js` | data layer; `?test=1` switches the whole app to localStorage |
 | `zip.js` | store-only ZIP writer, ~80 lines, no dependency; used by the folder export |
 | `style.css` | one stylesheet for all three pages |
@@ -39,7 +40,7 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 | `firebase-config.js` | Firebase keys **plus** `APP_CONFIG`: PINs (incl. `adminPin`), branches, shipment types |
 | `firestore.rules` | shape validation; the only server-side guard that exists |
 | `SETUP.md` | Arabic guide for the shop owner |
-| `tests/app.spec.js` | 22 Playwright tests, all in localStorage mode |
+| `tests/app.spec.js` | 35 Playwright tests, all in localStorage mode |
 | `scripts/*.mjs` | live checks and screenshot helpers (see below) |
 
 ## Data model
@@ -49,7 +50,9 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 
 `products/{barcode}` — `{ name }`. The barcode **is** the document id.
 
-`config/app` — `{ managerPin, adminPin, branches: [{name, pin}], shipmentTypes: [] }`.
+`config/app` — `{ managerPin, adminPin, branches: [{name, pin}], shipmentTypes: [], users: [] }`.
+Each user is `{ name, pin, branch, perms: [] }`; `perms` holds ids from `auth.js` `PERMS`
+(`emp`/`mgr`/`adm` are screens, the rest are actions).
 The admin page writes it; every page merges it over `window.APP_CONFIG` at boot, so the
 shipped `firebase-config.js` is only a fallback. A missing doc changes nothing.
 
@@ -57,7 +60,7 @@ shipped `firebase-config.js` is only a fallback. A missing doc changes nothing.
 mutations write a row, `update`/`delete` are denied by the rules.
 
 Rules in force (all live-tested):
-- `config`: only the doc id `app`, only those four keys, PINs ≤ 8 chars, lists ≤ 10.
+- `config`: only the doc id `app`, only those five keys, PINs ≤ 8 chars, lists ≤ 10, users ≤ 40.
 - `logs`: create-only with the four keys; `update`/`delete` always denied.
 - create: key allow-list, types, sizes, `items` ≤ 200.
 - update: `name`, `items`, `type` may change; `createdBy`, `createdAt` and
@@ -74,6 +77,19 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   refusal sheet (`#item-warn`), hides the qty stepper and the add button, and
   `btn-add-item` also refuses when called programmatically. Item names are never
   typed by employees — they come from `products` only.
+- **`auth.js` owns identity for all three pages.** `authenticate(pin, cfg, codeAdminPin)` tries
+  the admin's users first, then the legacy PINs (admin → every permission, manager → all but
+  `adm`, branch PIN → that branch, flagged `branchPin` so the employee page still runs the old
+  name+branch setup). The result goes into `localStorage.session` for 12 hours and every page
+  reads it, so signing in once covers all three. **`canDo(perm)` returns true when there is no
+  session at all** — that is what keeps the pre-users behaviour intact for a shop that never
+  creates a user.
+- **`session.user` separates a real account from a legacy PIN.** Only a real account may be
+  auto-enrolled as the employee (name written to `employeeName`); a legacy manager PIN must
+  still type a name, which is what the old flow did.
+- **Never write `location.href = "manager.html"`.** That drops the query string and silently
+  takes the app out of `?test=1`, straight onto live Firestore. Use `auth.goTo()` /
+  `auth.withQuery()`; the same applies to any `<a href>` between pages.
 - **Camera preferences are per phone, in `localStorage.camSettings`** (`{deviceId, box, torch, zoom}`),
   never in Firestore — the whole point is that one shop phone needs a different lens than another.
   `startScan(retried)` falls back to `facingMode: environment` and clears the saved `deviceId`
@@ -114,7 +130,7 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
 ## Commands
 
 ```bash
-npx playwright test                 # 29 tests, localStorage mode, ~19s
+npx playwright test                 # 35 tests, localStorage mode, ~17s
 npx playwright test -g "catalog"    # one group
 python3 -m http.server 8080         # serve locally, then open /?test=1
 node scripts/make-icons.mjs         # regenerate the PWA icons

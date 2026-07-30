@@ -303,6 +303,22 @@ body.sheet-open .bottombar { display: none; }
 }
 .qty-row button { inline-size: 62px; block-size: 56px; font-size: 1.6rem; padding: 0; }
 
+/* ---------- users + permissions ---------- */
+.user-card { display: grid; gap: 10px; }
+.user-row { display: flex; gap: 8px; align-items: center; }
+.user-row input { flex: 1; }
+.perm-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.perm-grid button {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  font-size: .82rem;
+  padding: 10px 8px;
+  text-align: start;
+}
+.perm-grid button[aria-pressed=true] { background: var(--ink); color: #fff; border-color: var(--ink); }
+.perm-grid button[aria-pressed=true]::before { content: "✓ "; }
+#users-list .seg button[aria-pressed=true] { background: var(--amber); color: var(--ink); border-color: var(--amber); }
+
 /* ---------- camera controls ---------- */
 .cam-live { display: flex; gap: 12px; align-items: center; margin-block-start: 10px; }
 .cam-live button[aria-pressed=true] { background: var(--amber); border-color: var(--amber); }

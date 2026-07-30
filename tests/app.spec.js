@@ -95,7 +95,14 @@ test('a barcode outside the catalog is refused, with the reason spelled out', as
   await expect(page.locator('#items-list li:not(.empty)')).toHaveCount(1);
 });
 
+// a session signed in on any page carries to the others, so tests that want the PIN
+// screen must sign out first — and before navigating, or the redirect wins the race
+async function signOut(page) {
+  await page.evaluate(() => localStorage.removeItem('session')).catch(() => {});
+}
+
 async function openManagerPage(page) {
+  await signOut(page);
   await page.goto('/manager.html?test=1');
   await page.evaluate(() => {
     localStorage.setItem('test-shipments', JSON.stringify([
@@ -464,6 +471,7 @@ test("catalog CSV import on manager page autofills names in employee app", async
 });
 
 async function openAdmin(page) {
+  await signOut(page);                                             // else the session skips the PIN screen
   await page.goto('/admin.html?test=1');
   await page.fill('#pin-input', await page.evaluate(() => window.APP_CONFIG.adminPin));
   await page.click('#btn-pin');
@@ -503,6 +511,7 @@ test('admin: a saved branch and type reach the employee app and the manager', as
   await page.click('#btn-new');
   await expect(page.locator('#type-picker button[data-type="إذن تحويل مخزن"]')).toBeVisible();
 
+  await signOut(page);                                          // the admin session would skip the PIN
   await page.goto('/manager.html?test=1');                      // manager: both appear as filters
   await page.fill('#pin-input', await page.evaluate(() => window.APP_CONFIG.managerPin));
   await page.click('#btn-pin');
@@ -608,6 +617,121 @@ test('camera settings: the scanner screen keeps its controls hidden until a came
   await page.click('#btn-lookup');
   await page.click('#btn-add-item');
   await expect(page.locator('#items-list li:not(.empty)')).toHaveCount(1);
+});
+
+// users the admin creates, with a permission tick per screen and per action
+async function seedUsers(page, users) {
+  await page.evaluate((u) => {
+    const cfg = JSON.parse(localStorage.getItem('test-config') || '{}');
+    localStorage.setItem('test-config', JSON.stringify({ ...window.APP_CONFIG, ...cfg, users: u }));
+  }, users);
+  await page.reload();                                             // APP_CONFIG merges the config at boot
+}
+
+const EMP = { name: 'سيد', pin: '2233', branch: 'فرع قويسنا', perms: ['emp', 'create'] };
+const MGR = { name: 'حسن', pin: '4411', branch: 'فرع قويسنا', perms: ['mgr', 'edit', 'download'] };
+const ADM = { name: 'الأدمن الجديد', pin: '5511', branch: '', perms: ['adm', 'danger'] };
+
+test('admin: creating a user with a PIN and permissions', async ({ page }) => {
+  await openAdmin(page);
+  await page.click('#btn-add-user');
+  await page.fill('input[data-uname="0"]', 'حسن');
+  await page.fill('input[data-upin="0"]', '4411');
+  await page.click('[data-uperms="0"] button[data-perm="mgr"]');       // add manager screen
+  await page.click('[data-uperms="0"] button[data-perm="emp"]');       // drop the employee screen
+  await page.click('[data-uperms="0"] button[data-perm="create"]');    // and the create action
+  await page.click('[data-uperms="0"] button[data-perm="download"]');
+  await page.click('#btn-save-config');
+  await expect(page.locator('#toast')).toContainText('تم حفظ الإعدادات');
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('test-config')).users);
+  expect(saved).toHaveLength(1);
+  expect(saved[0].name).toBe('حسن');
+  expect(saved[0].pin).toBe('4411');
+  expect(saved[0].perms.sort()).toEqual(['download', 'mgr']);
+});
+
+test('admin: a repeated PIN is refused before it can hand over someone else\'s access', async ({ page }) => {
+  await openAdmin(page);
+  await page.click('#btn-add-user');
+  await page.fill('input[data-uname="0"]', 'حسن');
+  await page.fill('input[data-upin="0"]', await page.evaluate(() => window.APP_CONFIG.branches[0].pin));
+  await page.click('#btn-save-config');
+  await expect(page.locator('#toast')).toContainText('رقم سري متكرر');
+  expect(await page.evaluate(() => localStorage.getItem('test-config'))).toBeNull();
+});
+
+test('login: one PIN box sends each user to the screen they are allowed', async ({ page }) => {
+  await page.goto('/?test=1');
+  await seedUsers(page, [EMP, MGR, ADM]);
+  await expect(page.locator('#screen-login')).toBeVisible();
+
+  await page.fill('#login-pin', '9999');                     // unknown PIN
+  await page.click('#btn-login');
+  await expect(page.locator('#toast')).toContainText('الرقم السري غلط');
+
+  await page.fill('#login-pin', EMP.pin);                    // employee stays on this page
+  await page.press('#login-pin', 'Enter');
+  await expect(page.locator('#screen-home')).toBeVisible();
+  await expect(page.locator('#who')).toContainText('سيد');
+  await expect(page.locator('#who')).toContainText('فرع قويسنا');
+  await expect(page.locator('#link-manager')).toBeHidden();  // no manager permission, no link
+  await expect(page.locator('#btn-new')).toBeVisible();      // create permission → the button is there
+
+  await page.click('#btn-logout');
+  await expect(page.locator('#screen-login')).toBeVisible();
+  await page.fill('#login-pin', MGR.pin);                    // manager PIN → routed to the manager page
+  await page.click('#btn-login');
+  await page.waitForURL(/manager\.html/);
+  await expect(page.locator('#screen-manager')).toBeVisible();   // session carries over, no second PIN
+  await expect(page.locator('#screen-title')).toHaveText('قويسنا');
+});
+
+test('permissions actually hide the actions on the manager page', async ({ page }) => {
+  await page.goto('/manager.html?test=1');
+  await page.evaluate(() => localStorage.setItem('test-shipments', JSON.stringify([
+    { name: 'شحنة المراعي', createdBy: 'أحمد', branch: 'فرع قويسنا', type: 'إذن استلام',
+      createdAt: 1753700000000, items: [{ barcode: '111', name: 'لبن', qty: 3 }] },
+  ])));
+  await seedUsers(page, [MGR]);
+  await page.fill('#pin-input', MGR.pin);
+  await page.click('#btn-pin');
+  await expect(page.locator('#all-shipments li')).toHaveCount(1);
+  await expect(page.locator('button[data-act="del"]')).toHaveCount(0);      // no delete permission
+  await expect(page.locator('button[data-act="download"]')).toHaveCount(1); // download is allowed
+  await expect(page.locator('#btn-products')).toBeHidden();                 // no catalog permission
+  await expect(page.locator('#tool-import')).toBeHidden();
+  await expect(page.locator('#tool-export')).toBeVisible();
+  await page.click('button[data-act="view"]');
+  await expect(page.locator('#btn-save-edit')).toBeVisible();               // edit is allowed
+});
+
+test('a PIN typed on the wrong page is redirected to the right one', async ({ page }) => {
+  await page.goto('/manager.html?test=1');
+  await seedUsers(page, [EMP, ADM]);
+  await page.fill('#pin-input', ADM.pin);                    // admin PIN on the manager page
+  await page.click('#btn-pin');
+  await expect(page.locator('#toast')).toContainText('مش من صلاحياتك');
+  await page.waitForURL(/admin\.html/);
+  await expect(page.locator('#screen-admin')).toBeVisible();
+  await expect(page.locator('#danger-tools')).toBeVisible();  // danger permission granted
+
+  await page.click('#btn-logout');
+  await page.goto('/admin.html?test=1');
+  await page.fill('#pin-input', EMP.pin);                     // employee PIN on the admin page
+  await page.click('#btn-pin');
+  await page.waitForURL(/index\.html|\/\?test=1/);
+  await expect(page.locator('#screen-home')).toBeVisible();
+  await expect(page.locator('#who')).toContainText('سيد');
+});
+
+test('the old PINs keep working after users exist', async ({ page }) => {
+  await page.goto('/manager.html?test=1');
+  await seedUsers(page, [EMP]);
+  await page.fill('#pin-input', await page.evaluate(() => window.APP_CONFIG.managerPin));
+  await page.click('#btn-pin');
+  await expect(page.locator('#screen-manager')).toBeVisible();
+  await expect(page.locator('#btn-products')).toBeVisible();   // legacy master PIN keeps every action
+  await expect(page.locator('#tool-import')).toBeVisible();
 });
 
 test("draft survives reload", async ({ page }) => {

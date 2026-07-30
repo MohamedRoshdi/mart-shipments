@@ -24,6 +24,12 @@
     </section>
 
     <section id="screen-admin" hidden>
+      <h2>المستخدمين</h2>
+      <p class="meta">كل مستخدم له رقم سري خاص بيه. لما يكتبه في الرابط الرئيسي، التطبيق
+        بيوديه على طول للشاشة اللي من صلاحيته.</p>
+      <ul id="users-list"></ul>
+      <button id="btn-add-user" class="ghost">+ إضافة مستخدم</button>
+
       <h2>الفروع</h2>
       <ul id="branches-list"></ul>
       <button id="btn-add-branch" class="ghost">+ إضافة فرع</button>
@@ -52,7 +58,7 @@
       <p class="meta">رقم الأدمن المكتوب جوه ملف الإعدادات في الكود بيفضل شغال دايمًا كصمام أمان — يعني لو حد غيّر الأرقام من هنا، لسه بتقدر تدخل بالرقم الأصلي وتصلّح.</p>
 
       <h2>أدوات خطرة</h2>
-      <ul>
+      <ul id="danger-tools">
         <li>
           <div class="card-main">
             <div class="card-title">حذف شحنات بالجملة</div>
@@ -74,6 +80,9 @@
           </div>
         </li>
       </ul>
+
+      <h2>الجلسة</h2>
+      <button id="btn-logout" class="ghost">خروج</button>
 
       <div class="bottombar">
         <span id="cfg-dirty" class="count"></span>

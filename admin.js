@@ -1,4 +1,5 @@
 import * as db from "./db.js";
+import * as auth from "./auth.js";
 
 const $ = (id) => document.getElementById(id);
 const esc = (t) => { const d = document.createElement("div"); d.textContent = t; return d.innerHTML; };
@@ -19,6 +20,7 @@ function toast(msg) {
 const TITLES = { "screen-pin": "النظام", "screen-admin": "إعدادات النظام", "screen-logs": "آخر العمليات" };
 
 let cfg = null;        // working copy of the settings
+let identity = "الأدمن";
 let dirty = false;
 let shipments = [];    // loaded once, for the bulk-delete count
 let shipmentsLoaded = false;
@@ -47,14 +49,39 @@ let cfgReady = null;
 $("btn-pin").onclick = async () => {
   await cfgReady;
   const entered = $("pin-input").value;
-  if (entered !== CODE_ADMIN_PIN && entered !== cfg.adminPin) { toast("الرقم السري غلط"); return; }
+  const who = auth.authenticate(entered, window.APP_CONFIG, CODE_ADMIN_PIN);
+  if (!who) { toast("الرقم السري غلط"); return; }
+  if (!who.perms.includes("adm")) {                 // right PIN, but not for this screen
+    const page = auth.landingPage(who.perms);
+    if (!page) { toast("المستخدم ده مالوش صلاحيات — كلّم الأدمن"); return; }
+    auth.startSession(who.name, who.branch, who.perms, who.user);
+    toast("الصفحة دي مش من صلاحياتك — بنوديك لصفحتك");
+    setTimeout(() => auth.goTo(page), 900);
+    return;
+  }
+  auth.startSession(who.name, who.branch, who.perms, who.user);
   $("pin-input").value = "";
+  await enterAdmin();
+};
+
+async function enterAdmin() {
+  identity = (auth.session() || {}).name || "الأدمن";
   history.replaceState({ screen: "screen-admin" }, "");
   render("screen-admin");
   renderAll();
+  $("danger-tools").hidden = !canDo("danger");
+  $("btn-logout").hidden = !auth.session();
   shipments = await db.listShipments().catch(() => []);
   shipmentsLoaded = true;
   renderBulk();
+}
+
+// no session = the old single-PIN admin, where everything was allowed
+const canDo = (perm) => !auth.session() || auth.can(perm);
+
+$("btn-logout").onclick = () => {
+  auth.endSession();
+  location.reload();
 };
 
 
@@ -64,12 +91,70 @@ function markDirty() {
 }
 
 function renderAll() {
+  renderUsers();
   renderBranches();
   renderTypes();
   $("cfg-manager-pin").value = cfg.managerPin;
   $("cfg-admin-pin").value = cfg.adminPin;
   renderBulk();
 }
+
+// one card per user: name, PIN, branch, and a tick for every screen and every action
+function renderUsers() {
+  const branchOpts = ["", ...cfg.branches.map(b => b.name)];
+  $("users-list").innerHTML = cfg.users.map((u, i) => `<li class="user-card">
+      <div class="card-main">
+        <input type="text" maxlength="40" data-uname="${i}" value="${escAttr(u.name)}" placeholder="اسم المستخدم">
+        <div class="user-row">
+          <input type="text" inputmode="numeric" maxlength="8" dir="ltr" data-upin="${i}" value="${escAttr(u.pin)}" placeholder="الرقم السري">
+          <button class="del" data-deluser="${i}" aria-label="حذف المستخدم">×</button>
+        </div>
+      </div>
+      <div class="seg" data-ubranch="${i}">
+        ${branchOpts.map(b => `<button type="button" data-branchpick="${escAttr(b)}" aria-pressed="${(u.branch || "") === b}">${esc(b || "كل الفروع")}</button>`).join("")}
+      </div>
+      <div class="perm-grid" data-uperms="${i}">
+        ${auth.PERMS.map(p => `<button type="button" data-perm="${p.id}" aria-pressed="${(u.perms || []).includes(p.id)}">${esc(p.label)}</button>`).join("")}
+      </div>
+    </li>`).join("") || `<li class="empty">مفيش مستخدمين — التطبيق شغال بالأرقام القديمة لحد ما تضيف أول واحد</li>`;
+}
+
+$("users-list").onclick = (e) => {
+  const del = e.target.closest("button[data-deluser]");
+  if (del) {
+    readInputs();
+    const gone = cfg.users.splice(+del.dataset.deluser, 1)[0];
+    renderUsers();
+    markDirty();
+    toast(`اتشال «${gone.name || "مستخدم"}»`);
+    return;
+  }
+  const perm = e.target.closest("button[data-perm]");
+  if (perm) {
+    readInputs();
+    const i = +perm.closest("[data-uperms]").dataset.uperms;
+    const list = cfg.users[i].perms || (cfg.users[i].perms = []);
+    const at = list.indexOf(perm.dataset.perm);
+    if (at >= 0) list.splice(at, 1); else list.push(perm.dataset.perm);
+    renderUsers();
+    markDirty();
+    return;
+  }
+  const branch = e.target.closest("button[data-branchpick]");
+  if (branch) {
+    readInputs();
+    cfg.users[+branch.closest("[data-ubranch]").dataset.ubranch].branch = branch.dataset.branchpick;
+    renderUsers();
+    markDirty();
+  }
+};
+
+$("btn-add-user").onclick = () => {
+  readInputs();
+  cfg.users.push({ name: "مستخدم جديد", pin: "", branch: cfg.branches[0] ? cfg.branches[0].name : "", perms: ["emp", "create"] });
+  renderUsers();
+  markDirty();
+};
 
 // inputs are read on save, not on every keystroke: re-rendering a row would eat the focus
 function renderBranches() {
@@ -93,6 +178,8 @@ function renderTypes() {
 }
 
 function readInputs() {
+  document.querySelectorAll("input[data-uname]").forEach(inp => cfg.users[+inp.dataset.uname].name = inp.value.trim());
+  document.querySelectorAll("input[data-upin]").forEach(inp => cfg.users[+inp.dataset.upin].pin = inp.value.trim());
   document.querySelectorAll("input[data-bname]").forEach(inp => cfg.branches[+inp.dataset.bname].name = inp.value.trim());
   document.querySelectorAll("input[data-bpin]").forEach(inp => cfg.branches[+inp.dataset.bpin].pin = inp.value.trim());
   document.querySelectorAll("input[data-tname]").forEach(inp => cfg.shipmentTypes[+inp.dataset.tname] = inp.value.trim());
@@ -151,11 +238,26 @@ $("btn-save-config").onclick = async () => {
   const names = cfg.branches.map(b => b.name);
   if (new Set(names).size !== names.length) { toast("في اسم فرع متكرر"); return; }
 
+  // a repeated PIN would silently hand one person another person's screens
+  if (cfg.users.some(u => !u.name)) { toast("في مستخدم من غير اسم"); return; }
+  if (cfg.users.some(u => !isPin(u.pin))) { toast("رقم المستخدم لازم يكون من 4 لـ 8 أرقام"); return; }
+  if (cfg.users.some(u => !(u.perms || []).some(p => auth.SCREEN_PERMS.includes(p)))) {
+    toast("كل مستخدم لازم يفتح شاشة واحدة على الأقل");
+    return;
+  }
+  if (cfg.users.some(u => u.perms.includes("emp") && !u.branch)) {
+    toast("موظف الشحنات لازم يكون على فرع محدد");
+    return;
+  }
+  const pins = [...cfg.users.map(u => u.pin), ...cfg.branches.map(b => b.pin), cfg.managerPin, cfg.adminPin];
+  if (new Set(pins).size !== pins.length) { toast("في رقم سري متكرر — كل واحد لازم يكون لوحده"); return; }
+
   const payload = {
     managerPin: cfg.managerPin,
     adminPin: cfg.adminPin,
     branches: cfg.branches.map(b => ({ name: b.name, pin: b.pin })),
     shipmentTypes: cfg.shipmentTypes.filter(Boolean),
+    users: cfg.users.map(u => ({ name: u.name, pin: u.pin, branch: u.branch || "", perms: u.perms.slice() })),
   };
   try {
     await db.saveConfig(payload);
@@ -165,7 +267,7 @@ $("btn-save-config").onclick = async () => {
     return;
   }
   Object.assign(window.APP_CONFIG, payload);
-  db.logAction("الأدمن", "تغيير الإعدادات", `${payload.branches.length} فرع · ${payload.shipmentTypes.length} نوع`);
+  db.logAction(identity, "تغيير الإعدادات", `${payload.users.length} مستخدم · ${payload.branches.length} فرع · ${payload.shipmentTypes.length} نوع`);
   dirty = false;
   $("cfg-dirty").textContent = "";
   renderAll();
@@ -219,7 +321,7 @@ $("btn-bulk-delete").onclick = async () => {
     toast("الحذف ما نفعش — جرّب تاني");
     return;
   }
-  db.logAction("الأدمن", "حذف شحنات بالجملة", `${hit.length} شحنة · ${bulkBranch} · ${bulkType}`);
+  db.logAction(identity,"حذف شحنات بالجملة", `${hit.length} شحنة · ${bulkBranch} · ${bulkType}`);
   shipments = await db.listShipments().catch(() => []);
   renderBulk();
   toast(`تم حذف ${hit.length} شحنة`);
@@ -237,7 +339,7 @@ $("btn-wipe-products").onclick = async () => {
     toast("المسح ما نفعش — جرّب تاني");
     return;
   }
-  db.logAction("الأدمن", "مسح ملف الأصناف", `${rows.length} صنف`);
+  db.logAction(identity,"مسح ملف الأصناف", `${rows.length} صنف`);
   toast(`تم مسح ${rows.length} صنف`);
 };
 
@@ -290,7 +392,13 @@ cfgReady = (async () => {
     adminPin: window.APP_CONFIG.adminPin,
     branches: window.APP_CONFIG.branches.map(b => ({ ...b })),
     shipmentTypes: [...window.APP_CONFIG.shipmentTypes],
+    users: (window.APP_CONFIG.users || []).map(u => ({ ...u, perms: (u.perms || []).slice() })),
   };
+  const s = auth.session();
+  if (!s) return;
+  if (s.perms.includes("adm")) { await enterAdmin(); return; }   // already signed in elsewhere
+  const page = auth.landingPage(s.perms);
+  if (page && page !== "admin.html") auth.goTo(page);
 })();
 
 if ("serviceWorker" in navigator && !new URLSearchParams(location.search).has("test")) {

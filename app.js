@@ -1,4 +1,5 @@
 import * as db from "./db.js";
+import * as auth from "./auth.js";
 
 const $ = (id) => document.getElementById(id);
 const esc = (t) => { const d = document.createElement("div"); d.textContent = t; return d.innerHTML; };
@@ -16,6 +17,7 @@ function toast(msg) {
 }
 
 const TITLES = {
+  "screen-login": "دخول",
   "screen-name": "بيانات الموظف",
   "screen-home": "شحناتي",
   "screen-new": "شحنة جديدة",
@@ -35,10 +37,11 @@ function render(id) {
   document.querySelectorAll("main > section").forEach(s => s.hidden = true);
   $(id).hidden = false;
   $("screen-title").textContent = TITLES[id] || "شحنات المحل";
-  $("btn-back").hidden = id === "screen-home" || (id === "screen-name" && !myName());
+  $("btn-back").hidden = id === "screen-home" || id === "screen-login" || (id === "screen-name" && !myName());
   $("btn-cam").hidden = !(id === "screen-home" || id === "screen-new");
   $("who").hidden = !myName() || id !== "screen-home";
   if (myName()) $("who").textContent = `${myName()} · ${myBranch()}`;
+  if (id === "screen-home") renderHomeLinks();
   hideSheet();
   scrollTo(0, 0);
 }
@@ -60,9 +63,32 @@ async function goHome() {
         <div class="card-title">${esc(s.name)}</div>
         <div class="meta">${esc(s.type || "")} · ${esc(s.branch || "")} · ${fmtDate(s.createdAt)} · ${s.items.length} صنف</div>
       </div>
-      <button class="ghost" data-edit="${i}">تعديل</button>
+      ${canDo("edit") ? `<button class="ghost" data-edit="${i}">تعديل</button>` : ""}
     </li>`).join("") || `<li class="empty">لسه مفيش شحنات — ابدأ بـ «شحنة جديدة»</li>`;
 }
+
+// no session at all = the old single-PIN setup, where everything was allowed
+const canDo = (perm) => !auth.session() || auth.can(perm);
+
+function renderHomeLinks() {
+  const s = auth.session();
+  $("home-links").hidden = !s;
+  $("link-manager").hidden = !(s && s.perms.includes("mgr"));
+  $("link-admin").hidden = !(s && s.perms.includes("adm"));
+  $("link-manager").href = auth.withQuery("manager.html");   // keep ?test=1 across pages
+  $("link-admin").href = auth.withQuery("admin.html");
+  $("btn-logout").hidden = !s;
+  $("btn-new").hidden = !canDo("create");
+  $("who").disabled = !!s;                 // a signed-in user changes their name from the admin page
+}
+
+$("btn-logout").onclick = () => {
+  auth.endSession();
+  localStorage.removeItem("employeeName");
+  history.replaceState({ screen: "screen-login" }, "");
+  $("login-pin").value = "";
+  render("screen-login");
+};
 
 addEventListener("popstate", (ev) => {
   const id = (ev.state && ev.state.screen) || "screen-home";
@@ -86,6 +112,43 @@ $("branch-picker").onclick = (e) => {
   if (!btn) return;
   state.branch = btn.dataset.branch;
   renderBranchPicker();
+};
+
+const CODE_ADMIN_PIN = window.APP_CONFIG.adminPin;   // captured before the stored config wins
+
+function enterEmployee(name, branch) {
+  localStorage.setItem("employeeName", name);
+  if (branch) localStorage.setItem("employeeBranch", branch);
+  state.branch = myBranch();
+  history.replaceState({ screen: "screen-home" }, "");
+  goHome();
+}
+
+// one PIN box for everybody: it sends each user to the page their permissions allow
+$("btn-login").onclick = async () => {
+  await cfgReady;
+  const pin = $("login-pin").value.trim();
+  const cfg = window.APP_CONFIG;
+  const who = auth.authenticate(pin, cfg, CODE_ADMIN_PIN);
+  if (!who) { toast("الرقم السري غلط"); return; }
+  if (who.branchPin) {                       // a branch PIN is still the old employee setup
+    state.branch = who.branch;
+    renderBranchPicker();
+    $("login-pin").value = "";
+    navTo("screen-name");
+    toast("اكتب اسمك عشان نكمّل");
+    return;
+  }
+  if (!who.perms.length) { toast("المستخدم ده مالوش صلاحيات — كلّم الأدمن"); return; }
+  auth.startSession(who.name, who.branch, who.perms, who.user);
+  $("login-pin").value = "";
+  if (who.perms.includes("emp")) {
+    enterEmployee(who.name, who.branch || branches()[0].name);
+    return;
+  }
+  const page = auth.landingPage(who.perms);
+  if (!page) { toast("المستخدم ده مالوش شاشة يفتحها — كلّم الأدمن"); return; }
+  auth.goTo(page);                           // manager or admin, per their permissions
 };
 
 $("save-name").onclick = () => {
@@ -241,6 +304,7 @@ $("btn-save-shipment").onclick = async () => {
   const name = $("shipment-name").value.trim();
   if (!name) { toast("اكتب اسم الشحنة الأول"); return; }
   const editing = state.editingId;
+  if (!canDo(editing ? "edit" : "create")) { toast("مالكش صلاحية للخطوة دي — كلّم الأدمن"); return; }
   try {
     if (editing) await db.updateShipment(editing, { name, items: state.items, type: state.type });
     else await db.saveShipment({ name, createdBy: myName(), branch: myBranch(), type: state.type, items: state.items });
@@ -421,6 +485,7 @@ function beep() {
 /* ---------- keyboard: Enter does the obvious thing for the focused field ---------- */
 
 const ENTER = {
+  "login-pin": "btn-login",
   "employee-name": "save-name",
   "branch-pin": "save-name",
   "barcode-input": "btn-lookup",
@@ -448,18 +513,36 @@ function updateSync() {
 addEventListener("online", updateSync);
 addEventListener("offline", updateSync);
 
-(async () => {
+let cfgReady = null;
+
+cfgReady = (async () => {
   const ok = await db.initDb().then(() => true).catch((e) => { console.error(e); return false; });
   dbBroken = !ok;
   updateSync();
-  // branches, PINs and types the admin edited win over the ones shipped in the code
+  // branches, PINs, types and users the admin edited win over the ones shipped in the code
   Object.assign(window.APP_CONFIG, await db.getConfig().catch(() => ({})));
   state.branch = myBranch();
   if (!types().includes(state.type)) state.type = types()[0];
   renderBranchPicker();
-  if (myName()) {
+
+  const s = auth.session();
+  const usersExist = (window.APP_CONFIG.users || []).length > 0;
+  if (s && s.user && s.perms.includes("emp") && !myName()) {
+    // signed in on another page and sent here: don't ask for the PIN a second time
+    localStorage.setItem("employeeName", s.name);
+    if (s.branch) localStorage.setItem("employeeBranch", s.branch);
+    state.branch = myBranch();
+  }
+  if (s && !s.perms.includes("emp")) {          // signed in, but this is not their screen
+    const page = auth.landingPage(s.perms);
+    if (page && page !== "index.html") { auth.goTo(page); return; }
+  }
+  if ((s || !usersExist) && myName()) {
     history.replaceState({ screen: "screen-home" }, "");
     goHome();
+  } else if (usersExist) {                      // users configured → the PIN decides who you are
+    history.replaceState({ screen: "screen-login" }, "");
+    render("screen-login");
   } else {
     history.replaceState({ screen: "screen-name" }, "");
     render("screen-name");

@@ -29,7 +29,9 @@ service cloud.firestore {
     match /config/{doc} {
       allow read: if true;
       allow write: if doc == 'app'
-        && request.resource.data.keys().hasOnly(['managerPin', 'adminPin', 'branches', 'shipmentTypes'])
+        && request.resource.data.keys().hasOnly(['managerPin', 'adminPin', 'branches', 'shipmentTypes', 'users'])
+        && (!('users' in request.resource.data)
+            || (request.resource.data.users is list && request.resource.data.users.size() <= 40))
         && request.resource.data.managerPin is string && request.resource.data.managerPin.size() <= 8
         && request.resource.data.adminPin is string && request.resource.data.adminPin.size() <= 8
         && request.resource.data.branches is list && request.resource.data.branches.size() <= 10

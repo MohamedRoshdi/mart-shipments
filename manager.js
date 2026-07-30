@@ -1,4 +1,5 @@
 import * as db from "./db.js";
+import * as auth from "./auth.js";
 import { zipBlob } from "./zip.js";
 
 const $ = (id) => document.getElementById(id);
@@ -43,7 +44,7 @@ function render(id) {
   $(id).hidden = false;
   $("screen-title").textContent = TITLES[id] || "شاشة المدير";
   $("btn-back").hidden = !DEEP.includes(id);
-  $("btn-products").hidden = id !== "screen-manager";   // one tap from the shipments list, no scrolling
+  $("btn-products").hidden = id !== "screen-manager" || !canDo("products");   // one tap from the list, no scrolling
   scrollTo(0, 0);
 }
 
@@ -58,21 +59,49 @@ $("btn-back").onclick = () => history.back();
 
 $("btn-pin").onclick = async () => {
   await cfgReady;                                          // the admin's settings win over the shipped ones
-  const cfg = window.APP_CONFIG;
   const entered = $("pin-input").value;
-  const branch = cfg.branches.find(b => b.pin === entered);
-  const admin = entered === cfg.adminPin || entered === CODE_ADMIN_PIN;
-  if (admin || entered === cfg.managerPin) {               // master: every branch
-    scope = null;
-    identity = admin ? "الأدمن" : "المدير العام";
-  } else if (branch) {                                     // branch manager: their branch only
-    scope = branch.name;
-    identity = branch.name;
-  } else { toast("الرقم السري غلط"); return; }
-  filter = scope || ALL;
+  const who = auth.authenticate(entered, window.APP_CONFIG, CODE_ADMIN_PIN);
+  if (!who) { toast("الرقم السري غلط"); return; }
+  if (!who.perms.includes("mgr")) {                        // right PIN, wrong screen → send them home
+    const page = auth.landingPage(who.perms);
+    if (!page) { toast("المستخدم ده مالوش صلاحيات — كلّم الأدمن"); return; }
+    auth.startSession(who.name, who.branch, who.perms, who.user);
+    toast("الصفحة دي مش من صلاحياتك — بنوديك لصفحتك");
+    setTimeout(() => auth.goTo(page), 900);
+    return;
+  }
+  auth.startSession(who.name, who.branch, who.perms, who.user);
   $("pin-input").value = "";
+  enterManager();
+};
+
+function enterManager() {
+  const s = auth.session();
+  scope = (s && s.branch) || null;                         // a branch user never loads another branch
+  identity = (s && s.name) || "مدير";
+  filter = scope || ALL;
+  applyPerms();
   history.replaceState({ screen: "screen-manager" }, "");
   openManager();
+}
+
+// no session = the old single-PIN manager, where everything was allowed
+const canDo = (perm) => !auth.session() || auth.can(perm);
+
+function applyPerms() {
+  $("tool-import").hidden = !canDo("import");
+  $("tool-export").hidden = !canDo("download");
+  $("tool-admin").hidden = !canDo("adm");
+  $("btn-save-edit").hidden = !canDo("edit");
+  $("detail-exports").hidden = !canDo("download");
+  $("btn-export-products").hidden = !canDo("download");
+  $("tool-logout").hidden = !auth.session();
+  $("link-admin-page").href = auth.withQuery("admin.html");   // keep ?test=1 across pages
+}
+
+$("btn-logout").onclick = () => {
+  auth.endSession();
+  location.reload();
 };
 
 /* ---------- shipment list ---------- */
@@ -127,10 +156,10 @@ function renderList() {
       </div>
       <div class="row-actions">
         <button data-act="view" data-i="${i}">عرض</button>
-        <button data-act="copy" data-i="${i}">نسخ</button>
+        ${canDo("download") ? `<button data-act="copy" data-i="${i}">نسخ</button>
         <button data-act="download" data-i="${i}">Excel</button>
-        <button data-act="txt" data-i="${i}">TXT</button>
-        <button data-act="del" data-i="${i}" class="danger">حذف</button>
+        <button data-act="txt" data-i="${i}">TXT</button>` : ""}
+        ${canDo("del") ? `<button data-act="del" data-i="${i}" class="danger">حذف</button>` : ""}
       </div>
     </li>`).join("") || `<li class="empty">مفيش شحنات في الفرع ده</li>`;
 }
@@ -269,8 +298,8 @@ $("detail-type").onclick = (e) => {
 function renderDetailItems() {
   $("detail-items").innerHTML = current.items.map((i, idx) => `<tr>
       <td><div>${esc(i.name || "بدون اسم")}</div><div class="code">${esc(i.barcode)}</div></td>
-      <td><input class="qty-cell" type="number" min="1" dir="ltr" data-qty="${idx}" value="${Number(i.qty) || 1}"></td>
-      <td><button class="del" data-delitem="${idx}" aria-label="حذف الصنف">×</button></td>
+      <td><input class="qty-cell" type="number" min="1" dir="ltr" data-qty="${idx}" value="${Number(i.qty) || 1}" ${canDo("edit") ? "" : "readonly"}></td>
+      <td>${canDo("edit") ? `<button class="del" data-delitem="${idx}" aria-label="حذف الصنف">×</button>` : ""}</td>
     </tr>`).join("") || `<tr><td>مفيش أصناف</td></tr>`;
 }
 
@@ -486,4 +515,9 @@ if ("serviceWorker" in navigator && !new URLSearchParams(location.search).has("t
 cfgReady = (async () => {
   await db.initDb().catch(console.error);
   Object.assign(window.APP_CONFIG, await db.getConfig().catch(() => ({})));
+  const s = auth.session();
+  if (!s) return;
+  if (s.perms.includes("mgr")) { enterManager(); return; }   // already signed in on another page
+  const page = auth.landingPage(s.perms);
+  if (page && page !== "manager.html") auth.goTo(page);
 })();

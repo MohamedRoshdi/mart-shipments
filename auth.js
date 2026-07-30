@@ -1,0 +1,75 @@
+// Who is signed in and what they may do. Shared by all three pages so the permission
+// list exists in exactly one place. These are UI gates, not security — Firestore has no
+// auth and the rules only validate shape (see CLAUDE.md).
+
+export const PERMS = [
+  { id: "emp", label: "شاشة الموظف" },
+  { id: "mgr", label: "شاشة المدير" },
+  { id: "adm", label: "شاشة النظام" },
+  { id: "create", label: "إنشاء شحنة" },
+  { id: "edit", label: "تعديل الشحنات" },
+  { id: "del", label: "حذف الشحنات" },
+  { id: "download", label: "تحميل الملفات" },
+  { id: "products", label: "إدارة الأصناف" },
+  { id: "import", label: "استيراد الأصناف" },
+  { id: "danger", label: "الأدوات الخطرة" },
+];
+
+export const ALL_PERMS = PERMS.map((p) => p.id);
+export const SCREEN_PERMS = ["emp", "mgr", "adm"];
+
+const KEY = "session";
+const MAX_AGE = 12 * 60 * 60 * 1000;   // one shift; after that the PIN is asked again
+
+export function session() {
+  let s = null;
+  try { s = JSON.parse(localStorage.getItem(KEY) || "null"); } catch (e) { console.error(e); }
+  if (!s || !Array.isArray(s.perms) || Date.now() - s.at > MAX_AGE) {
+    if (s) localStorage.removeItem(KEY);
+    return null;
+  }
+  return s;
+}
+
+// isUser marks a real account from the admin's users list, as opposed to one of the legacy
+// PINs — only a named account may put its own name on shipments without being asked
+export function startSession(name, branch, perms, isUser) {
+  localStorage.setItem(KEY, JSON.stringify({ name, branch: branch || "", perms, user: !!isUser, at: Date.now() }));
+}
+
+export const endSession = () => localStorage.removeItem(KEY);
+
+export function can(perm) {
+  const s = session();
+  return !!s && s.perms.includes(perm);
+}
+
+// PIN → identity. Users the admin created win; the PINs shipped in the code and the branch
+// PINs keep working, so a wrong users list can never lock the shop out of its own data.
+export function authenticate(pin, cfg, codeAdminPin) {
+  const user = (cfg.users || []).find((u) => u.pin === pin);
+  if (user) return { name: user.name, branch: user.branch || "", perms: (user.perms || []).slice(), user: true };
+  if (pin && (pin === cfg.adminPin || pin === codeAdminPin)) {
+    return { name: "الأدمن", branch: "", perms: ALL_PERMS.slice() };
+  }
+  if (pin && pin === cfg.managerPin) {
+    return { name: "المدير العام", branch: "", perms: ALL_PERMS.filter((p) => p !== "adm") };
+  }
+  const branch = (cfg.branches || []).find((b) => b.pin === pin);
+  if (branch) {
+    return { name: `مدير ${branch.name}`, branch: branch.name, perms: ALL_PERMS.filter((p) => p !== "adm"), branchPin: true };
+  }
+  return null;
+}
+
+// keep the query string across pages, otherwise ?test=1 (and anything after it) is lost
+export const withQuery = (page) => page + location.search;
+export const goTo = (page) => { location.href = withQuery(page); };
+
+// where a set of permissions is allowed to land, most specific screen first
+export function landingPage(perms) {
+  if (perms.includes("emp")) return "index.html";
+  if (perms.includes("mgr")) return "manager.html";
+  if (perms.includes("adm")) return "admin.html";
+  return null;
+}
