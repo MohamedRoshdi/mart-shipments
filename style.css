@@ -161,6 +161,7 @@ li.empty {
 .card-main { flex: 1; min-inline-size: 0; display: grid; gap: 3px; }
 .card-title { font-weight: 700; }
 .row-actions { display: flex; gap: 8px; flex-wrap: wrap; inline-size: 100%; }
+.row-actions button.primary { background: var(--amber); }   /* must beat the plain rule below */
 .row-actions button, .row-actions a {
   flex: 1;
   min-inline-size: 68px;

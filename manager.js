@@ -36,6 +36,7 @@ function render(id) {
   $(id).hidden = false;
   $("screen-title").textContent = TITLES[id] || "شاشة المدير";
   $("btn-back").hidden = !DEEP.includes(id);
+  $("btn-products").hidden = id !== "screen-manager";   // one tap from the shipments list, no scrolling
   scrollTo(0, 0);
 }
 
@@ -412,6 +413,19 @@ $("import-file").onchange = async (e) => {
   }
   e.target.value = "";
 };
+
+/* ---------- keyboard: Enter does the obvious thing for the focused field ---------- */
+
+const ENTER = { "pin-input": "btn-pin", "detail-name": "btn-save-edit" };
+
+addEventListener("keydown", (e) => {
+  if (e.key !== "Enter") return;
+  const btn = ENTER[e.target.id];
+  if (!btn) return;
+  e.preventDefault();
+  e.target.blur();          // closes the phone keyboard before the screen changes
+  $(btn).click();
+});
 
 /* ---------- boot ---------- */
 

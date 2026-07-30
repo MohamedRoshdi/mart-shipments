@@ -277,6 +277,24 @@ function beep() {
   } catch (e) { console.error(e); }
 }
 
+/* ---------- keyboard: Enter does the obvious thing for the focused field ---------- */
+
+const ENTER = {
+  "employee-name": "save-name",
+  "branch-pin": "save-name",
+  "barcode-input": "btn-lookup",
+  "item-qty": "btn-add-item",
+};
+
+addEventListener("keydown", (e) => {
+  if (e.key !== "Enter") return;
+  const btn = ENTER[e.target.id];
+  if (!btn) return;
+  e.preventDefault();
+  e.target.blur();          // closes the phone keyboard before the screen changes
+  $(btn).click();
+});
+
 /* ---------- boot ---------- */
 
 addEventListener("db-error", () => toast("مشكلة في مزامنة البيانات — اتأكد من الاتصال والإعدادات"));

@@ -189,6 +189,27 @@ test('branch: picked at setup, stamped on shipment, filters manager list', async
   await expect(page.locator('#all-shipments li')).toContainText('شحنة شبين');
 });
 
+test('Enter key submits: manager PIN, employee setup, barcode lookup', async ({ page }) => {
+  await page.goto('/manager.html?test=1');
+  await page.fill('#pin-input', await page.evaluate(() => window.APP_CONFIG.managerPin));
+  await page.press('#pin-input', 'Enter');                     // no button tap
+  await expect(page.locator('#screen-manager')).toBeVisible();
+
+  await page.goto('/?test=1');
+  const b = (await page.evaluate(() => window.APP_CONFIG.branches))[0];
+  await page.fill('#employee-name', 'أحمد');
+  await page.fill('#branch-pin', b.pin);
+  await page.press('#branch-pin', 'Enter');
+  await expect(page.locator('#screen-home')).toBeVisible();
+
+  await page.click('#btn-new');
+  await page.fill('#barcode-input', '111');
+  await page.press('#barcode-input', 'Enter');                 // opens the item sheet
+  await expect(page.locator('#item-form')).toBeVisible();
+  await page.press('#item-qty', 'Enter');                      // adds the item
+  await expect(page.locator('#items-list li:not(.empty)')).toHaveCount(1);
+});
+
 test('shipment type: picked under the branch, saved, filtered and editable', async ({ page }) => {
   await page.goto('/?test=1');
   const [t1, t2, t3] = await page.evaluate(() => window.APP_CONFIG.shipmentTypes);
@@ -297,7 +318,9 @@ test('catalog screen: list, search, rename, delete, export', async ({ page }) =>
   })));
   await page.fill('#pin-input', await page.evaluate(() => window.APP_CONFIG.managerPin));
   await page.click('#btn-pin');
+  await expect(page.locator('#btn-products')).toBeVisible();   // reachable without scrolling
   await page.click('#btn-products');
+  await expect(page.locator('#btn-products')).toBeHidden();     // not offered while already there
   await expect(page.locator('#products-list li')).toHaveCount(3);
   await expect(page.locator('#products-count')).toHaveText('3 صنف');
 

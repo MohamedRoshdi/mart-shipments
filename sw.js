@@ -1,5 +1,5 @@
 // bump CACHE version on every deploy - cache-first serving keeps old assets until the name changes
-const CACHE = "mart-v11";
+const CACHE = "mart-v12";
 const ASSETS = ["./", "index.html", "style.css", "app.js", "db.js", "firebase-config.js",
   "manager.html", "manager.js", "manifest-manager.json", "products-template.csv",
   "manifest.json", "vendor/html5-qrcode.min.js", "icon-192.png", "icon-512.png"];
