@@ -26,11 +26,17 @@ const liveTracks = () => page.evaluate(() => performance.now() >= 0
   && [...document.querySelectorAll("#reader video")].length);
 
 await page.goto(BASE + "/", { waitUntil: "load" });
-const branch = await page.evaluate(() => window.APP_CONFIG.branches[0]);
-await page.fill("#employee-name", "فحص كاميرا");
-await page.fill("#branch-pin", branch.pin);
-await page.press("#branch-pin", "Enter");
-await page.waitForSelector("#screen-home:not([hidden])");
+await page.waitForTimeout(2500);                 // the stored settings decide which screen opens
+if (await page.locator("#screen-login:not([hidden])").count()) {
+  await page.fill("#login-pin", "1994");         // users exist on production: one PIN box for everyone
+  await page.click("#btn-login");
+} else if (await page.locator("#screen-name:not([hidden])").count()) {
+  const branch = await page.evaluate(() => window.APP_CONFIG.branches[0]);
+  await page.fill("#employee-name", "فحص كاميرا");
+  await page.fill("#branch-pin", branch.pin);
+  await page.press("#branch-pin", "Enter");
+}
+await page.waitForSelector("#screen-home:not([hidden])", { timeout: 20000 });
 
 /* ---- the settings screen sees the camera ---- */
 await page.tap("#btn-cam");
@@ -47,33 +53,46 @@ log("2. picked a real camera id:", JSON.stringify(await page.evaluate(() => JSON
 
 await page.tap('#box-picker button[data-box="large"]');
 await page.fill("#cam-zoom", "2");
+await page.tap('#res-picker button[data-res="auto"]');       // whatever the browser hands out
 log("3. saved settings:", JSON.stringify(await page.evaluate(() => JSON.parse(localStorage.getItem("camSettings")))));
 
-/* ---- the scanner actually opens that camera ---- */
+/* ---- the scanner actually opens that camera, at the resolution that was asked for ---- */
 await page.goBack();
 await page.waitForSelector("#screen-home:not([hidden])");
 await page.tap("#btn-new");
 await page.tap("#btn-scan");
 await page.waitForSelector("#reader video", { timeout: 20000 });
 await page.waitForTimeout(2500);
-log("4. video running:", JSON.stringify(await videoState()));
-log("5. torch/zoom bar shown (fake device has no capabilities):", await page.locator("#cam-live").isVisible());
+log("4. video running on the browser default:", JSON.stringify(await videoState()));
+log("5. resolution readout:", await page.locator("#cam-res").innerText());
 await page.screenshot({ path: `${OUT}/cam-2-scanning.png` });
+
+// the setting has to reach the stream, otherwise a small barcode stays unreadable
+await page.tap("#btn-scan");                                 // stop
+await page.tap("#btn-cam");
+await page.waitForSelector("#screen-cam:not([hidden])");
+await page.tap('#res-picker button[data-res="fhd"]');
+await page.goBack();
+await page.waitForSelector("#screen-new:not([hidden])");
+await page.tap("#btn-scan");
+await page.waitForSelector("#reader video", { timeout: 20000 });
+await page.waitForTimeout(2500);
+log("6. video running on «أعلى»:", JSON.stringify(await videoState()), "| readout:", await page.locator("#cam-res").innerText());
 
 /* ---- leaving the screen releases the camera ---- */
 await page.tap("#btn-cam");
 await page.waitForSelector("#screen-cam:not([hidden])");
-log("6. camera released on leaving:", (await liveTracks()) === 0, "| reader hidden:", await page.locator("#reader").isHidden());
+log("7. camera released on leaving:", (await liveTracks()) === 0, "| reader hidden:", await page.locator("#reader").isHidden());
 
 /* ---- a saved camera that no longer exists falls back instead of dying ---- */
-await page.evaluate(() => localStorage.setItem("camSettings", JSON.stringify({ deviceId: "ghost-camera", box: "med", torch: false, zoom: 1 })));
+await page.evaluate(() => localStorage.setItem("camSettings", JSON.stringify({ deviceId: "ghost-camera", box: "med", torch: false, zoom: 1, res: "hd", focus: true })));
 await page.goBack();                                    // back from the settings lands on the shipment screen
 await page.waitForSelector("#screen-new:not([hidden])");
 await page.tap("#btn-scan");
 await page.waitForSelector("#reader video", { timeout: 20000 });
 await page.waitForTimeout(1500);
-log("7. fallback toast:", await page.locator("#toast").innerText());
-log("8. scanning anyway:", JSON.stringify(await videoState()),
+log("8. fallback toast:", await page.locator("#toast").innerText());
+log("9. scanning anyway:", JSON.stringify(await videoState()),
   "| saved id reset:", await page.evaluate(() => JSON.parse(localStorage.getItem("camSettings")).deviceId) === "");
 
 await browser.close();

@@ -1,9 +1,9 @@
 # mart-shipments — working notes for Claude
 
-Shipment-intake PWA for a two-branch Egyptian supermarket. Employees scan barcodes
-into a shipment on their phones; a manager page reviews, edits, exports and manages
-the product catalog; an admin page owns the settings, the audit trail and the
-destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
+Shipment-intake PWA for a two-branch Egyptian supermarket. Employees scan barcodes into a
+shipment on their phones, or count a shelf against the quantity the shop's system says
+(الجرد); a manager page reviews, edits, exports and manages the product catalog; an admin
+page owns the settings, the audit trail and the destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 
 ## Hard rules for this repo
 
@@ -21,7 +21,7 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 5. **`db.js` is the only file that knows where data lives.** `app.js` and
    `manager.js` never touch Firestore or localStorage keys directly.
 6. **Bump `CACHE` in `sw.js` on every deploy.** Serving is cache-first, so phones
-   keep the old bundle until the cache name changes. Currently `mart-v18`.
+   keep the old bundle until the cache name changes. Currently `mart-v19`.
 7. **Deploy = push to master.** GitHub Pages serves the repo root. Firestore rules
    deploy separately: `npx firebase deploy --only firestore:rules --project shipments-alaela-mart`.
 
@@ -29,8 +29,8 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 
 | File | Role |
 |---|---|
-| `index.html` / `app.js` | employee app: setup, home, new/edit shipment, camera, item sheet |
-| `manager.html` / `manager.js` | manager app: PIN, shipment list, shipment edit, catalog screen, import/export |
+| `index.html` / `app.js` | employee app: setup, home, new/edit shipment **or stocktake**, camera, item sheet |
+| `manager.html` / `manager.js` | manager app: PIN, shipments tab, stocktake tab, edit, catalog screen, import/export |
 | `admin.html` / `admin.js` | admin app: users + permissions, settings (branches, PINs, types), audit trail, bulk delete, catalog wipe |
 | `auth.js` | permission list, PIN → identity, the 12-hour session shared by all three pages |
 | `db.js` | data layer; `?test=1` switches the whole app to localStorage |
@@ -40,7 +40,8 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 | `firebase-config.js` | Firebase keys **plus** `APP_CONFIG`: PINs (incl. `adminPin`), branches, shipment types |
 | `firestore.rules` | shape validation; the only server-side guard that exists |
 | `SETUP.md` | Arabic guide for the shop owner |
-| `tests/app.spec.js` | 37 Playwright tests, all in localStorage mode |
+| `products-template.csv`, `stock-template.csv` | the two import shapes: barcode+name, and barcode+name+quantity |
+| `tests/app.spec.js` | 43 Playwright tests, all in localStorage mode |
 | `scripts/*.mjs` | live checks and screenshot helpers (see below) |
 
 ## Data model
@@ -48,7 +49,16 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 `shipments/{auto}` — `name`, `createdBy`, `createdAt` (epoch ms), `branch`, `type`,
 `items: [{barcode, name, qty}]`.
 
-`products/{barcode}` — `{ name }`. The barcode **is** the document id.
+`counts/{auto}` — a stocktake (جرد): `name`, `createdBy`, `createdAt`, `branch`,
+`items: [{barcode, name, qty, sys}]`. `qty` is what the employee counted on the shelf,
+`sys` what the imported sheet says the system holds. **`sys` is absent when the sheet never
+listed that product** — writing 0 would claim the system said zero. No `type`: a count is
+not a kind of shipment.
+
+`products/{barcode}` — `{ name, qty? }`. The barcode **is** the document id. `qty` is the
+system quantity a stocktake compares against; it arrives with the stocktake sheet import and
+is absent until then. Every product write is a **merge**, so renaming from the catalog screen
+cannot drop the quantity sitting next to the name.
 
 `config/app` — `{ managerPin, adminPin, branches: [{name, pin}], shipmentTypes: [], users: [] }`.
 Each user is `{ name, pin, branches: [], perms: [] }`; `perms` holds ids from `auth.js` `PERMS`
@@ -68,7 +78,10 @@ Rules in force (all live-tested):
 - update: `name`, `items`, `type` may change; `createdBy`, `createdAt` and
   **`branch` are immutable** (403 on any attempt).
 - delete: allowed on both collections (the owner asked for it).
-- `products`: create/update/delete open, `name` 1–100 chars, barcode ≤ 32.
+- `counts`: the same shape as `shipments` minus `type`, `items` ≤ 500; `createdBy`,
+  `createdAt` and `branch` immutable on update; delete allowed.
+- `products`: create/update/delete open, `name` 1–100 chars, barcode ≤ 32, optional
+  `qty` must be a number ≥ 0.
 
 `createdAt` is `Date.now()` on purpose — `serverTimestamp()` reads back null in the
 local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
@@ -79,6 +92,15 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   refusal sheet (`#item-warn`), hides the qty stepper and the add button, and
   `btn-add-item` also refuses when called programmatically. Item names are never
   typed by employees — they come from `products` only.
+- **The stocktake reuses the shipment screen, not a copy of it.** `state.mode` is `"ship"` or
+  `"count"`; `paintMode()` swaps the labels, hides `#new-type-row`, and the item sheet grows
+  `#item-stock`. The same rule holds as for shipments: an unlisted barcode is refused. A count
+  never touches `localStorage.draft` — only shipments have a draft.
+- **`sys` is read for free.** The system quantity lives on the product doc, so a scan still
+  costs the one `getProduct` read it always cost. Never add a second collection for it.
+- **The difference is computed, never stored.** `countDiff()` in both `app.js` and
+  `manager.js` sums `qty - (sys || 0)`; an item with no `sys` counts as pure surplus, which
+  is what an unlisted product on the shelf actually is.
 - **`auth.js` owns identity for all three pages.** `authenticate(pin, cfg, codeAdminPin)` tries
   the admin's users first, then the legacy PINs (admin → every permission, manager → all but
   `adm`, branch PIN → that branch, flagged `branchPin` so the employee page still runs the old
@@ -101,8 +123,14 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   never in Firestore — the whole point is that one shop phone needs a different lens than another.
   `startScan(retried)` falls back to `facingMode: environment` and clears the saved `deviceId`
   when `{deviceId:{exact}}` fails, so a swapped phone cannot leave the scanner dead.
-  Torch and zoom go through `applyVideoConstraints({advanced:[…]})` and only appear when
-  `getRunningTrackCapabilities()` reports them. `navTo` calls `stopScan()` for any screen other
+  Torch, zoom and continuous focus go through `applyVideoConstraints({advanced:[…]})`; torch
+  and zoom only appear when `getRunningTrackCapabilities()` reports them.
+- **Resolution is a start-time constraint, and html5-qrcode drops the first argument once
+  `config.videoConstraints` is valid** — so the chosen `deviceId` has to live *inside* the same
+  object as `width`/`height`, never beside it. Measured with the fake device 2026-07-30:
+  no constraint → **640×480**, `res: "fhd"` → **1920×1080**, default `res: "hd"` → 1280×720.
+  That default is why a small barcode reads on one phone and not another; `ideal` (not `exact`)
+  so a camera that cannot do it still starts. `navTo` calls `stopScan()` for any screen other
   than `screen-new`, otherwise the camera keeps running behind the settings screen.
 - **`window.APP_CONFIG` is mutated at boot, not read fresh.** `app.js` awaits the merge
   inside its boot IIFE; `manager.js` and `admin.js` paint the PIN screen first and make the
@@ -139,7 +167,7 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
 ## Commands
 
 ```bash
-npx playwright test                 # 37 tests, localStorage mode, ~18s
+npx playwright test                 # 43 tests, localStorage mode, ~21s
 npx playwright test -g "catalog"    # one group
 python3 -m http.server 8080         # serve locally, then open /?test=1
 node scripts/make-icons.mjs         # regenerate the PWA icons
@@ -153,6 +181,7 @@ STAMP=$RANDOM node scripts/live-mobile.mjs       # Pixel 5, 3 contexts: admin ma
 STAMP=$RANDOM node scripts/live-products.mjs     # catalog: import, rename, delete
 node scripts/live-search-name.mjs                # proves search reaches past the loaded page
 node scripts/live-admin.mjs                      # admin page, settings doc, audit trail, rule probes, ZIP
+STAMP=$RANDOM node scripts/live-count.mjs        # الجرد: stock sheet, count, difference, Excel, delete
 BASE=http://localhost:8087 node scripts/live-camera.mjs   # camera list/start/stop/fallback on a fake device
 OUT=/tmp/shots node scripts/shots.mjs            # local screenshots (needs the server above)
 ```
@@ -164,9 +193,11 @@ debounce, or it reports false negatives.
 
 ## Testing notes
 
-- Tests run with `?test=1`; `db.js` then uses `test-shipments` / `test-products` in
-  localStorage. Seed `test-products` in any test that adds items, or the add is
-  refused (`setUp()` seeds `111`/`222` by default).
+- Tests run with `?test=1`; `db.js` then uses `test-shipments` / `test-products` /
+  `test-counts` in localStorage. Seed `test-products` in any test that adds items, or the add
+  is refused (`setUp()` seeds `111`/`222` by default).
+- A `test-products` value may be a plain string **or** `{name, qty}` — the string form is kept
+  so older seeds still work, and `qty` is what a stocktake compares against.
 - Empty states render an `li.empty`, so count assertions use
   `#items-list li:not(.empty)`.
 - Product names live in `value=""`, so assert with `toHaveValue`, not `toContainText`.
@@ -202,6 +233,9 @@ debounce, or it reports false negatives.
 - `scripts/live-admin.mjs` leaves one audit row behind on purpose: the rules forbid deleting
   audit rows, so a live check of that collection cannot clean up after itself.
 - Catalog search matches the **start** of a name; mid-word search needs a search service.
+- A stocktake reports on what was **scanned**. A product in the sheet that nobody scanned does
+  not appear as a shortage — listing every missing product would mean reading the whole
+  catalog (10k reads) per count. Count by shelf and the sheet stays honest.
 - The sync chip reports connectivity (`navigator.onLine`), not real sync state.
 - Camera *decoding* can only be verified on a physical phone. `scripts/live-camera.mjs` proves
   the plumbing (camera list, chosen device, start/stop, release, ghost-camera fallback) with
