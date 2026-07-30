@@ -28,9 +28,13 @@ async function openCatalog() {
 
 async function find(code) {
   await page.fill("#product-search", code);
-  await page.waitForTimeout(400);
   const row = page.locator(`input[data-barcode="${code}"]`);
-  return (await row.count()) ? row.inputValue() : null;
+  try {
+    await row.waitFor({ timeout: 9000 });   // debounce + server query, not an instant check
+    return await row.inputValue();
+  } catch {
+    return null;
+  }
 }
 
 // 1. seed through the app's real import path
