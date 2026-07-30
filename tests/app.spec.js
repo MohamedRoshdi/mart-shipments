@@ -290,6 +290,17 @@ test('catalog screen: list, search, rename, delete, export', async ({ page }) =>
   await expect(page.locator('#screen-manager')).toBeVisible();
 });
 
+test('a db call fired before initDb finishes still lands', async ({ page }) => {
+  await page.goto('/?test=1');
+  const saved = await page.evaluate(async () => {
+    const db = await import('./db.js');
+    const write = db.saveProductName('777', 'قبل التهيئة');   // no await on initDb first
+    await Promise.all([write, db.initDb()]);
+    return db.getProductName('777');
+  });
+  expect(saved).toBe('قبل التهيئة');
+});
+
 test('catalog screen: a quote in a product name cannot break the row markup', async ({ page }) => {
   await page.goto('/manager.html?test=1');
   await page.evaluate(() => localStorage.setItem('test-products', JSON.stringify({

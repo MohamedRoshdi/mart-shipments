@@ -263,11 +263,22 @@ function matches() {
   return q ? products.filter(p => p.name.toLowerCase().includes(q) || p.barcode.includes(q)) : products;
 }
 
+// the loaded page is capped, so an exact barcode that is not in it gets looked up directly
+async function lookupMissingBarcode() {
+  const q = $("product-search").value.trim();
+  if (products.length < db.PRODUCT_CAP || !/^\d{6,}$/.test(q) || matches().length) return;
+  const name = await db.getProductName(q).catch(() => null);
+  if (!name || $("product-search").value.trim() !== q) return;
+  products.push({ barcode: q, name });
+  renderProducts();
+}
+
 function renderProducts() {
   const found = matches();
   const page = found.slice(0, PAGE);
+  const capped = products.length >= db.PRODUCT_CAP ? ` (أول ${db.PRODUCT_CAP} صنف — دوّر بالباركود للباقي)` : "";
   $("products-count").textContent = products.length
-    ? `${found.length} من ${products.length} صنف` + (found.length > PAGE ? ` — بيظهر أول ${PAGE}، دوّر للباقي` : "")
+    ? `${found.length} من ${products.length} صنف${capped}` + (found.length > PAGE ? ` — بيظهر أول ${PAGE}` : "")
     : "";
   $("products-list").innerHTML = page.map(p => `<li>
       <div class="card-main">
@@ -284,7 +295,7 @@ function updateDirty() {
   $("btn-save-products").disabled = edits.size === 0;
 }
 
-$("product-search").oninput = renderProducts;
+$("product-search").oninput = () => { renderProducts(); lookupMissingBarcode(); };
 
 $("products-list").oninput = (e) => {
   const inp = e.target.closest("input[data-barcode]");
