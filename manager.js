@@ -190,7 +190,7 @@ function renderList() {
         <button data-act="txt" data-i="${i}">TXT</button>` : ""}
         ${canDo("del") ? `<button data-act="del" data-i="${i}" class="danger">حذف</button>` : ""}
       </div>
-    </li>`).join("") || `<li class="empty">مفيش شحنات في الفرع ده</li>`;
+    </li>`).join("") || `<li class="empty">${filter === ALL ? "مفيش شحنات لسه" : "مفيش شحنات في الفرع ده"}</li>`;
 }
 
 $("all-shipments").onclick = async (e) => {
@@ -235,7 +235,7 @@ function renderCounts() {
         <button data-cact="download" data-i="${i}">Excel</button>` : ""}
         ${canDo("del") ? `<button data-cact="del" data-i="${i}" class="danger">حذف</button>` : ""}
       </div>
-    </li>`).join("") || `<li class="empty">مفيش جرد في الفرع ده</li>`;
+    </li>`).join("") || `<li class="empty">${filter === ALL ? "مفيش جرد لسه" : "مفيش جرد في الفرع ده"}</li>`;
 }
 
 $("all-counts").onclick = async (e) => {

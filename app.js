@@ -339,6 +339,8 @@ async function onBarcode(code) {
   // the whole point of a stocktake: the employee sees what the system claims before he types
   $("item-stock").hidden = !(known && counting());
   $("item-stock-qty").textContent = state.currentSys === null ? "غير مسجّلة" : state.currentSys;
+  // .code is dir=ltr for numbers; Arabic words inside it come out spaced wrong
+  $("item-stock-qty").classList.toggle("code", state.currentSys !== null);
   $("qty-hint").hidden = !(known && counting());
   $("qty-row").hidden = !known;                  // nothing to count if the item cannot be added
   $("btn-add-item").hidden = !known;             // only catalog items can enter a shipment
