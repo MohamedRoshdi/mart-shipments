@@ -256,14 +256,18 @@ test('catalog screen: list, search, rename, delete, export', async ({ page }) =>
   await page.click('#btn-pin');
   await page.click('#btn-products');
   await expect(page.locator('#products-list li')).toHaveCount(3);
-  await expect(page.locator('#products-count')).toHaveText('3 من 3 صنف');
+  await expect(page.locator('#products-count')).toHaveText('3 صنف');
 
   await page.fill('#product-search', 'جبنة');                 // search by name
   await expect(page.locator('#products-list li')).toHaveCount(1);
+  await expect(page.locator('#products-count')).toHaveText('1 نتيجة');
   await page.fill('#product-search', '333');                  // search by barcode
   await expect(page.locator('#products-list li')).toHaveCount(1);
   await expect(page.locator('input[data-barcode="333"]')).toHaveValue('أرز الضحى');
+  await page.fill('#product-search', 'لا يوجد كده');           // no hit → guidance, not a dead end
+  await expect(page.locator('#products-list li.empty')).toContainText('البحث بأول الاسم أو بالباركود');
   await page.fill('#product-search', '');
+  await expect(page.locator('#products-list li')).toHaveCount(3);
 
   await page.fill('input[data-barcode="111"]', 'لبن المراعي 1 لتر');   // rename
   await expect(page.locator('#products-dirty')).toHaveText('1 تعديل');

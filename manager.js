@@ -264,35 +264,20 @@ async function loadProducts() {
   }
 }
 
-function matches() {
-  const q = $("product-search").value.trim().toLowerCase();
-  return q ? products.filter(p => p.name.toLowerCase().includes(q) || p.barcode.includes(q)) : products;
-}
-
-// the loaded page is capped, so an exact barcode that is not in it gets looked up directly
-async function lookupMissingBarcode() {
-  const q = $("product-search").value.trim();
-  if (products.length < db.PRODUCT_CAP || !/^\d{6,}$/.test(q) || matches().length) return;
-  const name = await db.getProductName(q).catch(() => null);
-  if (!name || $("product-search").value.trim() !== q) return;
-  products.push({ barcode: q, name });
-  renderProducts();
-}
-
 function renderProducts() {
-  const found = matches();
+  const found = products;
   const page = found.slice(0, PAGE);
-  const capped = total > products.length ? ` (محمّل منهم ${products.length} — دوّر بالباركود للباقي)` : "";
-  $("products-count").textContent = products.length
-    ? `${found.length} من ${total} صنف${capped}` + (found.length > PAGE ? ` — بيظهر أول ${PAGE}` : "")
-    : "";
+  const searching = $("product-search").value.trim() !== "";
+  $("products-count").textContent = searching
+    ? `${found.length} نتيجة` + (found.length > PAGE ? ` — بيظهر أول ${PAGE}` : "")
+    : (total ? `${total} صنف` + (total > products.length ? ` — بيظهر أول ${products.length}، دوّر عن الباقي` : "") : "");
   $("products-list").innerHTML = page.map(p => `<li>
       <div class="card-main">
         <input class="product-name" type="text" maxlength="100" data-barcode="${escAttr(p.barcode)}" value="${escAttr(edits.get(p.barcode) ?? p.name)}">
         <div class="code">${esc(p.barcode)}</div>
       </div>
       <button class="del" data-delproduct="${escAttr(p.barcode)}" aria-label="حذف الصنف">×</button>
-    </li>`).join("") || `<li class="empty">${products.length ? "مفيش نتيجة للبحث" : "مفيش أصناف — استورد ملف الأصناف الأول"}</li>`;
+    </li>`).join("") || `<li class="empty">${searching ? "مفيش نتيجة — البحث بأول الاسم أو بالباركود" : "مفيش أصناف — استورد ملف الأصناف الأول"}</li>`;
   updateDirty();
 }
 
@@ -301,7 +286,22 @@ function updateDirty() {
   $("btn-save-products").disabled = edits.size === 0;
 }
 
-$("product-search").oninput = () => { renderProducts(); lookupMissingBarcode(); };
+let searchTimer = null;
+
+$("product-search").oninput = () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(runSearch, 250);   // one query per pause, not per keystroke
+};
+
+async function runSearch() {
+  const q = $("product-search").value.trim();
+  if (!q) { await loadProducts(); return; }
+  const hits = await db.searchProducts(q).catch(() => []);
+  if ($("product-search").value.trim() !== q) return;   // a newer search already ran
+  products = hits.sort((a, b) => a.name.localeCompare(b.name, "ar"));
+  edits.clear();
+  renderProducts();
+}
 
 $("products-list").oninput = (e) => {
   const inp = e.target.closest("input[data-barcode]");
@@ -349,13 +349,15 @@ $("btn-save-products").onclick = async () => {
   renderProducts();
 };
 
-$("btn-export-products").onclick = () => {
-  if (!products.length) { toast("مفيش أصناف تتحمّل"); return; }
+$("btn-export-products").onclick = async () => {
+  toast("بنجهّز الملف...");
+  const rows = await db.listAllProducts().catch(() => []);   // the whole catalog, not the page on screen
+  if (!rows.length) { toast("مفيش أصناف تتحمّل"); return; }
   downloadCsv("products.csv", [
     ["الباركود", "اسم الصنف"],
-    ...products.map(p => [p.barcode, p.name]),
+    ...rows.map(p => [p.barcode, p.name]),
   ]);
-  toast("تم تحميل ملف الأصناف");
+  toast(`تم تحميل ${rows.length} صنف`);
 };
 
 /* ---------- catalog import ---------- */

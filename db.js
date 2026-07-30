@@ -1,5 +1,6 @@
 const TEST_MODE = new URLSearchParams(location.search).has('test');
-export const PRODUCT_CAP = 2000;   // how many catalog rows one screen load pulls
+export const PRODUCT_CAP = 300;    // catalog rows the screen pulls before searching
+const HITS = 50;                   // rows one search returns
 
 let fs = null;      // firestore module namespace
 let dbRef = null;   // firestore instance
@@ -42,6 +43,7 @@ export async function listShipments() {
       .map((s) => ({ ...s, _id: String(s.createdAt) }))
       .sort((a, b) => b.createdAt - a.createdAt);
   }
+  await live();
   const snap = await fs.getDocs(
     fs.query(fs.collection(dbRef, 'shipments'), fs.orderBy('createdAt', 'desc'))
   );
@@ -80,11 +82,37 @@ export async function listProducts() {
   if (TEST_MODE) {
     return Object.entries(lsObj('test-products')).map(([barcode, name]) => ({ barcode, name }));
   }
-  // ponytail: pulls up to PRODUCT_CAP products and filters in the browser. A bigger
-  // catalog still works: searching an exact barcode falls back to a single-doc read.
+  // just the first page for the default view; searching goes to the server
   await live();
-  const snap = await fs.getDocs(fs.query(fs.collection(dbRef, 'products'), fs.limit(PRODUCT_CAP)));
+  const snap = await fs.getDocs(fs.query(fs.collection(dbRef, 'products'), fs.orderBy('name'), fs.limit(PRODUCT_CAP)));
   return snap.docs.map((d) => ({ barcode: d.id, name: d.data().name }));
+}
+
+// every product, for the export file (one deliberate full read, not a screen load)
+export async function listAllProducts() {
+  if (TEST_MODE) return listProducts();
+  await live();
+  const snap = await fs.getDocs(fs.query(fs.collection(dbRef, 'products'), fs.orderBy('name')));
+  return snap.docs.map((d) => ({ barcode: d.id, name: d.data().name }));
+}
+
+// Searches the WHOLE catalog, not just the loaded page: name-prefix and barcode-prefix
+// queries, 50 hits each. Prefix, not substring — a mid-word match needs a search service.
+export async function searchProducts(q) {
+  if (TEST_MODE) {
+    const all = await listProducts();
+    const s = q.toLowerCase();
+    return all.filter((p) => p.name.toLowerCase().includes(s) || p.barcode.includes(q));
+  }
+  await live();
+  const found = new Map();
+  const collect = (snap) => snap.docs.forEach((d) => found.set(d.id, { barcode: d.id, name: d.data().name }));
+  const prefix = (field) => fs.query(
+    fs.collection(dbRef, 'products'), fs.orderBy(field), fs.startAt(q), fs.endAt(q + '\uf8ff'), fs.limit(HITS)
+  );
+  if (/^\d{3,}$/.test(q)) collect(await fs.getDocs(prefix(fs.documentId())));
+  collect(await fs.getDocs(prefix('name')));
+  return [...found.values()];
 }
 
 // the real catalog size, even when it is bigger than PRODUCT_CAP
