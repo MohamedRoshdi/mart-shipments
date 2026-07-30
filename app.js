@@ -160,12 +160,25 @@ $("btn-lookup").onclick = () => {
 async function onBarcode(code) {
   state.currentBarcode = code;
   state.currentName = await db.getProductName(code) || "";
+  const known = state.currentName !== "";
   $("item-barcode").textContent = code;
-  $("item-name").textContent = state.currentName || "صنف غير مسجّل في ملف الأصناف";
-  $("item-name").classList.toggle("unknown", !state.currentName);
+  $("item-name").textContent = known ? state.currentName : "صنف غير مسجّل في ملف الأصناف";
+  $("item-name").classList.toggle("unknown", !known);
+  $("item-warn").hidden = known;                 // full explanation instead of a silent add
+  $("btn-add-item").disabled = !known;           // only catalog items can enter a shipment
   $("item-qty").value = 1;
   showSheet(true);
 }
+
+$("btn-copy-barcode").onclick = async () => {
+  try {
+    await navigator.clipboard.writeText(state.currentBarcode || "");
+    toast("تم نسخ الباركود");
+  } catch (e) {
+    console.error(e);
+    toast("النسخ ما نفعش — اكتب الباركود بإيدك");
+  }
+};
 
 function showSheet(open) {
   $("item-form").hidden = !open;
@@ -189,6 +202,7 @@ $("btn-add-item").onclick = () => {
   const qty = Math.max(1, parseInt($("item-qty").value, 10) || 1);
   const barcode = state.currentBarcode;
   if (!barcode) return;
+  if (!name) { toast("الصنف مش في ملف الأصناف — مش هينفع يتسجّل"); return; }
   const dup = state.items.find(i => i.barcode === barcode);
   if (dup) dup.qty += qty; else state.items.push({ barcode, name, qty });
   hideSheet();

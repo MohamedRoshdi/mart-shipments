@@ -3,6 +3,9 @@ const { test, expect } = require('@playwright/test');
 // setup now needs the branch PIN; helper keeps every test honest about that
 async function setUp(page, name = 'أحمد', branchIndex = 0) {
   const b = (await page.evaluate(() => window.APP_CONFIG.branches))[branchIndex];
+  // only catalog barcodes can be added now, so every flow needs a catalog
+  await page.evaluate(() => localStorage.getItem('test-products')
+    || localStorage.setItem('test-products', JSON.stringify({ '111': 'لبن', '222': 'جبنة' })));
   await page.fill('#employee-name', name);
   await page.click(`button[data-branch="${b.name}"]`);
   await page.fill('#branch-pin', b.pin);
@@ -62,17 +65,33 @@ test('create shipment: name shown from catalog as a label, duplicate merge', asy
   await expect(page.locator('#my-shipments li')).toContainText('شحنة المراعي');
 });
 
-test('unknown barcode shows a clear label and still records the item', async ({ page }) => {
+test('a barcode outside the catalog is refused, with the reason spelled out', async ({ page }) => {
   await page.goto('/?test=1');
-  await page.evaluate(() => localStorage.setItem('employeeName', 'أحمد'));
+  await page.evaluate(() => { localStorage.setItem('employeeName', 'أحمد'); localStorage.setItem('test-products', JSON.stringify({ '111': 'لبن', '222': 'جبنة' })); });
   await page.reload();
   await page.click('#btn-new');
   await page.fill('#shipment-name', 'شحنة');
   await page.fill('#barcode-input', '9990001112223');
   await page.click('#btn-lookup');
   await expect(page.locator('#item-name')).toHaveText('صنف غير مسجّل في ملف الأصناف');
+  await expect(page.locator('#item-warn')).toBeVisible();
+  await expect(page.locator('#item-warn')).toContainText('مش موجود في ملف الأصناف، والصنف مش هيتسجّل في الشحنة');
+  await expect(page.locator('#item-warn')).toContainText('ابعت الباركود للمدير يضيفه في ملف الأصناف');
+  await expect(page.locator('#btn-add-item')).toBeDisabled();
+  await page.click('#btn-add-item', { force: true });            // even a forced tap adds nothing
+  await expect(page.locator('#items-list li:not(.empty)')).toHaveCount(0);
+  await expect(page.locator('#btn-save-shipment')).toBeDisabled();
+
+  await page.click('#btn-copy-barcode');                         // employee can send it to the manager
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('9990001112223');
+
+  await page.click('#btn-cancel-item');                          // sheet owns the screen until dismissed
+  await page.fill('#barcode-input', '111');                      // a catalog item still works
+  await page.click('#btn-lookup');
+  await expect(page.locator('#item-warn')).toBeHidden();
+  await expect(page.locator('#btn-add-item')).toBeEnabled();
   await page.click('#btn-add-item');
-  await expect(page.locator('#items-list li:not(.empty)')).toContainText('9990001112223');
+  await expect(page.locator('#items-list li:not(.empty)')).toHaveCount(1);
 });
 
 async function openManagerPage(page) {
@@ -121,7 +140,7 @@ test('manager page: edit name, change qty, delete item', async ({ page }) => {
 
 test('employee: remove scanned item before saving', async ({ page }) => {
   await page.goto('/?test=1');
-  await page.evaluate(() => localStorage.setItem('employeeName', 'أحمد'));
+  await page.evaluate(() => { localStorage.setItem('employeeName', 'أحمد'); localStorage.setItem('test-products', JSON.stringify({ '111': 'لبن', '222': 'جبنة' })); });
   await page.reload();
   await page.click('#btn-new');
   await page.fill('#shipment-name', 'شحنة');
@@ -197,6 +216,7 @@ test('Enter key submits: manager PIN, employee setup, barcode lookup', async ({ 
 
   await page.goto('/?test=1');
   const b = (await page.evaluate(() => window.APP_CONFIG.branches))[0];
+  await page.evaluate(() => localStorage.setItem('test-products', JSON.stringify({ '111': 'لبن' })));
   await page.fill('#employee-name', 'أحمد');
   await page.fill('#branch-pin', b.pin);
   await page.press('#branch-pin', 'Enter');
@@ -386,7 +406,7 @@ test('catalog screen: a quote in a product name cannot break the row markup', as
 
 test('back button and phone back return to the previous screen', async ({ page }) => {
   await page.goto('/?test=1');
-  await page.evaluate(() => localStorage.setItem('employeeName', 'أحمد'));
+  await page.evaluate(() => { localStorage.setItem('employeeName', 'أحمد'); localStorage.setItem('test-products', JSON.stringify({ '111': 'لبن', '222': 'جبنة' })); });
   await page.reload();
   await expect(page.locator('#btn-back')).toBeHidden();       // nothing to go back to on home
   await page.click('#btn-new');
@@ -431,17 +451,18 @@ test("catalog CSV import on manager page autofills names in employee app", async
   await page.setInputFiles("#import-file", "tests/fixtures/catalog.csv");
   await expect(page.locator("#toast")).toContainText("تم استيراد 2 صنف");
   await page.goto("/?test=1");
-  await page.evaluate(() => localStorage.setItem("employeeName", "أحمد"));
+  await page.evaluate(() => localStorage.setItem('employeeName', 'أحمد'));   // keep the imported catalog
   await page.reload();
   await page.click("#btn-new");
   await page.fill("#barcode-input", "6221031250057");
   await page.click("#btn-lookup");
   await expect(page.locator("#item-name")).toHaveText("لبن المراعي");
+  await expect(page.locator("#btn-add-item")).toBeEnabled();                 // imported → addable
 });
 
 test("draft survives reload", async ({ page }) => {
   await page.goto("/?test=1");
-  await page.evaluate(() => localStorage.setItem("employeeName", "أحمد"));
+  await page.evaluate(() => { localStorage.setItem('employeeName', 'أحمد'); localStorage.setItem('test-products', JSON.stringify({ '111': 'لبن', '222': 'جبنة' })); });
   await page.reload();
   await page.click("#btn-new");
   await page.fill("#shipment-name", "مسودة");

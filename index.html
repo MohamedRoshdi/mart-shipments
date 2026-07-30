@@ -61,6 +61,11 @@
     <div class="handle"></div>
     <p id="item-name" class="item-label"></p>
     <p class="meta">الباركود <span id="item-barcode" class="code"></span></p>
+    <div id="item-warn" class="warn" hidden>
+      <p>الباركود ده مش موجود في ملف الأصناف، والصنف مش هيتسجّل في الشحنة.</p>
+      <p>ابعت الباركود للمدير يضيفه في ملف الأصناف، وبعد كده امسح الصنف تاني.</p>
+      <button id="btn-copy-barcode" class="ghost">نسخ الباركود</button>
+    </div>
     <div class="qty-row">
       <button id="qty-minus" aria-label="كمية أقل">−</button>
       <input id="item-qty" type="number" value="1" min="1" dir="ltr" aria-label="الكمية">

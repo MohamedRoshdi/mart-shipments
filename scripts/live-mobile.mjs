@@ -19,6 +19,20 @@ const shot = (n) => page.screenshot({ path: `${OUT}/m-${n}.png` });
 
 log("viewport:", JSON.stringify(page.viewportSize()), "| touch + mobile UA on");
 
+// real barcodes from the live catalog — unlisted ones are refused by design
+const helper = await ctx.newPage();
+await helper.goto(BASE + "/manager.html", { waitUntil: "load" });
+await helper.fill("#pin-input", "1994");
+await helper.click("#btn-pin");
+await helper.waitForSelector("#screen-manager:not([hidden])");
+await helper.click("#btn-products");
+await helper.waitForSelector("#products-list input[data-barcode]");
+await helper.waitForTimeout(4000);
+const [C1, C2] = await helper.locator("#products-list input[data-barcode]")
+  .evaluateAll((els) => els.slice(0, 2).map((e) => e.dataset.barcode));
+await helper.close();
+log("0. catalog barcodes used:", C1, C2);
+
 /* ---- employee: setup with Enter only ---- */
 await page.goto(BASE + "/", { waitUntil: "load" });
 const branch = await page.evaluate(() => window.APP_CONFIG.branches[0]);
@@ -36,14 +50,14 @@ const type = (await page.evaluate(() => window.APP_CONFIG.shipmentTypes))[1];
 log("2. branch line on new-shipment:", await page.locator("#new-branch").innerText());
 await page.tap(`#type-picker button[data-type="${type}"]`);
 await page.fill("#shipment-name", STAMP);
-await page.fill("#barcode-input", "6221031250057");
+await page.fill("#barcode-input", C1);
 await page.press("#barcode-input", "Enter");                 // lookup by Enter
 await page.waitForSelector("#item-form:not([hidden])");
 log("3. sheet label:", await page.locator("#item-name").innerText());
 await shot("2-sheet");
 await page.press("#item-qty", "Enter");                      // add by Enter
 await page.waitForSelector("#item-form", { state: "hidden" });
-await page.fill("#barcode-input", "9999999999999");
+await page.fill("#barcode-input", C2);
 await page.press("#barcode-input", "Enter");
 await page.waitForSelector("#item-form:not([hidden])");
 await page.press("#item-qty", "Enter");
@@ -86,9 +100,22 @@ await mgr.tap("#btn-products");
 await mgr.waitForSelector("#screen-products:not([hidden])");
 await mgr.waitForTimeout(5000);
 log("12. catalog count line:", await mgr.locator("#products-count").innerText());
-await mgr.fill("#product-search", "6221031250057");
+await mgr.fill("#product-search", C1);
 await mgr.waitForTimeout(2500);
 log("13. search by barcode found:", await mgr.locator("#products-list input[data-barcode]").count());
+
+await mgr.fill("#product-search", "");                       // and an unlisted barcode is refused
+await mgr.waitForTimeout(1500);
+const emp = await ctx.newPage();
+await emp.goto(BASE + "/", { waitUntil: "load" });
+await emp.tap("#btn-new");
+await emp.fill("#barcode-input", "9990001112223");
+await emp.press("#barcode-input", "Enter");
+await emp.waitForSelector("#item-warn:not([hidden])");
+log("13b. unlisted barcode refused:", await emp.locator("#btn-add-item").isDisabled(),
+  "| message:", (await emp.locator("#item-warn").innerText()).replace(/\n/g, " "));
+await emp.screenshot({ path: `${OUT}/m-6-refused.png` });
+await emp.close();
 await mgr.screenshot({ path: `${OUT}/m-5-products.png` });
 await mgr.goBack();
 log("14. back from catalog → shipments:", !(await mgr.locator("#screen-manager").isHidden()));

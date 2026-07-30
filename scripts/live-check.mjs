@@ -14,9 +14,29 @@ async function addItem(p, barcode) {
   await p.fill("#barcode-input", barcode);
   await p.click("#btn-lookup");
   await p.waitForSelector("#item-form:not([hidden])");
-  await p.click("#btn-add-item");                 // name comes from the imported catalog, not typed
+  await p.waitForSelector("#btn-add-item:not([disabled])");   // catalog barcodes only
+  await p.click("#btn-add-item");                             // name comes from the catalog, not typed
   await p.waitForSelector("#item-form", { state: "hidden" });
 }
+
+// real barcodes from the live catalog: unlisted ones are refused by design
+async function catalogBarcodes(ctx, n) {
+  const p = await ctx.newPage();
+  await p.goto(BASE + "/manager.html", { waitUntil: "load" });
+  await p.fill("#pin-input", "1994");
+  await p.click("#btn-pin");
+  await p.waitForSelector("#screen-manager:not([hidden])");
+  await p.click("#btn-products");
+  await p.waitForSelector("#products-list input[data-barcode]");
+  await p.waitForTimeout(4000);
+  const codes = await p.locator("#products-list input[data-barcode]")
+    .evaluateAll((els, k) => els.slice(0, k).map(e => e.dataset.barcode), n);
+  await p.close();
+  return codes;
+}
+
+const [C1, C2, C3] = await catalogBarcodes(ctx, 3);
+log("0. barcodes taken from the live catalog:", C1, C2, C3);
 
 // 1. employee creates a shipment against REAL Firestore, deletes one item first
 await page.goto(BASE + "/", { waitUntil: "load" });
@@ -30,8 +50,8 @@ await page.click("#btn-new");
 const type = (await page.evaluate(() => window.APP_CONFIG.shipmentTypes))[1];
 await page.click(`#type-picker button[data-type="${type}"]`);
 await page.fill("#shipment-name", STAMP);
-await addItem(page, "1111111111111");
-await addItem(page, "2222222222222");
+await addItem(page, C1);
+await addItem(page, C2);
 log("1. items after two scans:", await page.locator("#items-list li").count());
 await page.click('button[data-del="1"]');
 log("2. items after deleting one:", await page.locator("#items-list li").count());
@@ -50,7 +70,7 @@ await page.waitForSelector("#screen-new:not([hidden])");
 log("4. edit screen loaded name/items:",
   await page.locator("#shipment-name").inputValue(), "/", await page.locator("#items-list li").count());
 await page.fill("#shipment-name", STAMP + "-معدلة");
-await addItem(page, "3333333333333");
+await addItem(page, C3);
 await page.click("#btn-save-shipment");
 await page.waitForSelector("#screen-home:not([hidden])");
 await page.waitForTimeout(SYNC);

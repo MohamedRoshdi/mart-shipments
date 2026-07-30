@@ -280,7 +280,18 @@ body.sheet-open .bottombar { display: none; }
 .sheet > * + * { margin-block-start: 12px; }
 .handle { inline-size: 44px; block-size: 5px; border-radius: 99px; background: var(--line); margin: 0 auto; }
 .item-label { font-size: 1.15rem; font-weight: 700; }
-.item-label.unknown { color: var(--ink-2); font-weight: 600; font-size: .95rem; }
+.item-label.unknown { color: var(--bad); }
+.warn {
+  background: #fbeceb;
+  border: 1px solid #f0cdcb;
+  border-radius: 12px;
+  padding: 12px;
+  color: #7d1f1c;
+  font-size: .95rem;
+  line-height: 1.5;
+}
+.warn > * + * { margin-block-start: 8px; }
+.warn button { inline-size: 100%; }
 .qty-row { display: flex; gap: 12px; align-items: center; }
 .qty-row input {
   text-align: center;
