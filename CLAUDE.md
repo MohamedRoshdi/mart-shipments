@@ -22,7 +22,7 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 5. **`db.js` is the only file that knows where data lives.** `app.js` and
    `manager.js` never touch Firestore or localStorage keys directly.
 6. **Bump `CACHE` in `sw.js` on every deploy.** Serving is cache-first, so phones
-   keep the old bundle until the cache name changes. Currently `mart-v23`.
+   keep the old bundle until the cache name changes. Currently `mart-v24`.
 7. **Deploy = push to master.** GitHub Pages serves the repo root. Firestore rules
    deploy separately: `npx firebase deploy --only firestore:rules --project shipments-alaela-mart`.
 
@@ -116,6 +116,11 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   `SLOTS[screen]` (`slot-new` / `slot-expiry`) and hides it everywhere else. A second reader
   would mean a second camera stream and a second copy of every camera control. `navTo` stops
   the camera for any screen that has no slot.
+- **The expiry writes are fire-and-forget, like the shipment and count adds.** `updateExpiry`
+  and `deleteExpiry` do not await the server ack (measured on production 2026-07-30: awaiting
+  left the item sheet open with no toast when the write sat behind a backoff, and it would do
+  the same offline). The persistent cache applies the change immediately, so the screen repaints
+  either way; a real failure surfaces through the `db-error` toast.
 - **الصلاحيات never counts a month, it derives one.** `ex.months(rows)` is the only place the
   grouping, the two counters, the nearest-first order and the four colours are decided, and both
   `app.js` and `manager.js` call it. Deleting the last row of a month leaves the screen through

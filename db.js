@@ -332,7 +332,10 @@ export async function listExpiry() {
   return snap.docs.map((d) => ({ ...d.data(), _id: d.id }));
 }
 
-// quantity or date only: a row moves to another month by changing its date, never by re-adding
+// Quantity or date only: a row moves to another month by changing its date, never by re-adding.
+// Not awaited on the network, for the same reason the adds are not: a phone on the shelf may be
+// offline (or behind a write backoff), and awaiting the server ack would leave the item sheet
+// open with nothing happening. The local cache applies the change straight away.
 export async function updateExpiry(id, data) {
   const patch = { qty: data.qty, day: data.day, month: data.month, year: data.year };
   if (TEST_MODE) {
@@ -341,7 +344,8 @@ export async function updateExpiry(id, data) {
     return;
   }
   await live();
-  await fs.updateDoc(fs.doc(dbRef, 'expiry', id), patch);
+  fs.updateDoc(fs.doc(dbRef, 'expiry', id), patch)
+    .catch((e) => dispatchEvent(new CustomEvent('db-error', { detail: e })));
 }
 
 export async function deleteExpiry(id) {
@@ -351,5 +355,6 @@ export async function deleteExpiry(id) {
     return;
   }
   await live();
-  await fs.deleteDoc(fs.doc(dbRef, 'expiry', id));
+  fs.deleteDoc(fs.doc(dbRef, 'expiry', id))
+    .catch((e) => dispatchEvent(new CustomEvent('db-error', { detail: e })));
 }
