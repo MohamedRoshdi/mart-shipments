@@ -91,8 +91,18 @@ log("8. PIN by Enter → manager:", !(await mgr.locator("#screen-manager").isHid
 log("9. catalog button visible without scrolling:", await mgr.locator("#btn-products").isVisible());
 await mgr.screenshot({ path: `${OUT}/m-4-manager.png` });
 
-const rows = await mgr.locator("#all-shipments li").allInnerTexts();
-const mi = rows.findIndex((t) => t.includes(STAMP));
+// the employee save is queued, not server-acked, so the manager list can lag a few seconds
+async function waitForRow(p, stamp, tries = 10) {
+  for (let i = 0; i < tries; i++) {
+    const texts = await p.locator("#all-shipments li").allInnerTexts();
+    const at = texts.findIndex((t) => t.includes(stamp));
+    if (at >= 0) return { at, texts };
+    await p.waitForTimeout(2000);
+  }
+  return { at: -1, texts: await p.locator("#all-shipments li").allInnerTexts() };
+}
+
+const { at: mi, texts: rows } = await waitForRow(mgr, STAMP);
 log("10. manager sees it:", mi >= 0, "| type shown:", rows[mi]?.includes(type));
 await mgr.tap(`button[data-typefilter="${type}"]`);
 await mgr.waitForTimeout(500);
@@ -125,14 +135,16 @@ log("14. back from catalog → shipments:", !(await mgr.locator("#screen-manager
 
 /* ---- copy + downloads, then clean up ---- */
 await mgr.waitForTimeout(SYNC);
-const rows2 = await mgr.locator("#all-shipments li").allInnerTexts();
-const mi2 = rows2.findIndex((t) => t.includes(STAMP));
+const { at: mi2 } = await waitForRow(mgr, STAMP);
+if (mi2 < 0) throw new Error("the shipment vanished from the list before the copy/download step");
 await mgr.tap(`button[data-act="copy"][data-i="${mi2}"]`);
 log("15. copied:", JSON.stringify(await mgr.evaluate(() => navigator.clipboard.readText())));
 const dl = (await Promise.all([mgr.waitForEvent("download"), mgr.tap(`button[data-act="txt"][data-i="${mi2}"]`)]))[0];
 log("16. txt file:", dl.suggestedFilename());
-await mgr.tap(`button[data-act="del"][data-i="${mi2}"]`);
+const { at: mi3 } = await waitForRow(mgr, STAMP);   // the row index after the two downloads
+await mgr.tap(`button[data-act="del"][data-i="${mi3}"]`);
 await mgr.waitForTimeout(SYNC);
+log("16b. delete toast:", await mgr.locator("#toast").innerText());
 await mgr.reload({ waitUntil: "load" });
 await mgr.fill("#pin-input", "1994");
 await mgr.press("#pin-input", "Enter");
