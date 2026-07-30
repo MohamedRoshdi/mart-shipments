@@ -628,9 +628,10 @@ async function seedUsers(page, users) {
   await page.reload();                                             // APP_CONFIG merges the config at boot
 }
 
-const EMP = { name: 'سيد', pin: '2233', branch: 'فرع قويسنا', perms: ['emp', 'create'] };
-const MGR = { name: 'حسن', pin: '4411', branch: 'فرع قويسنا', perms: ['mgr', 'edit', 'download'] };
-const ADM = { name: 'الأدمن الجديد', pin: '5511', branch: '', perms: ['adm', 'danger'] };
+const EMP = { name: 'سيد', pin: '2233', branches: ['فرع قويسنا'], perms: ['emp', 'create'] };
+const MGR = { name: 'حسن', pin: '4411', branches: ['فرع قويسنا'], perms: ['mgr', 'edit', 'download'] };
+const ADM = { name: 'الأدمن الجديد', pin: '5511', branches: [], perms: ['adm', 'danger'] };
+const BOTH = { name: 'محمود', pin: '6622', branches: ['فرع قويسنا', 'فرع شبين الكوم'], perms: ['emp', 'create', 'mgr', 'download'] };
 
 test('admin: creating a user with a PIN and permissions', async ({ page }) => {
   await openAdmin(page);
@@ -648,6 +649,54 @@ test('admin: creating a user with a PIN and permissions', async ({ page }) => {
   expect(saved[0].name).toBe('حسن');
   expect(saved[0].pin).toBe('4411');
   expect(saved[0].perms.sort()).toEqual(['download', 'mgr']);
+  expect(saved[0].branches).toEqual([await page.evaluate(() => window.APP_CONFIG.branches[0].name)]);
+});
+
+test('admin: a user can cover both branches, or all of them', async ({ page }) => {
+  await openAdmin(page);
+  const names = await page.evaluate(() => window.APP_CONFIG.branches.map(b => b.name));
+  await page.click('#btn-add-user');
+  await page.fill('input[data-uname="0"]', 'محمود');
+  await page.fill('input[data-upin="0"]', '6622');
+  await page.click(`[data-ubranch="0"] button[data-branchpick="${names[1]}"]`);   // add the second branch
+  await expect(page.locator(`[data-ubranch="0"] button[data-branchpick="${names[0]}"]`)).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator(`[data-ubranch="0"] button[data-branchpick="${names[1]}"]`)).toHaveAttribute('aria-pressed', 'true');
+  await page.click('#btn-save-config');
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('test-config')).users[0].branches)).toEqual(names);
+
+  await page.click('[data-ubranch="0"] button[data-branchpick=""]');             // «كل الفروع» clears it
+  await expect(page.locator(`[data-ubranch="0"] button[data-branchpick="${names[0]}"]`)).toHaveAttribute('aria-pressed', 'false');
+  await page.click('#btn-save-config');
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('test-config')).users[0].branches)).toEqual([]);
+});
+
+test('a two-branch user picks the branch per shipment, and the manager view spans both', async ({ page }) => {
+  await page.goto('/?test=1');
+  await page.evaluate(() => localStorage.setItem('test-products', JSON.stringify({ '111': 'لبن' })));
+  await seedUsers(page, [BOTH]);
+  const names = await page.evaluate(() => window.APP_CONFIG.branches.map(b => b.name));
+  await page.fill('#login-pin', BOTH.pin);
+  await page.click('#btn-login');
+  await expect(page.locator('#screen-home')).toBeVisible();
+
+  await page.click('#btn-new');
+  await expect(page.locator('#new-branch-picker button')).toHaveCount(2);   // both branches offered
+  await expect(page.locator('#new-branch')).toBeHidden();
+  await page.click(`#new-branch-picker button[data-newbranch="${names[1]}"]`);
+  await page.fill('#shipment-name', 'شحنة شبين');
+  await page.fill('#barcode-input', '111');
+  await page.click('#btn-lookup');
+  await page.click('#btn-add-item');
+  await page.click('#btn-save-shipment');
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('test-shipments'))[0].branch)).toBe(names[1]);
+
+  await page.click('#link-manager');                                       // manager side, same session
+  await expect(page.locator('#screen-manager')).toBeVisible();
+  await expect(page.locator('#branch-filter button')).toHaveCount(3);       // الكل + the two branches
+  await expect(page.locator('#branch-filter button').first()).toBeEnabled();
+  await expect(page.locator('#all-shipments li')).toHaveCount(1);
+  await page.click(`#branch-filter button[data-branch="${names[0]}"]`);     // the other branch is empty
+  await expect(page.locator('#all-shipments li')).toContainText('مفيش شحنات');
 });
 
 test('admin: a repeated PIN is refused before it can hand over someone else\'s access', async ({ page }) => {
@@ -701,6 +750,8 @@ test('permissions actually hide the actions on the manager page', async ({ page 
   await expect(page.locator('#btn-products')).toBeHidden();                 // no catalog permission
   await expect(page.locator('#tool-import')).toBeHidden();
   await expect(page.locator('#tool-export')).toBeVisible();
+  await expect(page.locator('#branch-filter button')).toHaveCount(1);       // one branch → locked chip
+  await expect(page.locator('#branch-filter button')).toBeDisabled();
   await page.click('button[data-act="view"]');
   await expect(page.locator('#btn-save-edit')).toBeVisible();               // edit is allowed
 });

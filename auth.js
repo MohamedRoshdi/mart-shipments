@@ -28,13 +28,17 @@ export function session() {
     if (s) localStorage.removeItem(KEY);
     return null;
   }
+  s.branches = branchesOf(s);          // a session written before multi-branch had one string
   return s;
 }
 
+// a user may cover more than one branch; an empty list means every branch
+export const branchesOf = (u) => (Array.isArray(u.branches) ? u.branches : (u.branch ? [u.branch] : []));
+
 // isUser marks a real account from the admin's users list, as opposed to one of the legacy
 // PINs — only a named account may put its own name on shipments without being asked
-export function startSession(name, branch, perms, isUser) {
-  localStorage.setItem(KEY, JSON.stringify({ name, branch: branch || "", perms, user: !!isUser, at: Date.now() }));
+export function startSession(name, branches, perms, isUser) {
+  localStorage.setItem(KEY, JSON.stringify({ name, branches: branches || [], perms, user: !!isUser, at: Date.now() }));
 }
 
 export const endSession = () => localStorage.removeItem(KEY);
@@ -48,16 +52,16 @@ export function can(perm) {
 // PINs keep working, so a wrong users list can never lock the shop out of its own data.
 export function authenticate(pin, cfg, codeAdminPin) {
   const user = (cfg.users || []).find((u) => u.pin === pin);
-  if (user) return { name: user.name, branch: user.branch || "", perms: (user.perms || []).slice(), user: true };
+  if (user) return { name: user.name, branches: branchesOf(user), perms: (user.perms || []).slice(), user: true };
   if (pin && (pin === cfg.adminPin || pin === codeAdminPin)) {
-    return { name: "الأدمن", branch: "", perms: ALL_PERMS.slice() };
+    return { name: "الأدمن", branches: [], perms: ALL_PERMS.slice() };
   }
   if (pin && pin === cfg.managerPin) {
-    return { name: "المدير العام", branch: "", perms: ALL_PERMS.filter((p) => p !== "adm") };
+    return { name: "المدير العام", branches: [], perms: ALL_PERMS.filter((p) => p !== "adm") };
   }
   const branch = (cfg.branches || []).find((b) => b.pin === pin);
   if (branch) {
-    return { name: `مدير ${branch.name}`, branch: branch.name, perms: ALL_PERMS.filter((p) => p !== "adm"), branchPin: true };
+    return { name: `مدير ${branch.name}`, branches: [branch.name], perms: ALL_PERMS.filter((p) => p !== "adm"), branchPin: true };
   }
   return null;
 }

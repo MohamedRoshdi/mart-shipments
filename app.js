@@ -132,7 +132,7 @@ $("btn-login").onclick = async () => {
   const who = auth.authenticate(pin, cfg, CODE_ADMIN_PIN);
   if (!who) { toast("الرقم السري غلط"); return; }
   if (who.branchPin) {                       // a branch PIN is still the old employee setup
-    state.branch = who.branch;
+    state.branch = who.branches[0];
     renderBranchPicker();
     $("login-pin").value = "";
     navTo("screen-name");
@@ -140,10 +140,12 @@ $("btn-login").onclick = async () => {
     return;
   }
   if (!who.perms.length) { toast("المستخدم ده مالوش صلاحيات — كلّم الأدمن"); return; }
-  auth.startSession(who.name, who.branch, who.perms, who.user);
+  auth.startSession(who.name, who.branches, who.perms, who.user);
   $("login-pin").value = "";
   if (who.perms.includes("emp")) {
-    enterEmployee(who.name, who.branch || branches()[0].name);
+    // more than one branch: keep the one this phone used last if it is still allowed
+    const mine = allowedBranches();
+    enterEmployee(who.name, mine.includes(myBranch()) ? myBranch() : mine[0]);
     return;
   }
   const page = auth.landingPage(who.perms);
@@ -170,8 +172,36 @@ function saveDraft() {
   localStorage.setItem("draft", JSON.stringify({ name: $("shipment-name").value, items: state.items, type: state.type }));
 }
 
+// the branches this user may stamp a shipment with; no session = the shop's whole list
+function allowedBranches() {
+  const s = auth.session();
+  const all = branches().map(b => b.name);
+  if (!s || !s.branches.length) return all;
+  const mine = s.branches.filter(b => all.includes(b));
+  return mine.length ? mine : all;
+}
+
+// one branch → a line of text like before; more than one → the employee picks per shipment
+function renderNewBranch() {
+  const mine = allowedBranches();
+  const multi = mine.length > 1 && !!auth.session();
+  $("new-branch").hidden = multi;
+  $("new-branch-picker").hidden = !multi;
+  if (!multi) { $("new-branch").textContent = state.branch; return; }
+  $("new-branch-picker").innerHTML = mine.map(b =>
+    `<button type="button" data-newbranch="${escAttr(b)}" aria-pressed="${b === state.branch}">${esc(shortBranch(b))}</button>`).join("");
+}
+
+$("new-branch-picker").onclick = (e) => {
+  const btn = e.target.closest("button[data-newbranch]");
+  if (!btn) return;
+  state.branch = btn.dataset.newbranch;
+  localStorage.setItem("employeeBranch", state.branch);   // next shipment starts on the same branch
+  renderNewBranch();
+};
+
 function renderTypePicker() {
-  $("new-branch").textContent = myBranch();
+  renderNewBranch();
   $("type-picker").innerHTML = types().map(t =>
     `<button type="button" data-type="${esc(t)}" aria-pressed="${t === state.type}">${esc(t)}</button>`).join("");
 }
@@ -307,7 +337,7 @@ $("btn-save-shipment").onclick = async () => {
   if (!canDo(editing ? "edit" : "create")) { toast("مالكش صلاحية للخطوة دي — كلّم الأدمن"); return; }
   try {
     if (editing) await db.updateShipment(editing, { name, items: state.items, type: state.type });
-    else await db.saveShipment({ name, createdBy: myName(), branch: myBranch(), type: state.type, items: state.items });
+    else await db.saveShipment({ name, createdBy: myName(), branch: state.branch, type: state.type, items: state.items });
   } catch (e) {
     console.error(e);
     toast("الحفظ ما نفعش — حاول تاني");
@@ -530,9 +560,10 @@ cfgReady = (async () => {
   if (s && s.user && s.perms.includes("emp") && !myName()) {
     // signed in on another page and sent here: don't ask for the PIN a second time
     localStorage.setItem("employeeName", s.name);
-    if (s.branch) localStorage.setItem("employeeBranch", s.branch);
+    if (s.branches.length === 1) localStorage.setItem("employeeBranch", s.branches[0]);
     state.branch = myBranch();
   }
+  if (!allowedBranches().includes(state.branch)) state.branch = allowedBranches()[0];
   if (s && !s.perms.includes("emp")) {          // signed in, but this is not their screen
     const page = auth.landingPage(s.perms);
     if (page && page !== "index.html") { auth.goTo(page); return; }

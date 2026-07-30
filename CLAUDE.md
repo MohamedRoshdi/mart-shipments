@@ -21,7 +21,7 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 5. **`db.js` is the only file that knows where data lives.** `app.js` and
    `manager.js` never touch Firestore or localStorage keys directly.
 6. **Bump `CACHE` in `sw.js` on every deploy.** Serving is cache-first, so phones
-   keep the old bundle until the cache name changes. Currently `mart-v17`.
+   keep the old bundle until the cache name changes. Currently `mart-v18`.
 7. **Deploy = push to master.** GitHub Pages serves the repo root. Firestore rules
    deploy separately: `npx firebase deploy --only firestore:rules --project shipments-alaela-mart`.
 
@@ -40,7 +40,7 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 | `firebase-config.js` | Firebase keys **plus** `APP_CONFIG`: PINs (incl. `adminPin`), branches, shipment types |
 | `firestore.rules` | shape validation; the only server-side guard that exists |
 | `SETUP.md` | Arabic guide for the shop owner |
-| `tests/app.spec.js` | 35 Playwright tests, all in localStorage mode |
+| `tests/app.spec.js` | 37 Playwright tests, all in localStorage mode |
 | `scripts/*.mjs` | live checks and screenshot helpers (see below) |
 
 ## Data model
@@ -51,8 +51,10 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 `products/{barcode}` — `{ name }`. The barcode **is** the document id.
 
 `config/app` — `{ managerPin, adminPin, branches: [{name, pin}], shipmentTypes: [], users: [] }`.
-Each user is `{ name, pin, branch, perms: [] }`; `perms` holds ids from `auth.js` `PERMS`
-(`emp`/`mgr`/`adm` are screens, the rest are actions).
+Each user is `{ name, pin, branches: [], perms: [] }`; `perms` holds ids from `auth.js` `PERMS`
+(`emp`/`mgr`/`adm` are screens, the rest are actions). **`branches: []` means every branch**, one
+name means locked to it, several means the user works across them. `auth.branchesOf()` also reads
+the old single `branch` string, so users saved before this still work.
 The admin page writes it; every page merges it over `window.APP_CONFIG` at boot, so the
 shipped `firebase-config.js` is only a fallback. A missing doc changes nothing.
 
@@ -84,6 +86,11 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   reads it, so signing in once covers all three. **`canDo(perm)` returns true when there is no
   session at all** — that is what keeps the pre-users behaviour intact for a shop that never
   creates a user.
+- **Branch scope is a list, never a single value.** `manager.js` keeps `scopes`: empty = every
+  branch (filter chips show all), one = the chip is locked and the title becomes that branch,
+  several = chips are `الكل` plus that subset. The employee page mirrors it with
+  `allowedBranches()`: one branch prints a line of text, several render `#new-branch-picker` so
+  the branch is chosen per shipment (`state.branch`, not `myBranch()`, is what gets saved).
 - **`session.user` separates a real account from a legacy PIN.** Only a real account may be
   auto-enrolled as the employee (name written to `employeeName`); a legacy manager PIN must
   still type a name, which is what the old flow did.
@@ -130,7 +137,7 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
 ## Commands
 
 ```bash
-npx playwright test                 # 35 tests, localStorage mode, ~17s
+npx playwright test                 # 37 tests, localStorage mode, ~18s
 npx playwright test -g "catalog"    # one group
 python3 -m http.server 8080         # serve locally, then open /?test=1
 node scripts/make-icons.mjs         # regenerate the PWA icons

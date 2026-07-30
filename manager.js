@@ -28,7 +28,7 @@ let all = [];        // everything read from the database
 let shown = [];      // after the branch filter — row indexes point here
 let filter = ALL;
 let typeFilter = ALL;
-let scope = null;    // null = master PIN (all branches); otherwise locked to one branch
+let scopes = [];     // branches this user may see; empty = every branch
 let current = null;  // the shipment being edited (a copy)
 let identity = "";   // who the audit rows are written as
 
@@ -65,21 +65,21 @@ $("btn-pin").onclick = async () => {
   if (!who.perms.includes("mgr")) {                        // right PIN, wrong screen → send them home
     const page = auth.landingPage(who.perms);
     if (!page) { toast("المستخدم ده مالوش صلاحيات — كلّم الأدمن"); return; }
-    auth.startSession(who.name, who.branch, who.perms, who.user);
+    auth.startSession(who.name, who.branches, who.perms, who.user);
     toast("الصفحة دي مش من صلاحياتك — بنوديك لصفحتك");
     setTimeout(() => auth.goTo(page), 900);
     return;
   }
-  auth.startSession(who.name, who.branch, who.perms, who.user);
+  auth.startSession(who.name, who.branches, who.perms, who.user);
   $("pin-input").value = "";
   enterManager();
 };
 
 function enterManager() {
   const s = auth.session();
-  scope = (s && s.branch) || null;                         // a branch user never loads another branch
+  scopes = (s && s.branches) || [];                        // a scoped user never loads another branch
   identity = (s && s.name) || "مدير";
-  filter = scope || ALL;
+  filter = scopes.length === 1 ? scopes[0] : ALL;
   applyPerms();
   history.replaceState({ screen: "screen-manager" }, "");
   openManager();
@@ -110,9 +110,11 @@ const shortBranch = (b) => b.replace(/^فرع\s+/, ""); // chips stay one line; 
 
 function renderFilter() {
   // a branch manager sees their branch as a locked chip, not a filter
-  const opts = scope ? [scope] : [ALL, ...window.APP_CONFIG.branches.map(b => b.name)];
+  const mine = scopes.length ? scopes : window.APP_CONFIG.branches.map(b => b.name);
+  const opts = scopes.length === 1 ? scopes : [ALL, ...mine];
+  const locked = scopes.length === 1;
   $("branch-filter").innerHTML = opts.map(b =>
-    `<button type="button" data-branch="${esc(b)}" aria-pressed="${b === filter}" ${scope ? "disabled" : ""}>${esc(shortBranch(b))}</button>`).join("");
+    `<button type="button" data-branch="${esc(b)}" aria-pressed="${b === filter}" ${locked ? "disabled" : ""}>${esc(shortBranch(b))}</button>`).join("");
 }
 
 $("branch-filter").onclick = (e) => {
@@ -138,9 +140,9 @@ $("type-filter").onclick = (e) => {
 
 async function openManager() {
   render("screen-manager");
-  if (scope) $("screen-title").textContent = shortBranch(scope);
+  if (scopes.length === 1) $("screen-title").textContent = shortBranch(scopes[0]);
   all = await db.listShipments().catch(() => []);
-  if (scope) all = all.filter(s => s.branch === scope);   // branch managers never load other branches
+  if (scopes.length) all = all.filter(s => scopes.includes(s.branch));   // never load another branch
   renderFilter();
   renderTypeFilter();
   renderList();

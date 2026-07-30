@@ -48,7 +48,7 @@ GitHub Pages للاستضافة، Playwright للاختبارات.
 
 ```bash
 npm install
-npx playwright test          # 35 اختبار
+npx playwright test          # 37 اختبار
 python3 -m http.server 8080  # ثم افتح http://localhost:8080/?test=1
 ```
 

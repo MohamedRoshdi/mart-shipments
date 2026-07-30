@@ -54,12 +54,12 @@ $("btn-pin").onclick = async () => {
   if (!who.perms.includes("adm")) {                 // right PIN, but not for this screen
     const page = auth.landingPage(who.perms);
     if (!page) { toast("المستخدم ده مالوش صلاحيات — كلّم الأدمن"); return; }
-    auth.startSession(who.name, who.branch, who.perms, who.user);
+    auth.startSession(who.name, who.branches, who.perms, who.user);
     toast("الصفحة دي مش من صلاحياتك — بنوديك لصفحتك");
     setTimeout(() => auth.goTo(page), 900);
     return;
   }
-  auth.startSession(who.name, who.branch, who.perms, who.user);
+  auth.startSession(who.name, who.branches, who.perms, who.user);
   $("pin-input").value = "";
   await enterAdmin();
 };
@@ -111,7 +111,7 @@ function renderUsers() {
         </div>
       </div>
       <div class="seg" data-ubranch="${i}">
-        ${branchOpts.map(b => `<button type="button" data-branchpick="${escAttr(b)}" aria-pressed="${(u.branch || "") === b}">${esc(b || "كل الفروع")}</button>`).join("")}
+        ${branchOpts.map(b => `<button type="button" data-branchpick="${escAttr(b)}" aria-pressed="${b ? auth.branchesOf(u).includes(b) : auth.branchesOf(u).length === 0}">${esc(b || "كل الفروع")}</button>`).join("")}
       </div>
       <div class="perm-grid" data-uperms="${i}">
         ${auth.PERMS.map(p => `<button type="button" data-perm="${p.id}" aria-pressed="${(u.perms || []).includes(p.id)}">${esc(p.label)}</button>`).join("")}
@@ -143,7 +143,13 @@ $("users-list").onclick = (e) => {
   const branch = e.target.closest("button[data-branchpick]");
   if (branch) {
     readInputs();
-    cfg.users[+branch.closest("[data-ubranch]").dataset.ubranch].branch = branch.dataset.branchpick;
+    const u = cfg.users[+branch.closest("[data-ubranch]").dataset.ubranch];
+    const pick = branch.dataset.branchpick;
+    const list = auth.branchesOf(u);
+    if (!pick) u.branches = [];                       // "كل الفروع" clears the list
+    else if (list.includes(pick)) u.branches = list.filter(b => b !== pick);
+    else u.branches = [...list, pick];
+    delete u.branch;                                  // the old single-branch field is gone
     renderUsers();
     markDirty();
   }
@@ -151,7 +157,7 @@ $("users-list").onclick = (e) => {
 
 $("btn-add-user").onclick = () => {
   readInputs();
-  cfg.users.push({ name: "مستخدم جديد", pin: "", branch: cfg.branches[0] ? cfg.branches[0].name : "", perms: ["emp", "create"] });
+  cfg.users.push({ name: "مستخدم جديد", pin: "", branches: cfg.branches[0] ? [cfg.branches[0].name] : [], perms: ["emp", "create"] });
   renderUsers();
   markDirty();
 };
@@ -245,10 +251,6 @@ $("btn-save-config").onclick = async () => {
     toast("كل مستخدم لازم يفتح شاشة واحدة على الأقل");
     return;
   }
-  if (cfg.users.some(u => u.perms.includes("emp") && !u.branch)) {
-    toast("موظف الشحنات لازم يكون على فرع محدد");
-    return;
-  }
   const pins = [...cfg.users.map(u => u.pin), ...cfg.branches.map(b => b.pin), cfg.managerPin, cfg.adminPin];
   if (new Set(pins).size !== pins.length) { toast("في رقم سري متكرر — كل واحد لازم يكون لوحده"); return; }
 
@@ -257,7 +259,7 @@ $("btn-save-config").onclick = async () => {
     adminPin: cfg.adminPin,
     branches: cfg.branches.map(b => ({ name: b.name, pin: b.pin })),
     shipmentTypes: cfg.shipmentTypes.filter(Boolean),
-    users: cfg.users.map(u => ({ name: u.name, pin: u.pin, branch: u.branch || "", perms: u.perms.slice() })),
+    users: cfg.users.map(u => ({ name: u.name, pin: u.pin, branches: auth.branchesOf(u), perms: u.perms.slice() })),
   };
   try {
     await db.saveConfig(payload);
@@ -392,7 +394,7 @@ cfgReady = (async () => {
     adminPin: window.APP_CONFIG.adminPin,
     branches: window.APP_CONFIG.branches.map(b => ({ ...b })),
     shipmentTypes: [...window.APP_CONFIG.shipmentTypes],
-    users: (window.APP_CONFIG.users || []).map(u => ({ ...u, perms: (u.perms || []).slice() })),
+    users: (window.APP_CONFIG.users || []).map(u => ({ ...u, branches: auth.branchesOf(u), perms: (u.perms || []).slice() })),
   };
   const s = auth.session();
   if (!s) return;
