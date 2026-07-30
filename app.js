@@ -165,7 +165,9 @@ async function onBarcode(code) {
   $("item-name").textContent = known ? state.currentName : "صنف غير مسجّل في ملف الأصناف";
   $("item-name").classList.toggle("unknown", !known);
   $("item-warn").hidden = known;                 // full explanation instead of a silent add
-  $("btn-add-item").disabled = !known;           // only catalog items can enter a shipment
+  $("qty-row").hidden = !known;                  // nothing to count if the item cannot be added
+  $("btn-add-item").hidden = !known;             // only catalog items can enter a shipment
+  $("btn-add-item").disabled = !known;
   $("item-qty").value = 1;
   showSheet(true);
 }

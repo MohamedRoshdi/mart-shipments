@@ -18,6 +18,8 @@
 }
 
 * { box-sizing: border-box; }
+/* a display:flex/grid class outranks the browser's [hidden] rule — hidden must always win */
+[hidden] { display: none !important; }
 html, body { margin: 0; }
 body {
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;

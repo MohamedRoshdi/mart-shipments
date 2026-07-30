@@ -77,8 +77,9 @@ test('a barcode outside the catalog is refused, with the reason spelled out', as
   await expect(page.locator('#item-warn')).toBeVisible();
   await expect(page.locator('#item-warn')).toContainText('مش موجود في ملف الأصناف، والصنف مش هيتسجّل في الشحنة');
   await expect(page.locator('#item-warn')).toContainText('ابعت الباركود للمدير يضيفه في ملف الأصناف');
-  await expect(page.locator('#btn-add-item')).toBeDisabled();
-  await page.click('#btn-add-item', { force: true });            // even a forced tap adds nothing
+  await expect(page.locator('#btn-add-item')).toBeHidden();      // no add button, no qty stepper
+  await expect(page.locator('#qty-row')).toBeHidden();
+  await page.evaluate(() => document.getElementById('btn-add-item').click());   // forced: still nothing
   await expect(page.locator('#items-list li:not(.empty)')).toHaveCount(0);
   await expect(page.locator('#btn-save-shipment')).toBeDisabled();
 
