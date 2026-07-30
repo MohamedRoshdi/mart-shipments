@@ -437,6 +437,8 @@ test('PWA: manifest served, service worker registers', async ({ page }) => {
   expect(res.ok()).toBeTruthy();
   const resManager = await page.request.get('/manifest-manager.json');
   expect(resManager.ok()).toBeTruthy();
+  const resAdmin = await page.request.get('/manifest-admin.json');
+  expect(resAdmin.ok()).toBeTruthy();
   const resTemplate = await page.request.get('/products-template.csv');
   expect(resTemplate.ok()).toBeTruthy();
   await page.goto('/'); // no ?test → sw registers (initDb error is caught, app still boots)
@@ -459,6 +461,114 @@ test("catalog CSV import on manager page autofills names in employee app", async
   await page.click("#btn-lookup");
   await expect(page.locator("#item-name")).toHaveText("لبن المراعي");
   await expect(page.locator("#btn-add-item")).toBeEnabled();                 // imported → addable
+});
+
+async function openAdmin(page) {
+  await page.goto('/admin.html?test=1');
+  await page.fill('#pin-input', await page.evaluate(() => window.APP_CONFIG.adminPin));
+  await page.click('#btn-pin');
+  await expect(page.locator('#screen-admin')).toBeVisible();
+}
+
+test('admin page: PIN gate, then every setting on one screen', async ({ page }) => {
+  await page.goto('/admin.html?test=1');
+  await page.fill('#pin-input', '0000');
+  await page.click('#btn-pin');
+  await expect(page.locator('#screen-admin')).toBeHidden();
+  await expect(page.locator('#toast')).toContainText('الرقم السري غلط');
+  await openAdmin(page);
+  await expect(page.locator('#branches-list li')).toHaveCount(2);
+  await expect(page.locator('#types-list li')).toHaveCount(3);
+  await expect(page.locator('#cfg-manager-pin')).toHaveValue(
+    await page.evaluate(() => window.APP_CONFIG.managerPin));
+});
+
+test('admin: a saved branch and type reach the employee app and the manager', async ({ page }) => {
+  await openAdmin(page);
+  await page.click('#btn-add-branch');
+  await page.fill('input[data-bname="2"]', 'فرع بنها');
+  await page.fill('input[data-bpin="2"]', '3030');
+  await page.click('#btn-add-type');
+  await page.fill('input[data-tname="3"]', 'إذن تحويل مخزن');
+  await page.click('#btn-save-config');
+  await expect(page.locator('#toast')).toContainText('تم حفظ الإعدادات');
+
+  await page.goto('/?test=1');                                  // employee: new branch, its own PIN
+  await expect(page.locator('button[data-branch="فرع بنها"]')).toBeVisible();
+  await page.fill('#employee-name', 'سيد');
+  await page.click('button[data-branch="فرع بنها"]');
+  await page.fill('#branch-pin', '3030');
+  await page.click('#save-name');
+  await expect(page.locator('#who')).toContainText('فرع بنها');
+  await page.click('#btn-new');
+  await expect(page.locator('#type-picker button[data-type="إذن تحويل مخزن"]')).toBeVisible();
+
+  await page.goto('/manager.html?test=1');                      // manager: both appear as filters
+  await page.fill('#pin-input', await page.evaluate(() => window.APP_CONFIG.managerPin));
+  await page.click('#btn-pin');
+  await expect(page.locator('#branch-filter button[data-branch="فرع بنها"]')).toBeVisible();
+  await expect(page.locator('#type-filter button[data-typefilter="إذن تحويل مخزن"]')).toBeVisible();
+});
+
+test('admin: the audit trail shows what the manager did', async ({ page }) => {
+  await openManagerPage(page);
+  page.on('dialog', (d) => d.accept());
+  await page.click('button[data-act="del"]');
+  await expect(page.locator('#all-shipments li')).toContainText('مفيش شحنات');
+
+  await openAdmin(page);
+  await page.click('#btn-logs');
+  const row = page.locator('#logs-list li').first();
+  await expect(row).toContainText('حذف شحنة');
+  await expect(row).toContainText('شحنة المراعي');
+  await expect(row).toContainText('المدير العام');
+  await page.goBack();
+  await expect(page.locator('#screen-admin')).toBeVisible();
+});
+
+test('admin: bulk delete by type, and it is logged', async ({ page }) => {
+  await page.goto('/admin.html?test=1');
+  await page.evaluate(() => localStorage.setItem('test-shipments', JSON.stringify([
+    { name: 'استلام 1', createdBy: 'أحمد', branch: 'فرع قويسنا', type: 'إذن استلام', createdAt: 1753700000000, items: [] },
+    { name: 'مرتجع 1', createdBy: 'أحمد', branch: 'فرع قويسنا', type: 'إذن مرتجع', createdAt: 1753600000000, items: [] },
+  ])));
+  await page.fill('#pin-input', await page.evaluate(() => window.APP_CONFIG.adminPin));
+  await page.click('#btn-pin');
+  await expect(page.locator('#btn-bulk-delete')).toHaveText('حذف المطابق (2)');
+  await page.click('#bulk-type button[data-bulktype="إذن مرتجع"]');
+  await expect(page.locator('#btn-bulk-delete')).toHaveText('حذف المطابق (1)');
+
+  page.on('dialog', (d) => d.accept());
+  await page.click('#btn-bulk-delete');
+  await expect(page.locator('#toast')).toContainText('تم حذف 1 شحنة');
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('test-shipments')).map(s => s.name)))
+    .toEqual(['استلام 1']);
+  await page.click('#btn-logs');
+  await expect(page.locator('#logs-list li').first()).toContainText('حذف شحنات بالجملة');
+});
+
+test('manager: ZIP export puts each shipment in a folder named after its type', async ({ page }) => {
+  await page.goto('/manager.html?test=1');
+  await page.evaluate(() => localStorage.setItem('test-shipments', JSON.stringify([
+    { name: 'شحنة اللحمة', createdBy: 'أحمد', branch: 'فرع قويسنا', type: 'إذن استلام',
+      createdAt: 1753700000000, items: [{ barcode: '111', name: 'لبن', qty: 3 }] },
+    { name: 'مرتجع الألبان', createdBy: 'أحمد', branch: 'فرع قويسنا', type: 'إذن مرتجع',
+      createdAt: 1753600000000, items: [{ barcode: '222', name: 'جبنة', qty: 1 }] },
+  ])));
+  await page.fill('#pin-input', await page.evaluate(() => window.APP_CONFIG.managerPin));
+  await page.click('#btn-pin');
+  const dl = (await Promise.all([
+    page.waitForEvent('download'),
+    page.click('#btn-export-zip'),
+  ]))[0];
+  expect(dl.suggestedFilename()).toMatch(/^شحنات-\d{4}-\d{2}-\d{2}\.zip$/);
+  const buf = require('fs').readFileSync(await dl.path());
+  expect([...buf.slice(0, 4)]).toEqual([0x50, 0x4b, 0x03, 0x04]);   // local file header signature
+  const raw = buf.toString('utf8');           // stored, not compressed: names and rows are literal
+  expect(raw).toContain('إذن استلام/شحنة اللحمة.csv');
+  expect(raw).toContain('إذن استلام/شحنة اللحمة.txt');
+  expect(raw).toContain('إذن مرتجع/مرتجع الألبان.csv');
+  expect(raw).toContain('111\t3');
 });
 
 test("draft survives reload", async ({ page }) => {

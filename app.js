@@ -324,10 +324,14 @@ addEventListener("online", updateSync);
 addEventListener("offline", updateSync);
 
 (async () => {
-  renderBranchPicker();
   const ok = await db.initDb().then(() => true).catch((e) => { console.error(e); return false; });
   dbBroken = !ok;
   updateSync();
+  // branches, PINs and types the admin edited win over the ones shipped in the code
+  Object.assign(window.APP_CONFIG, await db.getConfig().catch(() => ({})));
+  state.branch = myBranch();
+  if (!types().includes(state.type)) state.type = types()[0];
+  renderBranchPicker();
   if (myName()) {
     history.replaceState({ screen: "screen-home" }, "");
     goHome();

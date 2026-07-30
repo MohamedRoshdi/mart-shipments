@@ -7,7 +7,10 @@ window.FIREBASE_CONFIG = {
   authDomain: "shipments-alaela-mart.firebaseapp.com",
   messagingSenderId: "430785723659"
 };
+// القيم دي هي الأساس. لو الأدمن غيّر الإعدادات من صفحة النظام، اللي في قاعدة البيانات
+// بيغلب اللي هنا — ما عدا رقم الأدمن اللي تحت: بيفضل شغال دايمًا كصمام أمان ضد القفل.
 window.APP_CONFIG = {
+  adminPin: '7007',                   // الأدمن: الإعدادات + آخر العمليات + الأدوات الخطرة
   managerPin: '1994',                 // يشوف كل الفروع
   branches: [
     { name: 'فرع قويسنا', pin: '1010' },

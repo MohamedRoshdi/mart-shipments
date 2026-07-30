@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#171a1c">
+  <title>شحنات المحل — النظام</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="manifest" href="manifest-admin.json">
+</head>
+<body>
+  <header class="appbar">
+    <button id="btn-back" class="icon-btn" hidden aria-label="رجوع">→</button>
+    <h1 id="screen-title">إعدادات النظام</h1>
+    <button id="btn-logs" class="icon-btn" hidden>آخر العمليات</button>
+    <span id="sync-state" class="sync"></span>
+  </header>
+
+  <main>
+    <section id="screen-pin" hidden>
+      <h2>رقم الأدمن</h2>
+      <input id="pin-input" type="password" inputmode="numeric" maxlength="8" dir="ltr" placeholder="••••">
+      <button id="btn-pin" class="primary big">دخول</button>
+    </section>
+
+    <section id="screen-admin" hidden>
+      <h2>الفروع</h2>
+      <ul id="branches-list"></ul>
+      <button id="btn-add-branch" class="ghost">+ إضافة فرع</button>
+
+      <h2>أنواع الشحنات</h2>
+      <ul id="types-list"></ul>
+      <button id="btn-add-type" class="ghost">+ إضافة نوع</button>
+
+      <h2>الأرقام السرية</h2>
+      <ul>
+        <li>
+          <div class="card-main">
+            <div class="card-title">المدير العام</div>
+            <div class="meta">يشوف شحنات كل الفروع من صفحة المدير</div>
+          </div>
+          <input id="cfg-manager-pin" type="text" inputmode="numeric" maxlength="8" dir="ltr">
+        </li>
+        <li>
+          <div class="card-main">
+            <div class="card-title">الأدمن</div>
+            <div class="meta">يفتح الصفحة دي: الإعدادات وآخر العمليات والأدوات الخطرة</div>
+          </div>
+          <input id="cfg-admin-pin" type="text" inputmode="numeric" maxlength="8" dir="ltr">
+        </li>
+      </ul>
+      <p class="meta">رقم الأدمن المكتوب جوه ملف الإعدادات في الكود بيفضل شغال دايمًا كصمام أمان — يعني لو حد غيّر الأرقام من هنا، لسه بتقدر تدخل بالرقم الأصلي وتصلّح.</p>
+
+      <h2>أدوات خطرة</h2>
+      <ul>
+        <li>
+          <div class="card-main">
+            <div class="card-title">حذف شحنات بالجملة</div>
+            <div class="meta">اختار الفرع والنوع، وبعدين احذف كل الشحنات المطابقة. مفيش رجوع.</div>
+          </div>
+          <div id="bulk-branch" class="seg"></div>
+          <div id="bulk-type" class="seg"></div>
+          <div class="row-actions">
+            <button id="btn-bulk-delete" class="danger">حذف المطابق</button>
+          </div>
+        </li>
+        <li>
+          <div class="card-main">
+            <div class="card-title">مسح ملف الأصناف</div>
+            <div class="meta">يشيل كل الأصناف المستوردة. بعد كده مفيش باركود هيتقبل في أي شحنة لحد ما تستورد الملف تاني.</div>
+          </div>
+          <div class="row-actions">
+            <button id="btn-wipe-products" class="danger">مسح كل الأصناف</button>
+          </div>
+        </li>
+      </ul>
+
+      <div class="bottombar">
+        <span id="cfg-dirty" class="count"></span>
+        <button id="btn-save-config" class="primary grow">حفظ الإعدادات</button>
+      </div>
+    </section>
+
+    <section id="screen-logs" hidden>
+      <p id="logs-count" class="meta"></p>
+      <ul id="logs-list"></ul>
+    </section>
+  </main>
+
+  <div id="toast"></div>
+  <script src="firebase-config.js"></script>
+  <script type="module" src="admin.js"></script>
+</body>
+</html>

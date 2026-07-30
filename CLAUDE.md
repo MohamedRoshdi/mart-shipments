@@ -2,7 +2,8 @@
 
 Shipment-intake PWA for a two-branch Egyptian supermarket. Employees scan barcodes
 into a shipment on their phones; a manager page reviews, edits, exports and manages
-the product catalog. Arabic-only UI, RTL, offline-capable, free to run.
+the product catalog; an admin page owns the settings, the audit trail and the
+destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 
 ## Hard rules for this repo
 
@@ -20,7 +21,7 @@ the product catalog. Arabic-only UI, RTL, offline-capable, free to run.
 5. **`db.js` is the only file that knows where data lives.** `app.js` and
    `manager.js` never touch Firestore or localStorage keys directly.
 6. **Bump `CACHE` in `sw.js` on every deploy.** Serving is cache-first, so phones
-   keep the old bundle until the cache name changes. Currently `mart-v14`.
+   keep the old bundle until the cache name changes. Currently `mart-v15`.
 7. **Deploy = push to master.** GitHub Pages serves the repo root. Firestore rules
    deploy separately: `npx firebase deploy --only firestore:rules --project shipments-alaela-mart`.
 
@@ -30,10 +31,12 @@ the product catalog. Arabic-only UI, RTL, offline-capable, free to run.
 |---|---|
 | `index.html` / `app.js` | employee app: setup, home, new/edit shipment, camera, item sheet |
 | `manager.html` / `manager.js` | manager app: PIN, shipment list, shipment edit, catalog screen, import/export |
+| `admin.html` / `admin.js` | admin app: settings (branches, PINs, types), audit trail, bulk delete, catalog wipe |
 | `db.js` | data layer; `?test=1` switches the whole app to localStorage |
-| `style.css` | one stylesheet for both pages |
-| `sw.js`, `manifest.json`, `manifest-manager.json` | two installable PWAs (employee + manager) |
-| `firebase-config.js` | Firebase keys **plus** `APP_CONFIG`: PINs, branches, shipment types |
+| `zip.js` | store-only ZIP writer, ~80 lines, no dependency; used by the folder export |
+| `style.css` | one stylesheet for all three pages |
+| `sw.js`, `manifest.json`, `manifest-manager.json`, `manifest-admin.json` | three installable PWAs (employee + manager + admin) |
+| `firebase-config.js` | Firebase keys **plus** `APP_CONFIG`: PINs (incl. `adminPin`), branches, shipment types |
 | `firestore.rules` | shape validation; the only server-side guard that exists |
 | `SETUP.md` | Arabic guide for the shop owner |
 | `tests/app.spec.js` | 22 Playwright tests, all in localStorage mode |
@@ -46,7 +49,16 @@ the product catalog. Arabic-only UI, RTL, offline-capable, free to run.
 
 `products/{barcode}` — `{ name }`. The barcode **is** the document id.
 
+`config/app` — `{ managerPin, adminPin, branches: [{name, pin}], shipmentTypes: [] }`.
+The admin page writes it; every page merges it over `window.APP_CONFIG` at boot, so the
+shipped `firebase-config.js` is only a fallback. A missing doc changes nothing.
+
+`logs/{auto}` — `{ who, action, target, at }`. Append-only audit trail: manager and admin
+mutations write a row, `update`/`delete` are denied by the rules.
+
 Rules in force (all live-tested):
+- `config`: only the doc id `app`, only those four keys, PINs ≤ 8 chars, lists ≤ 10.
+- `logs`: create-only with the four keys; `update`/`delete` always denied.
 - create: key allow-list, types, sizes, `items` ≤ 200.
 - update: `name`, `items`, `type` may change; `createdBy`, `createdAt` and
   **`branch` are immutable** (403 on any attempt).
@@ -62,6 +74,17 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   refusal sheet (`#item-warn`), hides the qty stepper and the add button, and
   `btn-add-item` also refuses when called programmatically. Item names are never
   typed by employees — they come from `products` only.
+- **`window.APP_CONFIG` is mutated at boot, not read fresh.** `app.js` awaits the merge
+  inside its boot IIFE; `manager.js` and `admin.js` paint the PIN screen first and make the
+  PIN handler `await cfgReady`. Anything that reads branches/types before that merge sees
+  the code defaults — that is why `state.branch` is recomputed after it.
+- **`CODE_ADMIN_PIN` must stay.** `config/app` is publicly writable, so a wrong (or hostile)
+  save could otherwise lock the owner out for good. The admin PIN in `firebase-config.js`
+  always opens both the admin page and the manager's master view; captured at module load,
+  before the merge overwrites `APP_CONFIG.adminPin`.
+- **The ZIP is store-only on purpose.** Folder structure comes from `/` inside the entry
+  names plus flag bit `0x0800` for UTF-8; a browser download cannot create folders itself
+  (Chrome rewrites `/` in the file name). Verified with `python3 -c` + `zipfile.testzip()`.
 - **Every `db.js` export awaits `live()`**, which resolves `initDb()`. Without it a
   call that lands before the Firebase SDK finishes throws on `fs` being null — this
   once made the catalog import silently save 0 rows.
@@ -84,7 +107,7 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
 ## Commands
 
 ```bash
-npx playwright test                 # 22 tests, localStorage mode, ~10s
+npx playwright test                 # 27 tests, localStorage mode, ~12s
 npx playwright test -g "catalog"    # one group
 python3 -m http.server 8080         # serve locally, then open /?test=1
 node scripts/make-icons.mjs         # regenerate the PWA icons
@@ -97,6 +120,7 @@ STAMP=$RANDOM node scripts/live-check.mjs        # employee → manager full loo
 STAMP=$RANDOM node scripts/live-mobile.mjs       # same, Pixel 5 emulation + PWA signals
 STAMP=$RANDOM node scripts/live-products.mjs     # catalog: import, rename, delete
 node scripts/live-search-name.mjs                # proves search reaches past the loaded page
+node scripts/live-admin.mjs                      # admin page, settings doc, audit trail, rule probes, ZIP
 OUT=/tmp/shots node scripts/shots.mjs            # local screenshots (needs the server above)
 ```
 
@@ -128,6 +152,11 @@ debounce, or it reports false negatives.
 ## Known limits (accepted, not bugs)
 
 - No auth. Anyone with the URL can read, write and delete. Rules only validate shape.
+  That now includes `config/app` (someone could rotate the PINs) and `logs` (someone could
+  append a fake row) — the code-side admin PIN is the way back in, and audit rows cannot be
+  edited or removed once written.
+- `scripts/live-admin.mjs` leaves one audit row behind on purpose: the rules forbid deleting
+  audit rows, so a live check of that collection cannot clean up after itself.
 - Catalog search matches the **start** of a name; mid-word search needs a search service.
 - The sync chip reports connectivity (`navigator.onLine`), not real sync state.
 - Camera scanning can only be verified on a physical phone.

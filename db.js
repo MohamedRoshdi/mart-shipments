@@ -134,6 +134,78 @@ export async function deleteProduct(barcode) {
   await fs.deleteDoc(fs.doc(dbRef, 'products', barcode));
 }
 
+// One admin-editable settings doc: branches, PINs, shipment types. What it returns is
+// merged over the shipped firebase-config.js, so a missing doc changes nothing.
+export async function getConfig() {
+  if (TEST_MODE) return lsObj('test-config');
+  await live();
+  const snap = await fs.getDoc(fs.doc(dbRef, 'config', 'app'));
+  return snap.exists() ? snap.data() : {};
+}
+
+export async function saveConfig(cfg) {
+  if (TEST_MODE) {
+    localStorage.setItem('test-config', JSON.stringify(cfg));
+    return;
+  }
+  await live();
+  await fs.setDoc(fs.doc(dbRef, 'config', 'app'), cfg);
+}
+
+// Audit row. Never throws and never blocks the action it records — a lost log line
+// must not turn a working delete into a failed one.
+export async function logAction(who, action, target) {
+  const row = {
+    who: String(who || '—').slice(0, 60),
+    action: String(action).slice(0, 40),
+    target: String(target || '').slice(0, 120),
+    at: Date.now(),
+  };
+  try {
+    if (TEST_MODE) {
+      const all = lsArr('test-logs');
+      all.push(row);
+      localStorage.setItem('test-logs', JSON.stringify(all));
+      return;
+    }
+    await live();
+    fs.addDoc(fs.collection(dbRef, 'logs'), row).catch(console.error);
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+export async function listLogs(max = 100) {
+  if (TEST_MODE) return lsArr('test-logs').sort((a, b) => b.at - a.at).slice(0, max);
+  await live();
+  const snap = await fs.getDocs(
+    fs.query(fs.collection(dbRef, 'logs'), fs.orderBy('at', 'desc'), fs.limit(max))
+  );
+  return snap.docs.map((d) => d.data());
+}
+
+// admin bulk delete for either collection; 500 writes is the Firestore batch limit
+export async function deleteMany(collection, ids) {
+  if (TEST_MODE) {
+    if (collection === 'shipments') {
+      const keep = lsArr('test-shipments').filter((s) => !ids.includes(String(s.createdAt)));
+      localStorage.setItem('test-shipments', JSON.stringify(keep));
+    } else {
+      const map = lsObj('test-products');
+      ids.forEach((id) => delete map[id]);
+      localStorage.setItem('test-products', JSON.stringify(map));
+    }
+    return ids.length;
+  }
+  await live();
+  for (let i = 0; i < ids.length; i += 500) {
+    const batch = fs.writeBatch(dbRef);
+    ids.slice(i, i + 500).forEach((id) => batch.delete(fs.doc(dbRef, collection, id)));
+    await batch.commit();
+  }
+  return ids.length;
+}
+
 export async function saveProductName(barcode, name) {
   if (TEST_MODE) {
     const map = lsObj('test-products');

@@ -1,4 +1,5 @@
 import * as db from "./db.js";
+import { zipBlob } from "./zip.js";
 
 const $ = (id) => document.getElementById(id);
 const esc = (t) => { const d = document.createElement("div"); d.textContent = t; return d.innerHTML; };
@@ -28,6 +29,12 @@ let filter = ALL;
 let typeFilter = ALL;
 let scope = null;    // null = master PIN (all branches); otherwise locked to one branch
 let current = null;  // the shipment being edited (a copy)
+let identity = "";   // who the audit rows are written as
+
+// same safety valve as the admin page: the PIN in the code always opens the master view
+const CODE_ADMIN_PIN = window.APP_CONFIG.adminPin;
+
+let cfgReady = null; // resolves once the admin's stored settings are merged in
 
 /* ---------- navigation ---------- */
 
@@ -49,13 +56,19 @@ $("btn-back").onclick = () => history.back();
 
 /* ---------- unlock ---------- */
 
-$("btn-pin").onclick = () => {
+$("btn-pin").onclick = async () => {
+  await cfgReady;                                          // the admin's settings win over the shipped ones
   const cfg = window.APP_CONFIG;
   const entered = $("pin-input").value;
   const branch = cfg.branches.find(b => b.pin === entered);
-  if (entered === cfg.managerPin) scope = null;            // master: every branch
-  else if (branch) scope = branch.name;                    // branch manager: their branch only
-  else { toast("الرقم السري غلط"); return; }
+  const admin = entered === cfg.adminPin || entered === CODE_ADMIN_PIN;
+  if (admin || entered === cfg.managerPin) {               // master: every branch
+    scope = null;
+    identity = admin ? "الأدمن" : "المدير العام";
+  } else if (branch) {                                     // branch manager: their branch only
+    scope = branch.name;
+    identity = branch.name;
+  } else { toast("الرقم السري غلط"); return; }
   filter = scope || ALL;
   $("pin-input").value = "";
   history.replaceState({ screen: "screen-manager" }, "");
@@ -134,6 +147,7 @@ $("all-shipments").onclick = async (e) => {
     if (!confirm(`حذف «${s.name}»؟ مش هينفع ترجّعها.`)) return;
     try {
       await db.deleteShipment(s._id);
+      db.logAction(identity, "حذف شحنة", `${s.name} · ${s.branch || ""}`);
       toast("تم الحذف");
     } catch (err) {
       console.error(err);
@@ -157,8 +171,8 @@ async function copyShipment(s) {
   }
 }
 
-function download(filename, text, type) {
-  const url = URL.createObjectURL(new Blob([text], { type }));
+function downloadBlob(filename, blob) {
+  const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
   a.download = filename;
@@ -166,21 +180,24 @@ function download(filename, text, type) {
   setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
+const download = (filename, text, type) => downloadBlob(filename, new Blob([text], { type }));
+
 // BOM + CRLF so Excel opens the Arabic columns correctly
-function downloadCsv(filename, rows) {
-  const csv = "﻿" + rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\r\n");
-  download(filename, csv, "text/csv;charset=utf-8");
-}
+const csvText = (rows) => "﻿" + rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\r\n");
+
+const downloadCsv = (filename, rows) => download(filename, csvText(rows), "text/csv;charset=utf-8");
 
 const downloadTxt = (filename, text) => download(filename, text, "text/plain;charset=utf-8");
 
 function safeName(t) { return String(t).replace(/[\\/:*?"<>|]/g, "-").slice(0, 60); }
 
+const shipmentRows = (s) => [
+  ["الباركود", "اسم الصنف", "الكمية"],
+  ...s.items.map(i => [i.barcode, i.name || "", i.qty]),
+];
+
 function downloadShipment(s) {
-  downloadCsv(`${safeName(s.name)}.csv`, [
-    ["الباركود", "اسم الصنف", "الكمية"],
-    ...s.items.map(i => [i.barcode, i.name || "", i.qty]),
-  ]);
+  downloadCsv(`${safeName(s.name)}.csv`, shipmentRows(s));
   toast("تم تحميل ملف Excel");
 }
 
@@ -205,6 +222,24 @@ $("btn-export-all-txt").onclick = () => {
   if (!shown.length) { toast("مفيش شحنات تتحمّل"); return; }
   downloadTxt(exportName("txt"), shown.map(s => shipmentText(s)).join("\n"));
   toast("تم تحميل ملف TXT");
+};
+
+// One archive, a folder per shipment type, both file shapes inside. Two shipments with
+// the same name in the same type folder would overwrite each other, so the second gets (2).
+$("btn-export-zip").onclick = () => {
+  if (!shown.length) { toast("مفيش شحنات تتحمّل"); return; }
+  const used = new Set();
+  const files = [];
+  for (const s of shown) {
+    const base = `${safeName(s.type || "بدون نوع")}/${safeName(s.name)}`;
+    let path = base;
+    for (let n = 2; used.has(path); n++) path = `${base} (${n})`;
+    used.add(path);
+    files.push({ path: `${path}.csv`, text: csvText(shipmentRows(s)) });
+    files.push({ path: `${path}.txt`, text: shipmentText(s) });
+  }
+  downloadBlob(`شحنات-${new Date().toLocaleDateString("en-CA")}.zip`, zipBlob(files));
+  toast(`تم تحميل ${shown.length} شحنة في مجلدات`);
 };
 
 /* ---------- edit one shipment ---------- */
@@ -261,6 +296,7 @@ $("btn-save-edit").onclick = async () => {
   if (!name) { toast("اكتب اسم الشحنة"); return; }
   try {
     await db.updateShipment(current._id, { name, items: current.items, type: current.type });
+    db.logAction(identity, "تعديل شحنة", `${name} · ${current.items.length} صنف`);
     toast("تم حفظ التعديلات");
     history.replaceState({ screen: "screen-manager" }, "");
     openManager();
@@ -351,6 +387,7 @@ $("products-list").onclick = async (e) => {
   if (!confirm(`حذف «${p.name}» من ملف الأصناف؟`)) return;
   try {
     await db.deleteProduct(barcode);
+    db.logAction(identity, "حذف صنف", `${barcode} — ${p.name}`);
     products = products.filter(x => x.barcode !== barcode);
     edits.delete(barcode);
     renderProducts();
@@ -372,6 +409,7 @@ $("btn-save-products").onclick = async () => {
       edits.delete(barcode);
       n++;
     }
+    if (n) db.logAction(identity, "تعديل أسماء أصناف", `${n} صنف`);
     toast(`تم حفظ ${n} اسم`);
   } catch (err) {
     console.error(err);
@@ -406,6 +444,7 @@ $("import-file").onchange = async (e) => {
   let n = 0;
   try {
     for (const c of rows) { await db.saveProductName(c[0].trim().replace(/^﻿/, ""), c.slice(1).join(" ").trim()); n++; }
+    db.logAction(identity, "استيراد أصناف", `${n} صنف`);
     toast(`تم استيراد ${n} صنف`);
   } catch (err) {
     console.error(err);
@@ -443,4 +482,8 @@ if ("serviceWorker" in navigator && !new URLSearchParams(location.search).has("t
   navigator.serviceWorker.register("./sw.js");
 }
 
-db.initDb().catch(console.error);
+// PIN screen paints straight away; the PIN check waits for this instead
+cfgReady = (async () => {
+  await db.initDb().catch(console.error);
+  Object.assign(window.APP_CONFIG, await db.getConfig().catch(() => ({})));
+})();

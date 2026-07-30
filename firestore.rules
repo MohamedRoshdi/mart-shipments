@@ -25,6 +25,25 @@ service cloud.firestore {
         && request.resource.data.items is list && request.resource.data.items.size() <= 200;
       allow delete: if true;
     }
+    // admin settings: one doc, fixed key set, short PINs, small lists
+    match /config/{doc} {
+      allow read: if true;
+      allow write: if doc == 'app'
+        && request.resource.data.keys().hasOnly(['managerPin', 'adminPin', 'branches', 'shipmentTypes'])
+        && request.resource.data.managerPin is string && request.resource.data.managerPin.size() <= 8
+        && request.resource.data.adminPin is string && request.resource.data.adminPin.size() <= 8
+        && request.resource.data.branches is list && request.resource.data.branches.size() <= 10
+        && request.resource.data.shipmentTypes is list && request.resource.data.shipmentTypes.size() <= 10;
+    }
+    match /logs/{id} {
+      allow read: if true;
+      allow create: if request.resource.data.keys().hasOnly(['who', 'action', 'target', 'at'])
+        && request.resource.data.who is string && request.resource.data.who.size() <= 60
+        && request.resource.data.action is string && request.resource.data.action.size() <= 40
+        && request.resource.data.target is string && request.resource.data.target.size() <= 120
+        && request.resource.data.at is number;
+      allow update, delete: if false;   // an audit row you can edit is not an audit row
+    }
     match /products/{barcode} {
       allow read: if true;
       allow delete: if true;
