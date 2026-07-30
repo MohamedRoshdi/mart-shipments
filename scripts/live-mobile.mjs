@@ -2,11 +2,15 @@
 // Three browser contexts = three phones, because the session lives in localStorage and one
 // context would have the employee, the manager and the admin overwriting each other.
 import { chromium, devices } from "@playwright/test";
-import { readFileSync, mkdirSync } from "fs";
+import { readFileSync, writeFileSync, mkdirSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 
 const BASE = "https://mohamedroshdi.github.io/mart-shipments";
 const STAMP = "فحص-موبايل-" + process.env.STAMP;
 const UPIN = "87" + String(process.env.STAMP || "01").slice(-2);
+const SCODE = "999" + process.env.STAMP;                 // a product this run creates and deletes
+const CSTAMP = "جرد-موبايل-" + process.env.STAMP;
 const OUT = process.env.OUT || "/tmp/shots";
 const SYNC = 4000;
 const log = (...a) => console.log("[mobile]", ...a);
@@ -46,7 +50,7 @@ await adm.tap("#btn-add-user");
 await adm.fill(`input[data-uname="${UI}"]`, "فحص موبايل");
 await adm.fill(`input[data-upin="${UI}"]`, UPIN);
 await adm.tap(`[data-ubranch="${UI}"] button[data-branchpick="${branchNames[1]}"]`);   // both branches
-for (const p of ["mgr", "edit", "del", "download", "products"]) {
+for (const p of ["mgr", "edit", "del", "download", "products", "count"]) {
   await adm.tap(`[data-uperms="${UI}"] button[data-perm="${p}"]`);
 }
 await adm.tap("#btn-save-config");
@@ -184,30 +188,116 @@ await mgr.waitForTimeout(SYNC);
 log("20. shipment deleted (cleanup ok):",
   !(await mgr.locator("#all-shipments li").allInnerTexts()).some(t => t.includes(STAMP)));
 
+/* ---- الجرد on the phone: the manager loads the quantities, the employee counts a shelf ---- */
+const sheet = join(tmpdir(), `stock-${SCODE}.csv`);
+writeFileSync(sheet, `﻿الباركود,اسم الصنف,الكمية\r\n${SCODE},صنف جرد موبايل,10\r\n`);
+await mgr.setInputFiles("#stock-file", sheet);
+await mgr.waitForTimeout(SYNC);
+log("21. stock sheet imported:", await mgr.locator("#toast").innerText());
+
+await page.reload({ waitUntil: "load" });
+await page.waitForSelector("#screen-home:not([hidden])", { timeout: 20000 });
+log("22. جرد button on the employee phone:", await page.locator("#btn-count").isVisible());
+await page.tap("#btn-count");
+await page.waitForSelector("#screen-new:not([hidden])");
+await page.fill("#shipment-name", CSTAMP);
+await page.fill("#barcode-input", SCODE);
+await page.press("#barcode-input", "Enter");
+await page.waitForSelector("#item-form:not([hidden])");
+log("23. system quantity shown before counting:", await page.locator("#item-stock-qty").innerText(),
+  "| type picker hidden:", await page.locator("#new-type-row").isHidden());
+await shot("9-count-sheet");
+await page.fill("#item-qty", "7");
+await page.tap("#btn-add-item");
+log("24. row verdict:", (await page.locator("#items-list li").first().innerText()).replace(/\s+/g, " ").trim());
+await shot("10-count");
+await page.tap("#btn-save-shipment");
+await page.waitForSelector("#screen-home:not([hidden])");
+await page.waitForTimeout(SYNC);
+log("25. saved:", await page.locator("#toast").innerText().catch(() => ""),
+  "| home list shows the difference:", (await page.locator("#my-counts").innerText()).includes("الفرق ناقص 3"));
+
+await mgr.reload({ waitUntil: "load" });
+await mgr.waitForSelector("#screen-manager:not([hidden])", { timeout: 20000 });
+await mgr.waitForTimeout(SYNC);
+await mgr.tap('#list-tabs button[data-tab="count"]');
+async function waitForCount(p, stamp, tries = 10) {
+  for (let i = 0; i < tries; i++) {
+    const texts = await p.locator("#all-counts li").allInnerTexts();
+    const at = texts.findIndex((t) => t.includes(stamp));
+    if (at >= 0) return { at, texts };
+    await p.waitForTimeout(2000);
+    await p.tap('#list-tabs button[data-tab="count"]').catch(() => {});
+  }
+  return { at: -1, texts: await p.locator("#all-counts li").allInnerTexts() };
+}
+const { at: ci, texts: crows } = await waitForCount(mgr, CSTAMP);
+log("26. manager الجرد tab has it:", ci >= 0, "|", (crows[ci] || "").replace(/\s+/g, " ").trim());
+await mgr.screenshot({ path: `${OUT}/m-11-counts.png` });
+
+const cdl = (await Promise.all([
+  mgr.waitForEvent("download"),
+  mgr.tap(`#all-counts button[data-cact="download"][data-i="${ci}"]`),
+]))[0];
+const ccsv = readFileSync(await cdl.path(), "utf8");
+log("27. excel:", cdl.suggestedFilename(), "| row:", ccsv.split("\r\n")[1]);
+
+await mgr.tap(`#all-counts button[data-cact="del"][data-i="${ci}"]`);
+await mgr.waitForTimeout(SYNC);
+await mgr.reload({ waitUntil: "load" });
+await mgr.waitForSelector("#screen-manager:not([hidden])", { timeout: 20000 });
+await mgr.waitForTimeout(SYNC);
+await mgr.tap('#list-tabs button[data-tab="count"]');
+log("28. count deleted (cleanup ok):",
+  !(await mgr.locator("#all-counts li").allInnerTexts()).some(t => t.includes(CSTAMP)));
+await mgr.tap("#btn-products");
+await mgr.waitForTimeout(SYNC);
+await mgr.fill("#product-search", SCODE);
+await mgr.waitForTimeout(SYNC);
+if (await mgr.locator(`button[data-delproduct="${SCODE}"]`).count()) {
+  await mgr.tap(`button[data-delproduct="${SCODE}"]`);
+  await mgr.waitForTimeout(SYNC);
+}
+await mgr.fill("#product-search", SCODE);
+await mgr.waitForTimeout(SYNC);
+log("29. temp product deleted (cleanup ok):",
+  (await mgr.locator(`input[data-barcode="${SCODE}"]`).count()) === 0);
+await mgr.goBack();
+
+/* ---- camera settings screen on the phone ---- */
+await page.tap("#btn-cam");
+await page.waitForSelector("#screen-cam:not([hidden])");
+await page.waitForTimeout(2500);
+log("30. camera screen:", (await page.locator("#res-picker button").allInnerTexts()).join("/"),
+  "| focus toggle:", await page.locator("#btn-focus").getAttribute("aria-pressed"),
+  "| cameras listed:", await page.locator("#cam-list button[data-cam]").count());
+await shot("12-camera");
+await page.goBack();
+
 /* ---- ZIP export on the phone: one folder per shipment type ---- */
 const zip = (await Promise.all([mgr.waitForEvent("download"), mgr.tap("#btn-export-zip")]))[0];
 const zipPath = `${OUT}/m-shipments.zip`;
 await zip.saveAs(zipPath);
 const zipBytes = readFileSync(zipPath);
-log("21. zip:", zip.suggestedFilename(), zipBytes.length, "bytes | signature ok:",
+log("31. zip:", zip.suggestedFilename(), zipBytes.length, "bytes | signature ok:",
   zipBytes[0] === 0x50 && zipBytes[1] === 0x4b);
 
 /* ---- admin phone: audit trail, then remove the throwaway user ---- */
 await adm.tap("#btn-logs");
 await adm.waitForTimeout(5000);
 const logRows = await adm.locator("#logs-list li").allInnerTexts();
-log("22. audit trail rows:", logRows.length,
+log("32. audit trail rows:", logRows.length,
   "| this run's delete is in it:", logRows.some(t => t.includes(STAMP)));
 log("    newest:", (logRows[0] || "").replace(/\n/g, " | "));
 await adm.screenshot({ path: `${OUT}/m-8-logs.png` });
 await adm.goBack();
-log("23. back from logs → settings:", !(await adm.locator("#screen-admin").isHidden()));
+log("33. back from logs → settings:", !(await adm.locator("#screen-admin").isHidden()));
 await adm.screenshot({ path: `${OUT}/m-7-admin.png` });
 
 await adm.tap(`button[data-deluser="${UI}"]`);
 await adm.tap("#btn-save-config");
 await adm.waitForTimeout(SYNC);
-log("24. temp user removed:", (await adm.locator("#users-list li.user-card").count()) === usersBefore,
+log("34. temp user removed:", (await adm.locator("#users-list li.user-card").count()) === usersBefore,
   "| users left:", await adm.locator("#users-list li.user-card").count());
 
 /* ---- PWA signals on the phone ---- */
@@ -217,6 +307,6 @@ const pwa = await page.evaluate(async () => {
   const a = await fetch("manifest-admin.json").then(r => r.json());
   return { sw: !!reg.active, name: m.name, display: m.display, admin: a.short_name, adminStart: a.start_url };
 });
-log("25. PWA:", JSON.stringify(pwa));
+log("35. PWA:", JSON.stringify(pwa));
 
 await browser.close();

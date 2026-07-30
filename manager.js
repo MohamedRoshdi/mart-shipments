@@ -220,14 +220,16 @@ $("all-shipments").onclick = async (e) => {
 // what the count found against what the system claims; an item with no system quantity
 // counts as a pure surplus, which is exactly what it is on the shelf
 const countDiff = (c) => c.items.reduce((n, i) => n + (Number(i.qty) || 0) - (Number(i.sys) || 0), 0);
-const withSign = (n) => (n > 0 ? `+${n}` : String(n));
+const withSign = (n) => (n > 0 ? `+${n}` : String(n));            // files: Excel wants the sign
+// screen: a leading minus next to Arabic text renders on the wrong side, so use words
+const diffWord = (n) => (n === 0 ? "مظبوط" : (n > 0 ? `زيادة ${n}` : `ناقص ${-n}`));
 
 function renderCounts() {
   shownCounts = counts.filter(c => filter === ALL || c.branch === filter);
   $("all-counts").innerHTML = shownCounts.map((c, i) => `<li>
       <div class="card-main">
         <div class="card-title">${esc(c.name)}</div>
-        <div class="meta">${esc(c.branch || "بدون فرع")} · ${esc(c.createdBy)} · ${fmtDate(c.createdAt)} · ${c.items.length} صنف · الفرق ${esc(withSign(countDiff(c)))}</div>
+        <div class="meta">${esc(c.branch || "بدون فرع")} · ${esc(c.createdBy)} · ${fmtDate(c.createdAt)} · ${c.items.length} صنف · الفرق ${esc(diffWord(countDiff(c)))}</div>
       </div>
       <div class="row-actions">
         <button data-cact="view" data-i="${i}">عرض</button>
@@ -395,7 +397,9 @@ $("detail-type").onclick = (e) => {
   renderDetailType();
 };
 
-const noteText = (i) => `في النظام ${sysCell(i)} · الفرق ${diffCell(i) || "—"}`;
+const noteText = (i) => (Number.isFinite(i.sys)
+  ? `في النظام ${i.sys} · ${diffWord((Number(i.qty) || 0) - i.sys)}`
+  : "مش مسجّل في النظام");
 
 function renderDetailItems() {
   const isCount = current.kind === "count";

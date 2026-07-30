@@ -842,7 +842,7 @@ test('employee stocktake: the sheet shows what the system says, the save keeps b
   await expect(page.locator('#item-stock-qty')).toHaveText('10');   // the whole point of the screen
   await page.fill('#item-qty', '3');
   await page.click('#btn-add-item');
-  await expect(page.locator('#items-list li:not(.empty)')).toContainText('في النظام 10 · الفرق -7');
+  await expect(page.locator('#items-list li:not(.empty)')).toContainText('في النظام 10 · ناقص 7');
 
   await page.fill('#barcode-input', '222');                         // never given a quantity
   await page.click('#btn-lookup');
@@ -859,7 +859,7 @@ test('employee stocktake: the sheet shows what the system says, the save keeps b
   expect(saved[0].items[1]).toEqual({ barcode: '222', name: 'جبنة', qty: 1 });   // no sys invented
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem('test-shipments') || '[]'))).toHaveLength(0);
   // −7 short on the milk, +1 of a cheese the system never listed
-  await expect(page.locator('#my-counts li')).toContainText('الفرق -6');
+  await expect(page.locator('#my-counts li')).toContainText('الفرق ناقص 6');
 });
 
 test('a stocktake reopens for editing and the difference follows the new quantity', async ({ page }) => {
@@ -873,7 +873,7 @@ test('a stocktake reopens for editing and the difference follows the new quantit
     ]));
   });
   await page.reload();
-  await expect(page.locator('#my-counts li')).toContainText('الفرق -6');
+  await expect(page.locator('#my-counts li')).toContainText('الفرق ناقص 6');
   await page.click('button[data-editcount="0"]');
   await expect(page.locator('#shipment-name')).toHaveValue('جرد قديم');
   await page.fill('#barcode-input', '111');
@@ -883,7 +883,7 @@ test('a stocktake reopens for editing and the difference follows the new quantit
   const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('test-counts')));
   expect(saved).toHaveLength(1);                                     // edited, not duplicated
   expect(saved[0].items[0].qty).toBe(5);
-  await expect(page.locator('#my-counts li')).toContainText('الفرق -5');
+  await expect(page.locator('#my-counts li')).toContainText('الفرق ناقص 5');
 });
 
 test('the stocktake permission gates the button and the list', async ({ page }) => {
@@ -916,7 +916,7 @@ test('manager: the stocktake tab lists a count with its difference, exports it a
   await expect(page.locator('#ships-block')).toBeHidden();
   await expect(page.locator('#type-filter-row')).toBeHidden();       // no shipment type on a count
   await expect(page.locator('#all-counts li')).toContainText('جرد التلاجة');
-  await expect(page.locator('#all-counts li')).toContainText('الفرق -1');   // 3 short, 2 not in the system
+  await expect(page.locator('#all-counts li')).toContainText('الفرق ناقص 1');   // 3 short, 2 not in the system
 
   const exp = (await Promise.all([
     page.waitForEvent('download'),
@@ -930,9 +930,9 @@ test('manager: the stocktake tab lists a count with its difference, exports it a
 
   await page.click('#all-counts button[data-cact="view"]');          // the manager may fix a number
   await expect(page.locator('#detail-type-row')).toBeHidden();
-  await expect(page.locator('#detail-items tr').first()).toContainText('في النظام 10 · الفرق -3');
+  await expect(page.locator('#detail-items tr').first()).toContainText('في النظام 10 · ناقص 3');
   await page.fill('#detail-items input[data-qty="0"]', '10');
-  await expect(page.locator('#detail-items tr').first()).toContainText('الفرق 0');
+  await expect(page.locator('#detail-items tr').first()).toContainText('مظبوط');
   await page.click('#btn-save-edit');
   await expect(page.locator('#toast')).toContainText('تم حفظ التعديلات');
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem('test-counts'))[0].items[0].qty)).toBe(10);

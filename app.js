@@ -76,7 +76,8 @@ async function goHome() {
 
 // the difference a stocktake found: counted minus what the system says
 const countDiff = (c) => c.items.reduce((n, i) => n + (Number(i.qty) || 0) - (Number(i.sys) || 0), 0);
-const withSign = (n) => (n > 0 ? `+${n}` : String(n));
+// words, not "-3": a leading minus next to Arabic text renders on the wrong side (RTL bidi)
+const diffWord = (n) => (n === 0 ? "مظبوط" : (n > 0 ? `زيادة ${n}` : `ناقص ${-n}`));
 
 async function renderMyCounts() {
   const all = await db.listCounts().catch(() => []);
@@ -84,7 +85,7 @@ async function renderMyCounts() {
   $("my-counts").innerHTML = state.myCounts.map((c, i) => `<li>
       <div class="card-main">
         <div class="card-title">${esc(c.name)}</div>
-        <div class="meta">${esc(c.branch || "")} · ${fmtDate(c.createdAt)} · ${c.items.length} صنف · الفرق ${esc(withSign(countDiff(c)))}</div>
+        <div class="meta">${esc(c.branch || "")} · ${fmtDate(c.createdAt)} · ${c.items.length} صنف · الفرق ${esc(diffWord(countDiff(c)))}</div>
       </div>
       ${canDo("edit") ? `<button class="ghost" data-editcount="${i}">تعديل</button>` : ""}
     </li>`).join("") || `<li class="empty">لسه مفيش جرد — ابدأ بـ «جرد»</li>`;
@@ -402,7 +403,7 @@ function itemNote(i) {
   if (!counting()) return "";
   if (!Number.isFinite(i.sys)) return `<div class="meta">مش مسجّل في النظام</div>`;
   const d = (Number(i.qty) || 0) - i.sys;
-  return `<div class="meta">في النظام ${esc(i.sys)} · الفرق ${esc(withSign(d))}</div>`;
+  return `<div class="meta">في النظام ${esc(i.sys)} · ${esc(diffWord(d))}</div>`;
 }
 
 function renderItems() {
