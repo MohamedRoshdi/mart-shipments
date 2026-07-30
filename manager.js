@@ -271,7 +271,8 @@ $("btn-save-edit").onclick = async () => {
 
 /* ---------- catalog: view, search, rename, delete, export ---------- */
 
-let products = [];              // the whole catalog, loaded once per screen open
+let products = [];              // rows on screen: first page, or the search hits
+let total = 0;                  // real catalog size, counted on the server
 const edits = new Map();        // barcode -> new name, pending save
 
 $("btn-products").onclick = async () => {
@@ -283,32 +284,30 @@ $("btn-products").onclick = async () => {
 async function loadProducts() {
   edits.clear();
   $("products-count").textContent = "بنجيب الأصناف...";
-  products = await db.listAllProducts().catch(() => []);
-  products.sort((a, b) => a.name.localeCompare(b.name, "ar"));
+  products = (await db.listProducts().catch(() => []))
+    .sort((a, b) => a.name.localeCompare(b.name, "ar"));
+  total = products.length;
   renderProducts();
-}
-
-// whole catalog is in memory, so search is a plain substring match on name or barcode
-function matches() {
-  const q = $("product-search").value.trim().toLowerCase();
-  return q ? products.filter(p => p.name.toLowerCase().includes(q) || p.barcode.includes(q)) : products;
+  if (products.length >= db.PRODUCT_CAP) {        // only then is the loaded count not the truth
+    total = await db.countProducts().catch(() => products.length);
+    renderProducts();
+  }
 }
 
 function renderProducts() {
-  const found = matches();
+  const found = products;
   const page = found.slice(0, PAGE);
   const searching = $("product-search").value.trim() !== "";
-  $("products-count").textContent = products.length
-    ? (searching ? `${found.length} نتيجة من ${products.length} صنف` : `${products.length} صنف`)
-      + (found.length > PAGE ? ` — بيظهر أول ${PAGE}` : "")
-    : "";
+  $("products-count").textContent = searching
+    ? `${found.length} نتيجة` + (found.length > PAGE ? ` — بيظهر أول ${PAGE}` : "")
+    : (total ? `${total} صنف` + (total > products.length ? ` — بيظهر أول ${products.length}، دوّر عن الباقي` : "") : "");
   $("products-list").innerHTML = page.map(p => `<li>
       <div class="card-main">
         <input class="product-name" type="text" maxlength="100" data-barcode="${escAttr(p.barcode)}" value="${escAttr(edits.get(p.barcode) ?? p.name)}">
         <div class="code">${esc(p.barcode)}</div>
       </div>
       <button class="del" data-delproduct="${escAttr(p.barcode)}" aria-label="حذف الصنف">×</button>
-    </li>`).join("") || `<li class="empty">${searching ? "مفيش نتيجة للبحث" : "مفيش أصناف — استورد ملف الأصناف الأول"}</li>`;
+    </li>`).join("") || `<li class="empty">${searching ? "مفيش نتيجة — دوّر بأول الاسم أو بالباركود" : "مفيش أصناف — استورد ملف الأصناف الأول"}</li>`;
   updateDirty();
 }
 
@@ -317,7 +316,22 @@ function updateDirty() {
   $("btn-save-products").disabled = edits.size === 0;
 }
 
-$("product-search").oninput = renderProducts;
+let searchTimer = null;
+
+$("product-search").oninput = () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(runSearch, 250);       // one query per pause, not per keystroke
+};
+
+async function runSearch() {
+  const q = $("product-search").value.trim();
+  if (!q) { await loadProducts(); return; }
+  const hits = await db.searchProducts(q).catch(() => []);
+  if ($("product-search").value.trim() !== q) return;   // a newer search already ran
+  products = hits.sort((a, b) => a.name.localeCompare(b.name, "ar"));
+  edits.clear();
+  renderProducts();
+}
 
 $("products-list").oninput = (e) => {
   const inp = e.target.closest("input[data-barcode]");
@@ -365,13 +379,15 @@ $("btn-save-products").onclick = async () => {
   renderProducts();
 };
 
-$("btn-export-products").onclick = () => {
-  if (!products.length) { toast("مفيش أصناف تتحمّل"); return; }
-  downloadCsv("products.csv", [                        // the loaded list is the whole catalog
+$("btn-export-products").onclick = async () => {
+  toast("بنجهّز الملف...");
+  const rows = await db.listAllProducts().catch(() => []);   // whole catalog, not the page on screen
+  if (!rows.length) { toast("مفيش أصناف تتحمّل"); return; }
+  downloadCsv("products.csv", [
     ["الباركود", "اسم الصنف"],
-    ...products.map(p => [p.barcode, p.name]),
+    ...rows.map(p => [p.barcode, p.name]),
   ]);
-  toast(`تم تحميل ${products.length} صنف`);
+  toast(`تم تحميل ${rows.length} صنف`);
 };
 
 /* ---------- catalog import ---------- */
