@@ -22,7 +22,7 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 5. **`db.js` is the only file that knows where data lives.** `app.js` and
    `manager.js` never touch Firestore or localStorage keys directly.
 6. **Bump `CACHE` in `sw.js` on every deploy.** Serving is cache-first, so phones
-   keep the old bundle until the cache name changes. Currently `mart-v24`.
+   keep the old bundle until the cache name changes. Currently `mart-v25`.
 7. **Deploy = push to master.** GitHub Pages serves the repo root. Firestore rules
    deploy separately: `npx firebase deploy --only firestore:rules --project shipments-alaela-mart`.
 
@@ -93,7 +93,10 @@ Rules in force (all live-tested):
   `createdAt` and `branch` immutable on update; delete allowed.
 - `expiry`: create/delete open; `qty > 0`, `day` 1–31, `month` 1–12, `year` 2000–2100;
   update may change name/qty/date only — `barcode`, `branch`, `createdBy`, `createdAt` are
-  immutable, so a row moves month but never changes product or branch.
+  immutable, so a row moves month but never changes product or branch. **Deployed and compiled,
+  but not yet server-accepted:** the daily write quota was exhausted on 2026-07-30, so the live
+  run's writes only ever reached the local cache. Re-run `scripts/live-expiry.mjs` after a quota
+  reset and confirm with `scripts/live-expiry-server.mjs` (fresh context = server reads).
 - `products`: create/update/delete open, `name` 1–100 chars, barcode ≤ 32, optional
   `qty` a number ≥ 0, optional `stock` a map of ≤ 10 branches (rules cannot iterate a map,
   so the per-branch values are only guarded client-side).
@@ -219,6 +222,9 @@ node scripts/live-search-name.mjs                # proves search reaches past th
 node scripts/live-admin.mjs                      # admin page, settings doc, audit trail, rule probes, ZIP
 STAMP=$RANDOM node scripts/live-count.mjs        # الجرد: stock sheet, count, difference, Excel, delete
 STAMP=$RANDOM node scripts/live-expiry.mjs       # الصلاحيات: record a date, merge, move month, Excel, delete
+node scripts/live-expiry-cleanup.mjs             # janitor for a live-expiry run that died mid-way
+node scripts/live-expiry-server.mjs              # fresh context: what the SERVER holds, no local cache
+node scripts/live-users-probe.mjs                # read-only users list; TIME=1 also times one save ack
 BASE=http://localhost:8087 node scripts/live-camera.mjs   # camera list/start/stop/fallback on a fake device
 OUT=/tmp/shots node scripts/shots.mjs            # local screenshots (needs the server above)
 OUT=/tmp/shots BASE=http://localhost:8080 node scripts/shots-expiry.mjs   # home + الصلاحيات screens
@@ -278,6 +284,13 @@ debounce, or it reports false negatives.
   crawl behind an exponential backoff (measured 2026-07-30 18:14 UTC — a `config/app` save
   produced no toast, and the temp user only appeared seconds later). Quotas reset at midnight
   Pacific. Import per branch, not the whole catalog repeatedly.
+  Measured again at 18:55 UTC the same day: an **idempotent** `config/app` save (press save with
+  nothing changed) never acked in 90 s, with `resource-exhausted` + "Using maximum backoff delay"
+  in the console. That is what blocks `scripts/live-mobile.mjs` at its first step — it creates a
+  temp user, and `saveConfig` is the one write in the app that waits for the server on purpose.
+  Everything else is fire-and-forget, so a live run **passes on the local cache while the server
+  has none of it**: `scripts/live-expiry-server.mjs` opens a fresh context and asks the server
+  directly. Use it before believing any live "it worked".
 - A stocktake reports on what was **scanned**. A product in the sheet that nobody scanned does
   not appear as a shortage — listing every missing product would mean reading the whole
   catalog (10k reads) per count. Count by shelf and the sheet stays honest.

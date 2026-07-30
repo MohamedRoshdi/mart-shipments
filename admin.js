@@ -261,12 +261,19 @@ $("btn-save-config").onclick = async () => {
     shipmentTypes: cfg.shipmentTypes.filter(Boolean),
     users: cfg.users.map(u => ({ name: u.name, pin: u.pin, branches: auth.branchesOf(u), perms: u.perms.slice() })),
   };
+  // The settings doc is the one write that waits for the server on purpose: a false «تم الحفظ»
+  // on the PINs could lock the shop out. So the wait has to be visible — a silent dead button
+  // is what a slow write (or an exhausted daily quota) used to look like.
+  toast("بنحفظ الإعدادات...");
+  const slow = setTimeout(() => toast("الحفظ بياخد وقت — سيب الصفحة مفتوحة لحد ما تظهر رسالة الحفظ"), 6000);
   try {
     await db.saveConfig(payload);
   } catch (err) {
     console.error(err);
     toast("الحفظ ما نفعش — جرّب تاني");
     return;
+  } finally {
+    clearTimeout(slow);
   }
   Object.assign(window.APP_CONFIG, payload);
   db.logAction(identity, "تغيير الإعدادات", `${payload.users.length} مستخدم · ${payload.branches.length} فرع · ${payload.shipmentTypes.length} نوع`);
