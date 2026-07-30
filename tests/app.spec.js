@@ -38,8 +38,8 @@ test('create shipment: catalog memory + duplicate merge', async ({ page }) => {
   await page.click('#btn-lookup');
   await expect(page.locator('#item-name')).toHaveValue('لبن كامل الدسم'); // catalog remembered
   await page.click('#btn-add-item'); // qty 1 more → merge to 3
-  await expect(page.locator('#items-list li')).toHaveCount(1);
-  await expect(page.locator('#items-list li')).toContainText('× 3');
+  await expect(page.locator('#items-list li:not(.empty)')).toHaveCount(1);
+  await expect(page.locator('#items-list li:not(.empty)')).toContainText('3');
   await page.click('#btn-save-shipment');
   await expect(page.locator('#screen-home')).toBeVisible();
   await expect(page.locator('#my-shipments li')).toContainText('شحنة المراعي');
@@ -86,7 +86,7 @@ test('manager page: edit name, change qty, delete item', async ({ page }) => {
   await page.click('button[data-delitem="0"]');
   await page.click('#btn-save-edit');
   await page.click('button[data-act="view"]');
-  await expect(page.locator('#detail-items tr')).toHaveCount(0);
+  await expect(page.locator('#detail-items tr:has(button)')).toHaveCount(0);
 });
 
 test('employee: remove scanned item before saving', async ({ page }) => {
@@ -99,9 +99,9 @@ test('employee: remove scanned item before saving', async ({ page }) => {
   await page.click('#btn-lookup');
   await page.fill('#item-name', 'صنف غلط');
   await page.click('#btn-add-item');
-  await expect(page.locator('#items-list li')).toHaveCount(1);
+  await expect(page.locator('#items-list li:not(.empty)')).toHaveCount(1);
   await page.click('button[data-del="0"]');
-  await expect(page.locator('#items-list li')).toHaveCount(0);
+  await expect(page.locator('#items-list li:not(.empty)')).toHaveCount(0);
   await expect(page.locator('#btn-save-shipment')).toBeDisabled();
 });
 
@@ -117,7 +117,7 @@ test('employee: edit own saved shipment', async ({ page }) => {
   await page.reload();
   await page.click('button[data-edit="0"]');
   await expect(page.locator('#shipment-name')).toHaveValue('شحنة قديمة');
-  await expect(page.locator('#items-list li')).toHaveCount(2);
+  await expect(page.locator('#items-list li:not(.empty)')).toHaveCount(2);
   await page.click('button[data-del="1"]');
   await page.fill('#shipment-name', 'شحنة متصلحة');
   await page.click('#btn-save-shipment');
@@ -131,7 +131,77 @@ test('manager page: delete removes shipment', async ({ page }) => {
   await expect(page.locator('#all-shipments li')).toHaveCount(1);
   page.on('dialog', (d) => d.accept());
   await page.click('button[data-act="del"]');
-  await expect(page.locator('#all-shipments li')).toHaveText('لا توجد شحنات');
+  await expect(page.locator('#all-shipments li')).toContainText('مفيش شحنات');
+});
+
+test('branch: picked at setup, stamped on shipment, filters manager list', async ({ page }) => {
+  await page.goto('/?test=1');
+  const [b1, b2] = await page.evaluate(() => window.APP_CONFIG.branches);
+  expect([b1, b2]).toEqual(['فرع قويسنا', 'فرع شبين الكوم']);
+  await page.fill('#employee-name', 'أحمد');
+  await page.click(`button[data-branch="${b2}"]`);
+  await page.click('#save-name');
+  await expect(page.locator('#who')).toContainText(b2);
+  await page.click('#btn-new');
+  await page.fill('#shipment-name', 'شحنة شبين');
+  await page.fill('#barcode-input', '111');
+  await page.click('#btn-lookup');
+  await page.click('#btn-add-item');
+  await page.click('#btn-save-shipment');
+  await expect(page.locator('#my-shipments li')).toContainText(b2);
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('test-shipments'))[0]);
+  expect(saved.branch).toBe(b2);
+
+  await page.goto('/manager.html?test=1');
+  await page.fill('#pin-input', await page.evaluate(() => window.APP_CONFIG.managerPin));
+  await page.click('#btn-pin');
+  await expect(page.locator('#all-shipments li')).toHaveCount(1);
+  await page.click(`button[data-branch="${b1}"]`);          // other branch → empty
+  await expect(page.locator('#all-shipments li')).toContainText('مفيش شحنات');
+  await page.click(`button[data-branch="${b2}"]`);
+  await expect(page.locator('#all-shipments li')).toContainText('شحنة شبين');
+});
+
+test('manager page: download one shipment and all shipments as CSV', async ({ page }) => {
+  await openManagerPage(page);
+  const one = await Promise.all([
+    page.waitForEvent('download'),
+    page.click('button[data-act="download"]'),
+  ]).then(([d]) => d);
+  expect(one.suggestedFilename()).toBe('شحنة المراعي.csv');
+  const oneText = require('fs').readFileSync(await one.path(), 'utf8');
+  expect(oneText.startsWith('﻿')).toBe(true);            // Excel needs the BOM for Arabic
+  expect(oneText).toContain('"6221031250057","لبن","3"');
+
+  const all = await Promise.all([
+    page.waitForEvent('download'),
+    page.click('#btn-export-all'),
+  ]).then(([d]) => d);
+  expect(all.suggestedFilename()).toBe('shipments-all.csv');
+  const allText = require('fs').readFileSync(await all.path(), 'utf8');
+  expect(allText).toContain('"الفرع","الشحنة","الموظف","التاريخ","الباركود","اسم الصنف","الكمية"');
+  expect(allText).toContain('"شحنة المراعي","أحمد"');
+});
+
+test('back button and phone back return to the previous screen', async ({ page }) => {
+  await page.goto('/?test=1');
+  await page.evaluate(() => localStorage.setItem('employeeName', 'أحمد'));
+  await page.reload();
+  await expect(page.locator('#btn-back')).toBeHidden();       // nothing to go back to on home
+  await page.click('#btn-new');
+  await expect(page.locator('#btn-back')).toBeVisible();
+  await page.click('#btn-back');                              // app bar back
+  await expect(page.locator('#screen-home')).toBeVisible();
+  await page.click('#btn-new');
+  await page.goBack();                                        // phone/browser back
+  await expect(page.locator('#screen-home')).toBeVisible();
+
+  await openManagerPage(page);
+  await expect(page.locator('#btn-back')).toBeHidden();
+  await page.click('button[data-act="view"]');
+  await expect(page.locator('#btn-back')).toBeVisible();
+  await page.goBack();
+  await expect(page.locator('#screen-manager')).toBeVisible();
 });
 
 test('scanner lib loads', async ({ page }) => {
@@ -177,7 +247,7 @@ test("item without name saves showing barcode", async ({ page }) => {
   await page.fill("#barcode-input", "9990001112223");
   await page.click("#btn-lookup");
   await page.click("#btn-add-item");
-  await expect(page.locator("#items-list li")).toContainText("9990001112223");
+  await expect(page.locator('#items-list li:not(.empty)')).toContainText("9990001112223");
 });
 
 test("draft survives reload", async ({ page }) => {
@@ -192,6 +262,6 @@ test("draft survives reload", async ({ page }) => {
   await page.click("#btn-add-item");
   await page.reload();
   await page.click("#btn-new");
-  await expect(page.locator("#items-list li")).toHaveCount(1);
+  await expect(page.locator('#items-list li:not(.empty)')).toHaveCount(1);
   await expect(page.locator("#shipment-name")).toHaveValue("مسودة");
 });

@@ -7,4 +7,7 @@ window.FIREBASE_CONFIG = {
   authDomain: "shipments-alaela-mart.firebaseapp.com",
   messagingSenderId: "430785723659"
 };
-window.APP_CONFIG = { managerPin: '1994' };
+window.APP_CONFIG = {
+  managerPin: '1994',
+  branches: ['فرع قويسنا', 'فرع شبين الكوم']
+};

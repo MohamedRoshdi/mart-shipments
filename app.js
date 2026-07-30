@@ -1,58 +1,93 @@
 import * as db from "./db.js";
 
 const $ = (id) => document.getElementById(id);
-
-function show(id) {
-  document.querySelectorAll("main > section").forEach(s => s.hidden = true);
-  $(id).hidden = false;
-}
-
-function esc(t) { const d = document.createElement("div"); d.textContent = t; return d.innerHTML; }
-
-function myName() { return localStorage.getItem("employeeName"); }
+const esc = (t) => { const d = document.createElement("div"); d.textContent = t; return d.innerHTML; };
+const branches = () => window.APP_CONFIG.branches;
+const myName = () => localStorage.getItem("employeeName");
+const myBranch = () => localStorage.getItem("employeeBranch") || branches()[0];
+const fmtDate = (ts) => new Date(ts).toLocaleDateString("ar-EG");
 
 function toast(msg) {
   $("toast").textContent = msg;
   $("toast").classList.add("show");
-  setTimeout(() => $("toast").classList.remove("show"), 2000);
+  setTimeout(() => $("toast").classList.remove("show"), 2200);
 }
 
-const state = { items: [], currentBarcode: null, editingId: null, mine: [] };
-
-async function goHome() {
-  state.editingId = null; // leaving the edit screen (back button) ends edit mode
-  show("screen-home");
-  const all = await db.listShipments().catch(() => []);
-  state.mine = all.filter(s => s.createdBy === myName());
-  $("my-shipments").innerHTML = state.mine.map((s, i) =>
-    `<li><div>${esc(s.name)} — ${s.items.length} صنف</div>
-     <div class="row-actions"><button data-edit="${i}">تعديل</button></div></li>`
-  ).join("") || "<li>لا توجد شحنات</li>";
-}
-
-$("my-shipments").onclick = (e) => {
-  const btn = e.target.closest("button[data-edit]");
-  if (btn) openShipment(state.mine[+btn.dataset.edit]);
+const TITLES = {
+  "screen-name": "بيانات الموظف",
+  "screen-home": "شحناتي",
+  "screen-new": "شحنة جديدة",
 };
 
-function openShipment(s) {
-  state.editingId = s._id;
-  state.items = s.items.map(i => ({ ...i }));
-  state.currentBarcode = null;
-  $("shipment-name").value = s.name;
-  $("barcode-input").value = "";
-  $("item-form").hidden = true;
-  $("btn-save-shipment").textContent = "حفظ التعديلات";
-  renderItems();
-  show("screen-new");
+const state = { items: [], currentBarcode: null, editingId: null, mine: [], branch: myBranch() };
+
+/* ---------- navigation: one screen at a time, phone back button works ---------- */
+
+function render(id) {
+  document.querySelectorAll("main > section").forEach(s => s.hidden = true);
+  $(id).hidden = false;
+  $("screen-title").textContent = TITLES[id] || "شحنات المحل";
+  $("btn-back").hidden = id === "screen-home" || (id === "screen-name" && !myName());
+  $("who").hidden = !myName() || id !== "screen-home";
+  if (myName()) $("who").textContent = `${myName()} · ${myBranch()}`;
+  hideSheet();
+  scrollTo(0, 0);
 }
+
+function navTo(id) {
+  history.pushState({ screen: id }, "");
+  render(id);
+}
+
+async function goHome() {
+  await stopScan();
+  state.editingId = null;
+  render("screen-home");
+  const all = await db.listShipments().catch(() => []);
+  state.mine = all.filter(s => s.createdBy === myName());
+  $("my-shipments").innerHTML = state.mine.map((s, i) => `<li>
+      <div class="card-main">
+        <div class="card-title">${esc(s.name)}</div>
+        <div class="meta">${esc(s.branch || "")} · ${fmtDate(s.createdAt)} · ${s.items.length} صنف</div>
+      </div>
+      <button class="ghost" data-edit="${i}">تعديل</button>
+    </li>`).join("") || `<li class="empty">لسه مفيش شحنات — ابدأ بـ «شحنة جديدة»</li>`;
+}
+
+addEventListener("popstate", (ev) => {
+  const id = (ev.state && ev.state.screen) || "screen-home";
+  if (id === "screen-home") goHome(); else render(id);
+});
+
+$("btn-back").onclick = () => history.back();
+$("who").onclick = () => navTo("screen-name");
+
+/* ---------- employee + branch setup ---------- */
+
+const shortBranch = (b) => b.replace(/^فرع\s+/, ""); // chips stay one line; stored value keeps "فرع"
+
+function renderBranchPicker() {
+  $("branch-picker").innerHTML = branches().map(b =>
+    `<button type="button" data-branch="${esc(b)}" aria-pressed="${b === state.branch}">${esc(shortBranch(b))}</button>`).join("");
+}
+
+$("branch-picker").onclick = (e) => {
+  const btn = e.target.closest("button[data-branch]");
+  if (!btn) return;
+  state.branch = btn.dataset.branch;
+  renderBranchPicker();
+};
 
 $("save-name").onclick = () => {
   const n = $("employee-name").value.trim();
-  if (!n) return;
+  if (!n) { toast("اكتب اسمك الأول"); return; }
   localStorage.setItem("employeeName", n);
+  localStorage.setItem("employeeBranch", state.branch);
+  history.replaceState({ screen: "screen-home" }, "");
   goHome();
 };
+
+/* ---------- building a shipment ---------- */
 
 function saveDraft() {
   if (state.editingId) return; // editing a saved shipment must not overwrite the unsaved draft
@@ -66,12 +101,27 @@ $("btn-new").onclick = () => {
   state.currentBarcode = null;
   $("shipment-name").value = (draft && draft.name) || "";
   $("barcode-input").value = "";
-  $("item-form").hidden = true;
   $("btn-save-shipment").textContent = "حفظ الشحنة";
   renderItems();
-  show("screen-new");
+  navTo("screen-new");
   if (state.items.length) toast("رجّعنالك الشحنة اللي كانت مفتوحة");
 };
+
+$("my-shipments").onclick = (e) => {
+  const btn = e.target.closest("button[data-edit]");
+  if (btn) openShipment(state.mine[+btn.dataset.edit]);
+};
+
+function openShipment(s) {
+  state.editingId = s._id;
+  state.items = s.items.map(i => ({ ...i }));
+  state.currentBarcode = null;
+  $("shipment-name").value = s.name;
+  $("barcode-input").value = "";
+  $("btn-save-shipment").textContent = "حفظ التعديلات";
+  renderItems();
+  navTo("screen-new");
+}
 
 $("shipment-name").oninput = saveDraft;
 
@@ -86,30 +136,50 @@ async function onBarcode(code) {
   const known = await db.getProductName(code);
   $("item-name").value = known || "";
   $("item-qty").value = 1;
-  $("item-form").hidden = false;
+  showSheet(true);
   if (!known) $("item-name").focus();
 }
 
+function showSheet(open) {
+  $("item-form").hidden = !open;
+  $("scrim").hidden = !open;
+  document.body.classList.toggle("sheet-open", open);
+}
+
+function hideSheet() {
+  showSheet(false);
+  state.currentBarcode = null;
+}
+
+$("btn-cancel-item").onclick = hideSheet;
+$("scrim").onclick = hideSheet;
 $("qty-plus").onclick = () => { $("item-qty").value = +$("item-qty").value + 1; };
 $("qty-minus").onclick = () => { $("item-qty").value = Math.max(1, +$("item-qty").value - 1); };
 
 $("btn-add-item").onclick = async () => {
   const name = $("item-name").value.trim();
   const qty = Math.max(1, parseInt($("item-qty").value, 10) || 1);
-  if (!state.currentBarcode) return;
-  const existing = await db.getProductName(state.currentBarcode);
-  if (name && existing !== name) await db.saveProductName(state.currentBarcode, name);
-  const dup = state.items.find(i => i.barcode === state.currentBarcode);
-  if (dup) dup.qty += qty; else state.items.push({ barcode: state.currentBarcode, name, qty });
-  $("item-form").hidden = true;
+  const barcode = state.currentBarcode;
+  if (!barcode) return;
+  const existing = await db.getProductName(barcode);
+  if (name && existing !== name) await db.saveProductName(barcode, name);
+  const dup = state.items.find(i => i.barcode === barcode);
+  if (dup) dup.qty += qty; else state.items.push({ barcode, name, qty });
+  hideSheet();
   $("barcode-input").value = "";
   renderItems();
 };
 
 function renderItems() {
-  $("items-list").innerHTML = state.items.map((i, idx) =>
-    `<li><span>${esc(i.name || i.barcode)} × ${esc(i.qty)}</span>
-     <button class="danger" data-del="${idx}">×</button></li>`).join("");
+  $("items-list").innerHTML = state.items.map((i, idx) => `<li>
+      <div class="card-main">
+        <div class="card-title">${esc(i.name || "بدون اسم")}</div>
+        <div class="code">${esc(i.barcode)}</div>
+      </div>
+      <span class="stamp">${esc(i.qty)}</span>
+      <button class="del" data-del="${idx}" aria-label="حذف الصنف">×</button>
+    </li>`).join("") || `<li class="empty">امسح أول صنف</li>`;
+  $("items-count").textContent = state.items.length ? `${state.items.length} صنف` : "";
   $("btn-save-shipment").disabled = state.items.length === 0;
   saveDraft();
 }
@@ -124,32 +194,22 @@ $("items-list").onclick = (e) => {
 $("btn-save-shipment").onclick = async () => {
   const name = $("shipment-name").value.trim();
   if (!name) { toast("اكتب اسم الشحنة الأول"); return; }
+  const editing = state.editingId;
   try {
-    if (state.editingId) await db.updateShipment(state.editingId, { name, items: state.items });
-    else await db.saveShipment({ name, createdBy: myName(), items: state.items });
+    if (editing) await db.updateShipment(editing, { name, items: state.items });
+    else await db.saveShipment({ name, createdBy: myName(), branch: myBranch(), items: state.items });
   } catch (e) {
     console.error(e);
     toast("الحفظ ما نفعش — حاول تاني");
     return;
   }
-  if (!state.editingId) localStorage.removeItem("draft");
-  toast(state.editingId ? "تم حفظ التعديلات" : "تم حفظ الشحنة");
-  state.editingId = null;
+  if (!editing) localStorage.removeItem("draft");
+  toast(editing ? "تم حفظ التعديلات" : "تم حفظ الشحنة");
+  history.replaceState({ screen: "screen-home" }, "");
   goHome();
 };
 
-document.querySelectorAll(".btn-back").forEach(b => b.onclick = async () => { await stopScan(); goHome(); });
-
-addEventListener("db-error", () => toast("مشكلة في مزامنة البيانات — اتأكد من الاتصال والإعدادات"));
-
-let dbBroken = false;
-
-(async () => {
-  const ok = await db.initDb().then(() => true).catch((e) => { console.error(e); return false; });
-  dbBroken = !ok;
-  updateSync();
-  if (myName()) goHome(); else show("screen-name");
-})();
+/* ---------- camera ---------- */
 
 let scanner = null;
 
@@ -191,12 +251,31 @@ function beep() {
   } catch (e) { console.error(e); }
 }
 
+/* ---------- boot ---------- */
+
+addEventListener("db-error", () => toast("مشكلة في مزامنة البيانات — اتأكد من الاتصال والإعدادات"));
+
+let dbBroken = false;
+
 function updateSync() {
-  $("sync-state").textContent = dbBroken ? "إعدادات التطبيق ناقصة" : (navigator.onLine ? "متصل" : "في انتظار الاتصال");
+  $("sync-state").textContent = dbBroken ? "إعدادات ناقصة" : (navigator.onLine ? "متصل" : "مستني الاتصال");
 }
 addEventListener("online", updateSync);
 addEventListener("offline", updateSync);
-updateSync();
+
+(async () => {
+  renderBranchPicker();
+  const ok = await db.initDb().then(() => true).catch((e) => { console.error(e); return false; });
+  dbBroken = !ok;
+  updateSync();
+  if (myName()) {
+    history.replaceState({ screen: "screen-home" }, "");
+    goHome();
+  } else {
+    history.replaceState({ screen: "screen-name" }, "");
+    render("screen-name");
+  }
+})();
 
 if ("serviceWorker" in navigator && !new URLSearchParams(location.search).has("test")) {
   navigator.serviceWorker.register("./sw.js");
