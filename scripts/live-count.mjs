@@ -14,6 +14,8 @@ const log = (...a) => console.log("[live-count]", ...a);
 
 const sheet = join(tmpdir(), `stock-${CODE}.csv`);
 writeFileSync(sheet, `﻿الباركود,اسم الصنف,الكمية\r\n${CODE},${NAME},10\r\n`);
+const sheet2 = join(tmpdir(), `stock2-${CODE}.csv`);      // the other branch's own sheet
+writeFileSync(sheet2, `﻿الباركود,اسم الصنف,الكمية\r\n${CODE},${NAME},4\r\n`);
 
 const browser = await chromium.launch();
 const page = await browser.newPage();
@@ -49,6 +51,14 @@ await page.setInputFiles("#stock-file", sheet);
 await page.waitForTimeout(4000);
 log("1. import toast:", await page.locator("#toast").innerText(), "| branch:", BRANCH);
 
+// 1b. the second branch's sheet: a different number for the same barcode, and the first
+// branch's number must survive it
+const BRANCH2 = await page.locator("#stock-branch button[data-stockbranch]").nth(1).getAttribute("data-stockbranch");
+await page.click(`#stock-branch button[data-stockbranch="${BRANCH2}"]`);
+await page.setInputFiles("#stock-file", sheet2);
+await page.waitForTimeout(4000);
+log("1b. second branch imported:", await page.locator("#toast").innerText(), "| branch:", BRANCH2);
+
 // 2. the catalog screen shows the quantity next to the barcode
 await page.click("#btn-products");
 await page.waitForTimeout(3000);
@@ -74,7 +84,22 @@ await page.fill("#shipment-name", COUNT);
 await page.fill("#barcode-input", CODE);
 await page.click("#btn-lookup");
 await page.waitForSelector("#item-form:not([hidden])");
-log("3. system quantity on the item sheet:", await page.locator("#item-stock-qty").innerText());
+log("3. system quantity on the item sheet:", await page.locator("#item-stock-qty").innerText(), `(${BRANCH})`);
+
+// 3b. the same barcode, the other branch: its own number, not the first one's
+if (await page.locator(`#new-branch-picker button[data-newbranch="${BRANCH2}"]`).count()) {
+  await page.click("#btn-cancel-item");
+  await page.click(`#new-branch-picker button[data-newbranch="${BRANCH2}"]`);
+  await page.fill("#barcode-input", CODE);
+  await page.click("#btn-lookup");
+  await page.waitForSelector("#item-form:not([hidden])");
+  log("3b. same barcode in the other branch:", await page.locator("#item-stock-qty").innerText(), `(${BRANCH2})`);
+  await page.click("#btn-cancel-item");
+  await page.click(`#new-branch-picker button[data-newbranch="${BRANCH}"]`);   // back to the branch being counted
+  await page.fill("#barcode-input", CODE);
+  await page.click("#btn-lookup");
+  await page.waitForSelector("#item-form:not([hidden])");
+}
 await page.fill("#item-qty", "7");
 await page.click("#btn-add-item");
 log("4. row verdict:", (await page.locator("#items-list li").first().innerText()).replace(/\s+/g, " ").trim());
@@ -102,7 +127,8 @@ log("10. excel has the difference column:", csv.includes('"في النظام","�
 // 6. cleanup: the count, then the temporary product
 await row.locator('button[data-cact="del"]').click();
 await page.waitForTimeout(3000);
-log("11. delete toast:", await page.locator("#toast").innerText());
+// the toast may still be showing the download message, so report the row itself
+log("11. row removed from the list:", (await row.count()) === 0);
 await openManager();
 await page.click('#list-tabs button[data-tab="count"]');
 await page.waitForTimeout(2000);

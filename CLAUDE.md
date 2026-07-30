@@ -242,6 +242,12 @@ debounce, or it reports false negatives.
 - `scripts/live-admin.mjs` leaves one audit row behind on purpose: the rules forbid deleting
   audit rows, so a live check of that collection cannot clean up after itself.
 - Catalog search matches the **start** of a name; mid-word search needs a search service.
+- **The free Spark plan is 20k writes / 50k reads a day, and a full sheet import is one write
+  per row.** The owner's catalog is ~10k products, so two full imports in a day exhaust the
+  write quota; Firestore then answers `[code=resource-exhausted]: Quota exceeded` and writes
+  crawl behind an exponential backoff (measured 2026-07-30 18:14 UTC — a `config/app` save
+  produced no toast, and the temp user only appeared seconds later). Quotas reset at midnight
+  Pacific. Import per branch, not the whole catalog repeatedly.
 - A stocktake reports on what was **scanned**. A product in the sheet that nobody scanned does
   not appear as a shortage — listing every missing product would mean reading the whole
   catalog (10k reads) per count. Count by shelf and the sheet stays honest.
