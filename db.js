@@ -71,21 +71,35 @@ export async function deleteShipment(id) {
   await fs.deleteDoc(fs.doc(dbRef, 'shipments', id));
 }
 
-export async function getProductName(barcode) {
-  if (TEST_MODE) return lsObj('test-products')[barcode] || null;
+// a product row is { name, qty } — qty is the stocktake quantity, absent until a sheet is
+// imported. Test mode keeps accepting the old plain-string map so older seeds still work.
+const prodOf = (v) => (typeof v === 'string' ? { name: v } : (v || {}));
+const row = (barcode, v) => ({ barcode, name: prodOf(v).name, qty: prodOf(v).qty });
+
+// one read serves both the shipment name and the stocktake quantity
+export async function getProduct(barcode) {
+  if (TEST_MODE) {
+    const v = lsObj('test-products')[barcode];
+    return v === undefined ? null : row(barcode, v);
+  }
   await live();
   const snap = await fs.getDoc(fs.doc(dbRef, 'products', barcode));
-  return snap.exists() ? snap.data().name : null;
+  return snap.exists() ? row(barcode, snap.data()) : null;
+}
+
+export async function getProductName(barcode) {
+  const p = await getProduct(barcode);
+  return p ? p.name : null;
 }
 
 // first page only for the default view; searching goes to the server
 export async function listProducts() {
   if (TEST_MODE) {
-    return Object.entries(lsObj('test-products')).map(([barcode, name]) => ({ barcode, name }));
+    return Object.entries(lsObj('test-products')).map(([barcode, v]) => row(barcode, v));
   }
   await live();
   const snap = await fs.getDocs(fs.query(fs.collection(dbRef, 'products'), fs.orderBy('name'), fs.limit(PRODUCT_CAP)));
-  return snap.docs.map((d) => ({ barcode: d.id, name: d.data().name }));
+  return snap.docs.map((d) => row(d.id, d.data()));
 }
 
 // every product, for the export file (one deliberate full read, never a screen load)
@@ -93,7 +107,7 @@ export async function listAllProducts() {
   if (TEST_MODE) return listProducts();
   await live();
   const snap = await fs.getDocs(fs.query(fs.collection(dbRef, 'products'), fs.orderBy('name')));
-  return snap.docs.map((d) => ({ barcode: d.id, name: d.data().name }));
+  return snap.docs.map((d) => row(d.id, d.data()));
 }
 
 // Searches the WHOLE catalog, not just the loaded page: name-prefix and barcode-prefix
@@ -106,7 +120,7 @@ export async function searchProducts(q) {
   }
   await live();
   const found = new Map();
-  const collect = (snap) => snap.docs.forEach((d) => found.set(d.id, { barcode: d.id, name: d.data().name }));
+  const collect = (snap) => snap.docs.forEach((d) => found.set(d.id, row(d.id, d.data())));
   const prefix = (field) => fs.query(
     fs.collection(dbRef, 'products'), fs.orderBy(field), fs.startAt(q), fs.endAt(q + '\uf8ff'), fs.limit(HITS)
   );
@@ -206,13 +220,71 @@ export async function deleteMany(collection, ids) {
   return ids.length;
 }
 
+// merge, never replace: renaming a product must not drop the stocktake quantity next to it
 export async function saveProductName(barcode, name) {
+  return writeProduct(barcode, { name });
+}
+
+// the stocktake sheet carries both columns; qty comes in as a number
+export async function saveProductRow(barcode, name, qty) {
+  return writeProduct(barcode, Number.isFinite(qty) ? { name, qty } : { name });
+}
+
+async function writeProduct(barcode, patch) {
   if (TEST_MODE) {
     const map = lsObj('test-products');
-    map[barcode] = name;
+    map[barcode] = { ...prodOf(map[barcode]), ...patch };
     localStorage.setItem('test-products', JSON.stringify(map));
     return;
   }
   await live();
-  fs.setDoc(fs.doc(dbRef, 'products', barcode), { name }).catch((e) => dispatchEvent(new CustomEvent('db-error', { detail: e })));
+  fs.setDoc(fs.doc(dbRef, 'products', barcode), patch, { merge: true })
+    .catch((e) => dispatchEvent(new CustomEvent('db-error', { detail: e })));
+}
+
+/* ---------- stocktake sessions (الجرد): the same shape as a shipment, plus sys on each item ---------- */
+
+export async function saveCount(count) {
+  count.createdAt = Date.now();
+  if (TEST_MODE) {
+    const all = lsArr('test-counts');
+    all.push(count);
+    localStorage.setItem('test-counts', JSON.stringify(all));
+    return;
+  }
+  await live();
+  // same reasoning as saveShipment: awaiting the network would hang the UI while offline
+  fs.addDoc(fs.collection(dbRef, 'counts'), count).catch((e) => dispatchEvent(new CustomEvent('db-error', { detail: e })));
+}
+
+export async function listCounts() {
+  if (TEST_MODE) {
+    return lsArr('test-counts')
+      .map((c) => ({ ...c, _id: String(c.createdAt) }))
+      .sort((a, b) => b.createdAt - a.createdAt);
+  }
+  await live();
+  const snap = await fs.getDocs(fs.query(fs.collection(dbRef, 'counts'), fs.orderBy('createdAt', 'desc')));
+  return snap.docs.map((d) => ({ ...d.data(), _id: d.id }));
+}
+
+export async function updateCount(id, data) {
+  if (TEST_MODE) {
+    const all = lsArr('test-counts').map((c) =>
+      String(c.createdAt) === id ? { ...c, name: data.name, items: data.items } : c);
+    localStorage.setItem('test-counts', JSON.stringify(all));
+    return;
+  }
+  await live();
+  await fs.updateDoc(fs.doc(dbRef, 'counts', id), { name: data.name, items: data.items });
+}
+
+export async function deleteCount(id) {
+  if (TEST_MODE) {
+    const keep = lsArr('test-counts').filter((c) => String(c.createdAt) !== id);
+    localStorage.setItem('test-counts', JSON.stringify(keep));
+    return;
+  }
+  await live();
+  await fs.deleteDoc(fs.doc(dbRef, 'counts', id));
 }

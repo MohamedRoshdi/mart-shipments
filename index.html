@@ -42,8 +42,13 @@
         <button id="btn-logout" class="ghost" hidden>خروج</button>
       </div>
       <ul id="my-shipments"></ul>
+      <div id="counts-block" hidden>
+        <h2>الجرد</h2>
+        <ul id="my-counts"></ul>
+      </div>
       <div class="bottombar">
-        <button id="btn-new" class="primary big">+ شحنة جديدة</button>
+        <button id="btn-new" class="primary big grow">+ شحنة جديدة</button>
+        <button id="btn-count" class="ghost big grow" hidden>+ جرد</button>
       </div>
     </section>
 
@@ -51,9 +56,11 @@
       <h2>الفرع</h2>
       <p id="new-branch" class="branch-line"></p>
       <div id="new-branch-picker" class="seg" hidden></div>
-      <h2>نوع الشحنة</h2>
-      <div id="type-picker" class="seg"></div>
-      <h2>اسم الشحنة</h2>
+      <div id="new-type-row">
+        <h2>نوع الشحنة</h2>
+        <div id="type-picker" class="seg"></div>
+      </div>
+      <h2 id="new-name-head">اسم الشحنة</h2>
       <input id="shipment-name" type="text" maxlength="100" placeholder="مثلاً: شحنة المراعي">
       <button id="btn-scan" class="scan">امسح الباركود بالكاميرا</button>
       <div id="reader" hidden></div>
@@ -62,6 +69,7 @@
         <label id="zoom-live-wrap" hidden>التقريب
           <input id="zoom-live" type="range" min="1" max="5" step="0.5" dir="ltr">
         </label>
+        <span id="cam-res" class="code"></span>
       </div>
       <div class="manual">
         <input id="barcode-input" type="text" inputmode="numeric" maxlength="32" placeholder="أو اكتب الباركود" dir="ltr">
@@ -82,8 +90,17 @@
       <div id="cam-list" class="seg"></div>
       <p id="cam-note" class="meta"></p>
 
+      <h2>دقة الصورة</h2>
+      <div id="res-picker" class="seg"></div>
+      <p class="meta">الدقة العالية بتقرأ الباركود الصغير أو المطبوع بشكل وحش أحسن بكتير. لو الموبايل قديم
+        وحسّيت المسح بقى بطيء، رجّعها لـ «عادية». الرقم اللي بيظهر جنب الفلاش وإنت بتمسح هو الدقة الفعلية.</p>
+
       <h2>حجم منطقة المسح</h2>
       <div id="box-picker" class="seg"></div>
+
+      <h2>التركيز</h2>
+      <button id="btn-focus" class="ghost" aria-pressed="true">تركيز تلقائي مستمر</button>
+      <p class="meta">بيخلي الكاميرا تظبّط التركيز لوحدها وإنت بتقرّب من الباركود. لو لقيت الصورة بتروح وتيجي، اقفله.</p>
 
       <h2>التقريب</h2>
       <label class="zoom-row">
@@ -104,10 +121,12 @@
     <p id="item-name" class="item-label"></p>
     <p class="meta">الباركود <span id="item-barcode" class="code"></span></p>
     <div id="item-warn" class="warn" hidden>
-      <p>الباركود ده مش موجود في ملف الأصناف، والصنف مش هيتسجّل في الشحنة.</p>
+      <p id="item-warn-line">الباركود ده مش موجود في ملف الأصناف، والصنف مش هيتسجّل في الشحنة.</p>
       <p>ابعت الباركود للمدير يضيفه في ملف الأصناف، وبعد كده امسح الصنف تاني.</p>
       <button id="btn-copy-barcode" class="ghost">نسخ الباركود</button>
     </div>
+    <p id="item-stock" class="stock-line" hidden>الكمية في النظام <span id="item-stock-qty" class="code"></span></p>
+    <p id="qty-hint" class="meta" hidden>اكتب الكمية اللي لقيتها فعلاً على الرف.</p>
     <div id="qty-row" class="qty-row">
       <button id="qty-minus" aria-label="كمية أقل">−</button>
       <input id="item-qty" type="number" value="1" min="1" dir="ltr" aria-label="الكمية">

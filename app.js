@@ -27,16 +27,21 @@ const TITLES = {
 const types = () => window.APP_CONFIG.shipmentTypes;
 
 const state = {
-  items: [], currentBarcode: null, currentName: "", editingId: null, mine: [],
+  items: [], currentBarcode: null, currentName: "", currentSys: null, editingId: null,
+  mine: [], myCounts: [],
+  // "ship" = a delivery being received, "count" = a stocktake (جرد) against the system quantity
+  mode: "ship",
   branch: myBranch(), type: types()[0],
 };
+
+const counting = () => state.mode === "count";
 
 /* ---------- navigation: one screen at a time, phone back button works ---------- */
 
 function render(id) {
   document.querySelectorAll("main > section").forEach(s => s.hidden = true);
   $(id).hidden = false;
-  $("screen-title").textContent = TITLES[id] || "شحنات المحل";
+  $("screen-title").textContent = (id === "screen-new" && counting()) ? "جرد" : (TITLES[id] || "شحنات المحل");
   $("btn-back").hidden = id === "screen-home" || id === "screen-login" || (id === "screen-name" && !myName());
   $("btn-cam").hidden = !(id === "screen-home" || id === "screen-new");
   $("who").hidden = !myName() || id !== "screen-home";
@@ -55,6 +60,7 @@ function navTo(id) {
 async function goHome() {
   await stopScan();
   state.editingId = null;
+  state.mode = "ship";
   render("screen-home");
   const all = await db.listShipments().catch(() => []);
   state.mine = all.filter(s => s.createdBy === myName());
@@ -65,6 +71,23 @@ async function goHome() {
       </div>
       ${canDo("edit") ? `<button class="ghost" data-edit="${i}">تعديل</button>` : ""}
     </li>`).join("") || `<li class="empty">لسه مفيش شحنات — ابدأ بـ «شحنة جديدة»</li>`;
+  if (canDo("count")) await renderMyCounts();
+}
+
+// the difference a stocktake found: counted minus what the system says
+const countDiff = (c) => c.items.reduce((n, i) => n + (Number(i.qty) || 0) - (Number(i.sys) || 0), 0);
+const withSign = (n) => (n > 0 ? `+${n}` : String(n));
+
+async function renderMyCounts() {
+  const all = await db.listCounts().catch(() => []);
+  state.myCounts = all.filter(c => c.createdBy === myName());
+  $("my-counts").innerHTML = state.myCounts.map((c, i) => `<li>
+      <div class="card-main">
+        <div class="card-title">${esc(c.name)}</div>
+        <div class="meta">${esc(c.branch || "")} · ${fmtDate(c.createdAt)} · ${c.items.length} صنف · الفرق ${esc(withSign(countDiff(c)))}</div>
+      </div>
+      ${canDo("edit") ? `<button class="ghost" data-editcount="${i}">تعديل</button>` : ""}
+    </li>`).join("") || `<li class="empty">لسه مفيش جرد — ابدأ بـ «جرد»</li>`;
 }
 
 // no session at all = the old single-PIN setup, where everything was allowed
@@ -79,6 +102,8 @@ function renderHomeLinks() {
   $("link-admin").href = auth.withQuery("admin.html");
   $("btn-logout").hidden = !s;
   $("btn-new").hidden = !canDo("create");
+  $("btn-count").hidden = !canDo("count");
+  $("counts-block").hidden = !canDo("count");
   $("who").disabled = !!s;                 // a signed-in user changes their name from the admin page
 }
 
@@ -168,7 +193,7 @@ $("save-name").onclick = () => {
 /* ---------- building a shipment ---------- */
 
 function saveDraft() {
-  if (state.editingId) return; // editing a saved shipment must not overwrite the unsaved draft
+  if (state.editingId || counting()) return; // editing a saved shipment, or a stocktake, must not overwrite the unsaved draft
   localStorage.setItem("draft", JSON.stringify({ name: $("shipment-name").value, items: state.items, type: state.type }));
 }
 
@@ -214,8 +239,20 @@ $("type-picker").onclick = (e) => {
   saveDraft();
 };
 
+// one screen serves both jobs; the mode decides the labels and what a row shows
+function paintMode() {
+  const c = counting();
+  $("new-type-row").hidden = c;
+  $("new-name-head").textContent = c ? "اسم الجرد" : "اسم الشحنة";
+  $("shipment-name").placeholder = c ? "مثلاً: جرد رف اللبن" : "مثلاً: شحنة المراعي";
+  $("btn-save-shipment").textContent = c
+    ? "حفظ الجرد"
+    : (state.editingId ? "حفظ التعديلات" : "حفظ الشحنة");
+}
+
 $("btn-new").onclick = () => {
   const draft = JSON.parse(localStorage.getItem("draft") || "null");
+  state.mode = "ship";
   state.editingId = null;
   state.items = (draft && draft.items) || [];
   state.currentBarcode = null;
@@ -223,10 +260,23 @@ $("btn-new").onclick = () => {
   renderTypePicker();
   $("shipment-name").value = (draft && draft.name) || "";
   $("barcode-input").value = "";
-  $("btn-save-shipment").textContent = "حفظ الشحنة";
+  paintMode();
   renderItems();
   navTo("screen-new");
   if (state.items.length) toast("رجّعنالك الشحنة اللي كانت مفتوحة");
+};
+
+$("btn-count").onclick = () => {
+  state.mode = "count";
+  state.editingId = null;
+  state.items = [];
+  state.currentBarcode = null;
+  renderNewBranch();
+  $("shipment-name").value = "";
+  $("barcode-input").value = "";
+  paintMode();
+  renderItems();
+  navTo("screen-new");
 };
 
 $("my-shipments").onclick = (e) => {
@@ -234,7 +284,13 @@ $("my-shipments").onclick = (e) => {
   if (btn) openShipment(state.mine[+btn.dataset.edit]);
 };
 
+$("my-counts").onclick = (e) => {
+  const btn = e.target.closest("button[data-editcount]");
+  if (btn) openCount(state.myCounts[+btn.dataset.editcount]);
+};
+
 function openShipment(s) {
+  state.mode = "ship";
   state.editingId = s._id;
   state.items = s.items.map(i => ({ ...i }));
   state.currentBarcode = null;
@@ -242,7 +298,20 @@ function openShipment(s) {
   renderTypePicker();
   $("shipment-name").value = s.name;
   $("barcode-input").value = "";
-  $("btn-save-shipment").textContent = "حفظ التعديلات";
+  paintMode();
+  renderItems();
+  navTo("screen-new");
+}
+
+function openCount(c) {
+  state.mode = "count";
+  state.editingId = c._id;
+  state.items = c.items.map(i => ({ ...i }));
+  state.currentBarcode = null;
+  renderNewBranch();
+  $("shipment-name").value = c.name;
+  $("barcode-input").value = "";
+  paintMode();
   renderItems();
   navTo("screen-new");
 }
@@ -255,16 +324,26 @@ $("btn-lookup").onclick = () => {
 };
 
 async function onBarcode(code) {
+  const p = await db.getProduct(code);
   state.currentBarcode = code;
-  state.currentName = await db.getProductName(code) || "";
+  state.currentName = (p && p.name) || "";
+  state.currentSys = p && Number.isFinite(p.qty) ? p.qty : null;
   const known = state.currentName !== "";
   $("item-barcode").textContent = code;
   $("item-name").textContent = known ? state.currentName : "صنف غير مسجّل في ملف الأصناف";
   $("item-name").classList.toggle("unknown", !known);
   $("item-warn").hidden = known;                 // full explanation instead of a silent add
+  $("item-warn-line").textContent = counting()
+    ? "الباركود ده مش موجود في ملف الأصناف، والصنف مش هيتسجّل في الجرد."
+    : "الباركود ده مش موجود في ملف الأصناف، والصنف مش هيتسجّل في الشحنة.";
+  // the whole point of a stocktake: the employee sees what the system claims before he types
+  $("item-stock").hidden = !(known && counting());
+  $("item-stock-qty").textContent = state.currentSys === null ? "غير مسجّلة" : state.currentSys;
+  $("qty-hint").hidden = !(known && counting());
   $("qty-row").hidden = !known;                  // nothing to count if the item cannot be added
   $("btn-add-item").hidden = !known;             // only catalog items can enter a shipment
   $("btn-add-item").disabled = !known;
+  $("btn-add-item").textContent = counting() ? "تسجيل الكمية" : "إضافة الصنف";
   $("item-qty").value = 1;
   showSheet(true);
 }
@@ -289,6 +368,7 @@ function hideSheet() {
   showSheet(false);
   state.currentBarcode = null;
   state.currentName = "";
+  state.currentSys = null;
 }
 
 $("btn-cancel-item").onclick = hideSheet;
@@ -303,17 +383,32 @@ $("btn-add-item").onclick = () => {
   if (!barcode) return;
   if (!name) { toast("الصنف مش في ملف الأصناف — مش هينفع يتسجّل"); return; }
   const dup = state.items.find(i => i.barcode === barcode);
-  if (dup) dup.qty += qty; else state.items.push({ barcode, name, qty });
+  // a second scan of the same item means more of it was found, in both modes
+  if (dup) dup.qty += qty;
+  // sys is left out when the sheet never gave a quantity for this product — 0 would be a lie
+  else if (counting()) state.items.push(state.currentSys === null
+    ? { barcode, name, qty }
+    : { barcode, name, qty, sys: state.currentSys });
+  else state.items.push({ barcode, name, qty });
   hideSheet();
   $("barcode-input").value = "";
   renderItems();
 };
+
+// a stocktake row carries its own verdict: what the system said and how far off the shelf is
+function itemNote(i) {
+  if (!counting()) return "";
+  if (!Number.isFinite(i.sys)) return `<div class="meta">مش مسجّل في النظام</div>`;
+  const d = (Number(i.qty) || 0) - i.sys;
+  return `<div class="meta">في النظام ${esc(i.sys)} · الفرق ${esc(withSign(d))}</div>`;
+}
 
 function renderItems() {
   $("items-list").innerHTML = state.items.map((i, idx) => `<li>
       <div class="card-main">
         <div class="card-title">${esc(i.name || "بدون اسم")}</div>
         <div class="code">${esc(i.barcode)}</div>
+        ${itemNote(i)}
       </div>
       <span class="stamp">${esc(i.qty)}</span>
       <button class="del" data-del="${idx}" aria-label="حذف الصنف">×</button>
@@ -332,19 +427,22 @@ $("items-list").onclick = (e) => {
 
 $("btn-save-shipment").onclick = async () => {
   const name = $("shipment-name").value.trim();
-  if (!name) { toast("اكتب اسم الشحنة الأول"); return; }
+  if (!name) { toast(counting() ? "اكتب اسم الجرد الأول" : "اكتب اسم الشحنة الأول"); return; }
   const editing = state.editingId;
-  if (!canDo(editing ? "edit" : "create")) { toast("مالكش صلاحية للخطوة دي — كلّم الأدمن"); return; }
+  const perm = counting() ? (editing ? "edit" : "count") : (editing ? "edit" : "create");
+  if (!canDo(perm)) { toast("مالكش صلاحية للخطوة دي — كلّم الأدمن"); return; }
   try {
-    if (editing) await db.updateShipment(editing, { name, items: state.items, type: state.type });
+    if (counting() && editing) await db.updateCount(editing, { name, items: state.items });
+    else if (counting()) await db.saveCount({ name, createdBy: myName(), branch: state.branch, items: state.items });
+    else if (editing) await db.updateShipment(editing, { name, items: state.items, type: state.type });
     else await db.saveShipment({ name, createdBy: myName(), branch: state.branch, type: state.type, items: state.items });
   } catch (e) {
     console.error(e);
     toast("الحفظ ما نفعش — حاول تاني");
     return;
   }
-  if (!editing) localStorage.removeItem("draft");
-  toast(editing ? "تم حفظ التعديلات" : "تم حفظ الشحنة");
+  if (!editing && !counting()) localStorage.removeItem("draft");
+  toast(counting() ? "تم حفظ الجرد" : (editing ? "تم حفظ التعديلات" : "تم حفظ الشحنة"));
   history.replaceState({ screen: "screen-home" }, "");
   goHome();
 };
@@ -355,12 +453,22 @@ let scanner = null;
 
 // per-phone camera preferences: a shop phone with three back lenses often defaults to the
 // one that cannot focus close up, which reads as "the scanner is broken on this phone"
-const CAM_DEFAULTS = { deviceId: "", box: "med", torch: false, zoom: 1 };
+const CAM_DEFAULTS = { deviceId: "", box: "med", torch: false, zoom: 1, res: "hd", focus: true };
 const camCfg = () => ({ ...CAM_DEFAULTS, ...JSON.parse(localStorage.getItem("camSettings") || "{}") });
 const saveCam = (patch) => localStorage.setItem("camSettings", JSON.stringify({ ...camCfg(), ...patch }));
 
 const BOXES = { small: { w: 220, h: 130 }, med: { w: 300, h: 170 }, large: { w: 340, h: 220 } };
 const BOX_LABELS = { small: "صغير", med: "متوسط", large: "كبير" };
+
+// Without a resolution the browser hands out its default stream — 640×480 on most Android
+// phones, which is where "the scanner is fine on my phone, useless on the shop one" comes from.
+// ideal (not exact) so a camera that cannot do it still starts instead of failing.
+const RES = {
+  auto: {},
+  hd: { width: { ideal: 1280 }, height: { ideal: 720 } },
+  fhd: { width: { ideal: 1920 }, height: { ideal: 1080 } },
+};
+const RES_LABELS = { auto: "عادية", hd: "عالية", fhd: "أعلى" };
 
 // retail barcodes + QR only: fewer formats to try per frame means a faster read
 const FMT = window.Html5QrcodeSupportedFormats;
@@ -381,10 +489,16 @@ async function startScan(retried = false) {
     formatsToSupport: FORMATS,
     experimentalFeatures: { useBarCodeDetectorIfSupported: true },
   });
+  // html5-qrcode ignores the first argument once videoConstraints is valid, so the chosen
+  // camera has to live inside the same object as the resolution
+  const video = {
+    ...(RES[s.res] || RES.hd),
+    ...(s.deviceId && !retried ? { deviceId: { exact: s.deviceId } } : { facingMode: "environment" }),
+  };
   try {
     await scanner.start(
-      s.deviceId && !retried ? { deviceId: { exact: s.deviceId } } : { facingMode: "environment" },
-      { fps: 12, qrbox: { width: Math.min(box.w, innerWidth - 48), height: box.h } },
+      video,
+      { fps: 12, qrbox: { width: Math.min(box.w, innerWidth - 48), height: box.h }, videoConstraints: video },
       async (text) => { await stopScan(); beep(); onBarcode(text.trim()).catch(() => toast("حصلت مشكلة — جرّب تاني")); }
     );
   } catch (err) {
@@ -410,9 +524,14 @@ async function applyTrack() {
   const s = camCfg();
   let caps = {};
   try { caps = scanner.getRunningTrackCapabilities() || {}; } catch (e) { console.error(e); }
+  // a phone that locks focus at infinity never reads a barcode held 10 cm away
+  if (s.focus && Array.isArray(caps.focusMode) && caps.focusMode.includes("continuous")) {
+    await constrain({ focusMode: "continuous" });
+  }
+  showCamRes();
   $("btn-torch").hidden = !caps.torch;
   $("zoom-live-wrap").hidden = !caps.zoom;
-  $("cam-live").hidden = !(caps.torch || caps.zoom);
+  $("cam-live").hidden = false;                 // the resolution readout is always worth showing
   if (caps.zoom) {
     const z = Math.min(Math.max(s.zoom, caps.zoom.min), caps.zoom.max);
     Object.assign($("zoom-live"), { min: caps.zoom.min, max: caps.zoom.max, step: caps.zoom.step || 0.5, value: z });
@@ -422,6 +541,14 @@ async function applyTrack() {
     $("btn-torch").setAttribute("aria-pressed", String(!!s.torch));
     await constrain({ torch: !!s.torch });
   }
+}
+
+// the real stream size, not the one we asked for: the only honest way to tell whether the
+// phone accepted the resolution setting
+function showCamRes() {
+  let st = {};
+  try { st = scanner.getRunningTrackSettings() || {}; } catch (e) { console.error(e); }
+  $("cam-res").textContent = st.width ? `${st.width}×${st.height}` : "";
 }
 
 $("btn-torch").onclick = async () => {
@@ -453,6 +580,9 @@ async function renderCamScreen() {
   const s = camCfg();
   $("box-picker").innerHTML = Object.keys(BOXES).map(k =>
     `<button type="button" data-box="${k}" aria-pressed="${k === s.box}">${BOX_LABELS[k]}</button>`).join("");
+  $("res-picker").innerHTML = Object.keys(RES).map(k =>
+    `<button type="button" data-res="${k}" aria-pressed="${k === s.res}">${RES_LABELS[k]}</button>`).join("");
+  $("btn-focus").setAttribute("aria-pressed", String(!!s.focus));
   $("cam-zoom").value = s.zoom;
   $("cam-zoom-val").textContent = `×${s.zoom}`;
   $("btn-torch-default").setAttribute("aria-pressed", String(!!s.torch));
@@ -485,6 +615,20 @@ $("box-picker").onclick = (e) => {
   if (!btn) return;
   saveCam({ box: btn.dataset.box });
   renderCamScreen();
+};
+
+$("res-picker").onclick = (e) => {
+  const btn = e.target.closest("button[data-res]");
+  if (!btn) return;
+  saveCam({ res: btn.dataset.res });
+  renderCamScreen();
+  toast("اتحفظت — تفتح مع المسح الجاي");
+};
+
+$("btn-focus").onclick = () => {
+  const on = $("btn-focus").getAttribute("aria-pressed") !== "true";
+  $("btn-focus").setAttribute("aria-pressed", String(on));
+  saveCam({ focus: on });
 };
 
 $("cam-zoom").oninput = () => {

@@ -367,8 +367,9 @@ test('catalog screen: list, search, rename, delete, export', async ({ page }) =>
   await expect(page.locator('#products-dirty')).toHaveText('1 تعديل');
   await page.click('#btn-save-products');
   await expect(page.locator('#btn-save-products')).toBeDisabled();
+  // a saved product row is an object now: the stocktake quantity lives next to the name
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem('test-products'))['111']))
-    .toBe('لبن المراعي 1 لتر');
+    .toEqual({ name: 'لبن المراعي 1 لتر' });
 
   page.on('dialog', (d) => d.accept());                       // delete
   await page.click('button[data-delproduct="222"]');
@@ -448,6 +449,8 @@ test('PWA: manifest served, service worker registers', async ({ page }) => {
   expect(resAdmin.ok()).toBeTruthy();
   const resTemplate = await page.request.get('/products-template.csv');
   expect(resTemplate.ok()).toBeTruthy();
+  const resStock = await page.request.get('/stock-template.csv');
+  expect(resStock.ok()).toBeTruthy();
   await page.goto('/'); // no ?test → sw registers (initDb error is caught, app still boots)
   const active = await page.evaluate(async () => {
     const reg = await navigator.serviceWorker.ready;
@@ -593,7 +596,7 @@ test('camera settings: reachable from the app bar and the choices stick', async 
   await page.fill('#cam-zoom', '2.5');
   await page.click('#btn-torch-default');
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem('camSettings'))))
-    .toEqual({ deviceId: '', box: 'large', torch: true, zoom: 2.5 });
+    .toEqual({ deviceId: '', box: 'large', torch: true, zoom: 2.5, res: 'hd', focus: true });
   await expect(page.locator('#cam-zoom-val')).toHaveText('×2.5');
 
   await page.goBack();                                           // phone back leaves the settings
@@ -798,4 +801,164 @@ test("draft survives reload", async ({ page }) => {
   await page.click("#btn-new");
   await expect(page.locator('#items-list li:not(.empty)')).toHaveCount(1);
   await expect(page.locator("#shipment-name")).toHaveValue("مسودة");
+});
+
+/* ---------- الجرد: counting the shelf against the quantity the shop's system says ---------- */
+
+const COUNTER = { name: 'سعيد', pin: '7733', branches: ['فرع قويسنا'], perms: ['emp', 'create', 'count', 'edit'] };
+const NO_COUNT = { name: 'سيد', pin: '2233', branches: ['فرع قويسنا'], perms: ['emp', 'create'] };
+
+test('stocktake sheet import writes the system quantity onto the product', async ({ page }) => {
+  await openManagerPage(page);
+  await page.setInputFiles('#stock-file', 'tests/fixtures/stock.csv');
+  await expect(page.locator('#toast')).toContainText('تم استيراد كميات 2 صنف');
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('test-products')));
+  expect(saved['6221031250057']).toEqual({ name: 'لبن المراعي', qty: 24 });
+  expect(saved['6224000123456']).toEqual({ name: 'جبنة بيضاء', qty: 8 });
+
+  // renaming from the catalog screen must not drop the quantity sitting next to the name
+  await page.click('#btn-products');
+  await page.fill('input[data-barcode="6221031250057"]', 'لبن المراعي 1 لتر');
+  await page.click('#btn-save-products');
+  await expect(page.locator('#toast')).toContainText('تم حفظ 1 اسم');
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('test-products'))['6221031250057']))
+    .toEqual({ name: 'لبن المراعي 1 لتر', qty: 24 });
+});
+
+test('employee stocktake: the sheet shows what the system says, the save keeps both numbers', async ({ page }) => {
+  await page.goto('/?test=1');
+  await page.evaluate(() => {
+    localStorage.setItem('employeeName', 'أحمد');
+    localStorage.setItem('test-products', JSON.stringify({ '111': { name: 'لبن', qty: 10 }, '222': 'جبنة' }));
+  });
+  await page.reload();
+  await page.click('#btn-count');
+  await expect(page.locator('#new-type-row')).toBeHidden();         // a stocktake has no shipment type
+  await expect(page.locator('#new-name-head')).toHaveText('اسم الجرد');
+  await page.fill('#shipment-name', 'جرد رف اللبن');
+  await page.fill('#barcode-input', '111');
+  await page.click('#btn-lookup');
+  await expect(page.locator('#item-stock')).toBeVisible();
+  await expect(page.locator('#item-stock-qty')).toHaveText('10');   // the whole point of the screen
+  await page.fill('#item-qty', '3');
+  await page.click('#btn-add-item');
+  await expect(page.locator('#items-list li:not(.empty)')).toContainText('في النظام 10 · الفرق -7');
+
+  await page.fill('#barcode-input', '222');                         // never given a quantity
+  await page.click('#btn-lookup');
+  await expect(page.locator('#item-stock-qty')).toHaveText('غير مسجّلة');
+  await page.click('#btn-add-item');
+  await expect(page.locator('#items-list li:not(.empty)').nth(1)).toContainText('مش مسجّل في النظام');
+
+  await page.click('#btn-save-shipment');
+  await expect(page.locator('#toast')).toContainText('تم حفظ الجرد');
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('test-counts')));
+  expect(saved).toHaveLength(1);
+  expect(saved[0].name).toBe('جرد رف اللبن');
+  expect(saved[0].items[0]).toEqual({ barcode: '111', name: 'لبن', qty: 3, sys: 10 });
+  expect(saved[0].items[1]).toEqual({ barcode: '222', name: 'جبنة', qty: 1 });   // no sys invented
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('test-shipments') || '[]'))).toHaveLength(0);
+  // −7 short on the milk, +1 of a cheese the system never listed
+  await expect(page.locator('#my-counts li')).toContainText('الفرق -6');
+});
+
+test('a stocktake reopens for editing and the difference follows the new quantity', async ({ page }) => {
+  await page.goto('/?test=1');
+  await page.evaluate(() => {
+    localStorage.setItem('employeeName', 'أحمد');
+    localStorage.setItem('test-products', JSON.stringify({ '111': { name: 'لبن', qty: 10 } }));
+    localStorage.setItem('test-counts', JSON.stringify([
+      { name: 'جرد قديم', createdBy: 'أحمد', createdAt: 1753700000000, branch: 'فرع قويسنا',
+        items: [{ barcode: '111', name: 'لبن', qty: 4, sys: 10 }] },
+    ]));
+  });
+  await page.reload();
+  await expect(page.locator('#my-counts li')).toContainText('الفرق -6');
+  await page.click('button[data-editcount="0"]');
+  await expect(page.locator('#shipment-name')).toHaveValue('جرد قديم');
+  await page.fill('#barcode-input', '111');
+  await page.click('#btn-lookup');
+  await page.click('#btn-add-item');                                 // one more found on the shelf
+  await page.click('#btn-save-shipment');
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('test-counts')));
+  expect(saved).toHaveLength(1);                                     // edited, not duplicated
+  expect(saved[0].items[0].qty).toBe(5);
+  await expect(page.locator('#my-counts li')).toContainText('الفرق -5');
+});
+
+test('the stocktake permission gates the button and the list', async ({ page }) => {
+  await page.goto('/?test=1');
+  await seedUsers(page, [NO_COUNT, COUNTER]);
+  await page.fill('#login-pin', NO_COUNT.pin);
+  await page.click('#btn-login');
+  await expect(page.locator('#screen-home')).toBeVisible();
+  await expect(page.locator('#btn-count')).toBeHidden();
+  await expect(page.locator('#counts-block')).toBeHidden();
+
+  await signOut(page);
+  await page.goto('/?test=1');
+  await page.fill('#login-pin', COUNTER.pin);
+  await page.click('#btn-login');
+  await expect(page.locator('#btn-count')).toBeVisible();
+  await expect(page.locator('#counts-block')).toBeVisible();
+});
+
+test('manager: the stocktake tab lists a count with its difference, exports it and deletes it', async ({ page }) => {
+  await openManagerPage(page);
+  await page.evaluate(() => localStorage.setItem('test-counts', JSON.stringify([
+    { name: 'جرد التلاجة', createdBy: 'سعيد', createdAt: 1753700000000, branch: 'فرع قويسنا',
+      items: [{ barcode: '111', name: 'لبن', qty: 7, sys: 10 }, { barcode: '222', name: 'جبنة', qty: 2 }] },
+  ])));
+  await page.reload();                                              // the session survives, no second PIN
+  await expect(page.locator('#screen-manager')).toBeVisible();
+  await expect(page.locator('#counts-block')).toBeHidden();          // the shipments tab opens first
+  await page.click('#list-tabs button[data-tab="count"]');
+  await expect(page.locator('#ships-block')).toBeHidden();
+  await expect(page.locator('#type-filter-row')).toBeHidden();       // no shipment type on a count
+  await expect(page.locator('#all-counts li')).toContainText('جرد التلاجة');
+  await expect(page.locator('#all-counts li')).toContainText('الفرق -1');   // 3 short, 2 not in the system
+
+  const exp = (await Promise.all([
+    page.waitForEvent('download'),
+    page.click('#all-counts button[data-cact="download"]'),
+  ]))[0];
+  expect(exp.suggestedFilename()).toBe('جرد التلاجة.csv');
+  const csv = require('fs').readFileSync(await exp.path(), 'utf8');
+  expect(csv).toContain('"الباركود","اسم الصنف","في النظام","المعدود","الفرق"');
+  expect(csv).toContain('"111","لبن","10","7","-3"');
+  expect(csv).toContain('"222","جبنة","غير مسجّلة","2",""');
+
+  await page.click('#all-counts button[data-cact="view"]');          // the manager may fix a number
+  await expect(page.locator('#detail-type-row')).toBeHidden();
+  await expect(page.locator('#detail-items tr').first()).toContainText('في النظام 10 · الفرق -3');
+  await page.fill('#detail-items input[data-qty="0"]', '10');
+  await expect(page.locator('#detail-items tr').first()).toContainText('الفرق 0');
+  await page.click('#btn-save-edit');
+  await expect(page.locator('#toast')).toContainText('تم حفظ التعديلات');
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('test-counts'))[0].items[0].qty)).toBe(10);
+
+  await page.click('#list-tabs button[data-tab="count"]');
+  page.on('dialog', (d) => d.accept());
+  await page.click('#all-counts button[data-cact="del"]');
+  await expect(page.locator('#toast')).toContainText('تم الحذف');
+  await page.click('#list-tabs button[data-tab="count"]');
+  await expect(page.locator('#all-counts li')).toContainText('مفيش جرد');
+});
+
+test('camera settings: resolution and continuous focus stick per phone', async ({ page }) => {
+  await page.goto('/?test=1');
+  await page.evaluate(() => localStorage.setItem('employeeName', 'أحمد'));
+  await page.reload();
+  await page.click('#btn-cam');
+  await expect(page.locator('#res-picker button[data-res="hd"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#btn-focus')).toHaveAttribute('aria-pressed', 'true');
+  await page.click('#res-picker button[data-res="fhd"]');
+  await page.click('#btn-focus');
+  const cam = await page.evaluate(() => JSON.parse(localStorage.getItem('camSettings')));
+  expect(cam.res).toBe('fhd');
+  expect(cam.focus).toBe(false);
+  await page.reload();
+  await page.click('#btn-cam');
+  await expect(page.locator('#res-picker button[data-res="fhd"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#btn-focus')).toHaveAttribute('aria-pressed', 'false');
 });

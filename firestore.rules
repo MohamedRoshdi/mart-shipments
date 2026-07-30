@@ -25,6 +25,27 @@ service cloud.firestore {
         && request.resource.data.items is list && request.resource.data.items.size() <= 200;
       allow delete: if true;
     }
+    // stocktake sessions: a shipment with the system quantity kept next to the counted one
+    match /counts/{id} {
+      allow read: if true;
+      allow create: if request.resource.data.keys().hasOnly(['name', 'createdBy', 'createdAt', 'items', 'branch'])
+        && (!('branch' in request.resource.data)
+            || (request.resource.data.branch is string && request.resource.data.branch.size() <= 40))
+        && request.resource.data.name is string && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 100
+        && request.resource.data.createdBy is string && request.resource.data.createdBy.size() <= 50
+        && request.resource.data.createdAt is number
+        && request.resource.data.items is list && request.resource.data.items.size() <= 500;
+      // same as shipments: only name + items may change, the branch a count was taken in never moves
+      allow update: if request.resource.data.keys().hasOnly(['name', 'createdBy', 'createdAt', 'items', 'branch'])
+        && request.resource.data.createdBy == resource.data.createdBy
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.get('branch', '') == resource.data.get('branch', '')
+        && request.resource.data.name is string && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 100
+        && request.resource.data.items is list && request.resource.data.items.size() <= 500;
+      allow delete: if true;
+    }
     // admin settings: one doc, fixed key set, short PINs, small lists
     match /config/{doc} {
       allow read: if true;
@@ -49,10 +70,13 @@ service cloud.firestore {
     match /products/{barcode} {
       allow read: if true;
       allow delete: if true;
+      // qty = the quantity the shop's system says is on the shelf; written by the stocktake import
       allow create, update: if barcode.size() <= 32
-        && request.resource.data.keys().hasOnly(['name'])
+        && request.resource.data.keys().hasOnly(['name', 'qty'])
         && request.resource.data.name is string && request.resource.data.name.size() > 0
-        && request.resource.data.name.size() <= 100;
+        && request.resource.data.name.size() <= 100
+        && (!('qty' in request.resource.data)
+            || (request.resource.data.qty is number && request.resource.data.qty >= 0));
     }
   }
 }

@@ -7,6 +7,7 @@ export const PERMS = [
   { id: "mgr", label: "شاشة المدير" },
   { id: "adm", label: "شاشة النظام" },
   { id: "create", label: "إنشاء شحنة" },
+  { id: "count", label: "الجرد" },
   { id: "edit", label: "تعديل الشحنات" },
   { id: "del", label: "حذف الشحنات" },
   { id: "download", label: "تحميل الملفات" },

@@ -26,6 +26,9 @@ const PAGE = 50;                                     // rows rendered at once; s
 
 let all = [];        // everything read from the database
 let shown = [];      // after the branch filter — row indexes point here
+let counts = [];     // stocktake sessions (الجرد), same scope rules as shipments
+let shownCounts = [];
+let tab = "ship";    // which list the screen is showing
 let filter = ALL;
 let typeFilter = ALL;
 let scopes = [];     // branches this user may see; empty = every branch
@@ -90,7 +93,11 @@ const canDo = (perm) => !auth.session() || auth.can(perm);
 
 function applyPerms() {
   $("tool-import").hidden = !canDo("import");
+  $("tool-stock").hidden = !canDo("import");
   $("tool-export").hidden = !canDo("download");
+  $("counts-exports").hidden = !canDo("download");
+  $("list-tabs").hidden = !canDo("count");     // one list left = no need for tabs
+  if (!canDo("count") && tab === "count") tab = "ship";
   $("tool-admin").hidden = !canDo("adm");
   $("btn-save-edit").hidden = !canDo("edit");
   $("detail-exports").hidden = !canDo("download");
@@ -143,12 +150,32 @@ async function openManager() {
   if (scopes.length === 1) $("screen-title").textContent = shortBranch(scopes[0]);
   all = await db.listShipments().catch(() => []);
   if (scopes.length) all = all.filter(s => scopes.includes(s.branch));   // never load another branch
+  counts = canDo("count") ? await db.listCounts().catch(() => []) : [];
+  if (scopes.length) counts = counts.filter(c => scopes.includes(c.branch));
   renderFilter();
   renderTypeFilter();
+  renderTabs();
   renderList();
 }
 
+function renderTabs() {
+  [...$("list-tabs").children].forEach(b =>
+    b.setAttribute("aria-pressed", String(b.dataset.tab === tab)));
+  $("type-filter-row").hidden = tab !== "ship";   // a stocktake has no shipment type
+  $("ships-block").hidden = tab !== "ship";
+  $("counts-block").hidden = tab !== "count";
+}
+
+$("list-tabs").onclick = (e) => {
+  const btn = e.target.closest("button[data-tab]");
+  if (!btn) return;
+  tab = btn.dataset.tab;
+  renderTabs();
+  renderList();
+};
+
 function renderList() {
+  if (tab === "count") { renderCounts(); return; }
   shown = all.filter(s => (filter === ALL || s.branch === filter)
     && (typeFilter === ALL || s.type === typeFilter));
   $("all-shipments").innerHTML = shown.map((s, i) => `<li>
@@ -179,6 +206,50 @@ $("all-shipments").onclick = async (e) => {
     try {
       await db.deleteShipment(s._id);
       db.logAction(identity, "حذف شحنة", `${s.name} · ${s.branch || ""}`);
+      toast("تم الحذف");
+    } catch (err) {
+      console.error(err);
+      toast("الحذف ما نفعش — جرّب تاني");
+    }
+    openManager();
+  }
+};
+
+/* ---------- stocktake list (الجرد) ---------- */
+
+// what the count found against what the system claims; an item with no system quantity
+// counts as a pure surplus, which is exactly what it is on the shelf
+const countDiff = (c) => c.items.reduce((n, i) => n + (Number(i.qty) || 0) - (Number(i.sys) || 0), 0);
+const withSign = (n) => (n > 0 ? `+${n}` : String(n));
+
+function renderCounts() {
+  shownCounts = counts.filter(c => filter === ALL || c.branch === filter);
+  $("all-counts").innerHTML = shownCounts.map((c, i) => `<li>
+      <div class="card-main">
+        <div class="card-title">${esc(c.name)}</div>
+        <div class="meta">${esc(c.branch || "بدون فرع")} · ${esc(c.createdBy)} · ${fmtDate(c.createdAt)} · ${c.items.length} صنف · الفرق ${esc(withSign(countDiff(c)))}</div>
+      </div>
+      <div class="row-actions">
+        <button data-cact="view" data-i="${i}">عرض</button>
+        ${canDo("download") ? `<button data-cact="copy" data-i="${i}">نسخ</button>
+        <button data-cact="download" data-i="${i}">Excel</button>` : ""}
+        ${canDo("del") ? `<button data-cact="del" data-i="${i}" class="danger">حذف</button>` : ""}
+      </div>
+    </li>`).join("") || `<li class="empty">مفيش جرد في الفرع ده</li>`;
+}
+
+$("all-counts").onclick = async (e) => {
+  const btn = e.target.closest("button[data-cact]");
+  if (!btn) return;
+  const c = shownCounts[+btn.dataset.i];
+  if (btn.dataset.cact === "view") openDetail(c, "count");
+  else if (btn.dataset.cact === "copy") copyShipment(c);
+  else if (btn.dataset.cact === "download") downloadCount(c);
+  else if (btn.dataset.cact === "del") {
+    if (!confirm(`حذف «${c.name}»؟ مش هينفع ترجّعه.`)) return;
+    try {
+      await db.deleteCount(c._id);
+      db.logAction(identity, "حذف جرد", `${c.name} · ${c.branch || ""}`);
       toast("تم الحذف");
     } catch (err) {
       console.error(err);
@@ -232,6 +303,29 @@ function downloadShipment(s) {
   toast("تم تحميل ملف Excel");
 }
 
+const sysCell = (i) => (Number.isFinite(i.sys) ? i.sys : "غير مسجّلة");
+const diffCell = (i) => (Number.isFinite(i.sys) ? withSign((Number(i.qty) || 0) - i.sys) : "");
+
+const countRows = (c) => [
+  ["الباركود", "اسم الصنف", "في النظام", "المعدود", "الفرق"],
+  ...c.items.map(i => [i.barcode, i.name || "", sysCell(i), i.qty, diffCell(i)]),
+];
+
+function downloadCount(c) {
+  downloadCsv(`${safeName(c.name)}.csv`, countRows(c));
+  toast("تم تحميل ملف Excel");
+}
+
+$("btn-export-counts").onclick = () => {
+  if (!shownCounts.length) { toast("مفيش جرد يتحمّل"); return; }
+  downloadCsv(`stocktake-${filter === ALL ? "all" : safeName(filter)}.csv`, [
+    ["الفرع", "الجرد", "الموظف", "التاريخ", "الباركود", "اسم الصنف", "في النظام", "المعدود", "الفرق"],
+    ...shownCounts.flatMap(c => c.items.map(i =>
+      [c.branch || "", c.name, c.createdBy, fmtDate(c.createdAt), i.barcode, i.name || "", sysCell(i), i.qty, diffCell(i)])),
+  ]);
+  toast("تم تحميل ملف Excel");
+};
+
 function downloadShipmentTxt(s) {
   downloadTxt(`${safeName(s.name)}.txt`, shipmentText(s));   // barcode TAB qty, same as the copy button
   toast("تم تحميل ملف TXT");
@@ -275,14 +369,18 @@ $("btn-export-zip").onclick = () => {
 
 /* ---------- edit one shipment ---------- */
 
-function openDetail(s) {
-  current = { ...s, items: s.items.map(i => ({ ...i })) }; // edit a copy: back = discard
+function openDetail(s, kind = "ship") {
+  current = { ...s, kind, items: s.items.map(i => ({ ...i })) }; // edit a copy: back = discard
+  const isCount = kind === "count";
   $("detail-name").value = s.name;
+  $("detail-name-head").textContent = isCount ? "اسم الجرد" : "اسم الشحنة";
+  $("detail-type-row").hidden = isCount;                  // a stocktake has no shipment type
   $("detail-meta").textContent = `${s.branch || "بدون فرع"} · ${s.createdBy} · ${fmtDate(s.createdAt)}`;
   renderDetailType();
   renderDetailItems();
   history.pushState({ screen: "screen-detail" }, "");
   render("screen-detail");
+  if (isCount) $("screen-title").textContent = "تعديل جرد";
 }
 
 function renderDetailType() {
@@ -297,9 +395,13 @@ $("detail-type").onclick = (e) => {
   renderDetailType();
 };
 
+const noteText = (i) => `في النظام ${sysCell(i)} · الفرق ${diffCell(i) || "—"}`;
+
 function renderDetailItems() {
+  const isCount = current.kind === "count";
   $("detail-items").innerHTML = current.items.map((i, idx) => `<tr>
-      <td><div>${esc(i.name || "بدون اسم")}</div><div class="code">${esc(i.barcode)}</div></td>
+      <td><div>${esc(i.name || "بدون اسم")}</div><div class="code">${esc(i.barcode)}</div>
+        ${isCount ? `<div class="meta" data-note="${idx}">${esc(noteText(i))}</div>` : ""}</td>
       <td><input class="qty-cell" type="number" min="1" dir="ltr" data-qty="${idx}" value="${Number(i.qty) || 1}" ${canDo("edit") ? "" : "readonly"}></td>
       <td>${canDo("edit") ? `<button class="del" data-delitem="${idx}" aria-label="حذف الصنف">×</button>` : ""}</td>
     </tr>`).join("") || `<tr><td>مفيش أصناف</td></tr>`;
@@ -307,7 +409,12 @@ function renderDetailItems() {
 
 $("detail-items").oninput = (e) => {
   const inp = e.target.closest("input[data-qty]");
-  if (inp) current.items[+inp.dataset.qty].qty = Math.max(1, parseInt(inp.value, 10) || 1);
+  if (!inp) return;
+  const item = current.items[+inp.dataset.qty];
+  item.qty = Math.max(1, parseInt(inp.value, 10) || 1);
+  // repaint just this row's note: a full re-render would drop the focus mid-typing
+  const note = inp.closest("tr").querySelector("[data-note]");
+  if (note) note.textContent = noteText(item);
 };
 
 $("detail-items").onclick = (e) => {
@@ -319,15 +426,23 @@ $("detail-items").onclick = (e) => {
 
 $("btn-copy").onclick = () => copyShipment(current);
 const detailShipment = () => ({ ...current, name: $("detail-name").value.trim() || current.name });
-$("btn-download").onclick = () => downloadShipment(detailShipment());
+$("btn-download").onclick = () => (current.kind === "count"
+  ? downloadCount(detailShipment())
+  : downloadShipment(detailShipment()));
 $("btn-download-txt").onclick = () => downloadShipmentTxt(detailShipment());
 
 $("btn-save-edit").onclick = async () => {
   const name = $("detail-name").value.trim();
-  if (!name) { toast("اكتب اسم الشحنة"); return; }
+  const isCount = current.kind === "count";
+  if (!name) { toast(isCount ? "اكتب اسم الجرد" : "اكتب اسم الشحنة"); return; }
   try {
-    await db.updateShipment(current._id, { name, items: current.items, type: current.type });
-    db.logAction(identity, "تعديل شحنة", `${name} · ${current.items.length} صنف`);
+    if (isCount) {
+      await db.updateCount(current._id, { name, items: current.items });
+      db.logAction(identity, "تعديل جرد", `${name} · ${current.items.length} صنف`);
+    } else {
+      await db.updateShipment(current._id, { name, items: current.items, type: current.type });
+      db.logAction(identity, "تعديل شحنة", `${name} · ${current.items.length} صنف`);
+    }
     toast("تم حفظ التعديلات");
     history.replaceState({ screen: "screen-manager" }, "");
     openManager();
@@ -372,7 +487,7 @@ function renderProducts() {
   $("products-list").innerHTML = page.map(p => `<li>
       <div class="card-main">
         <input class="product-name" type="text" maxlength="100" data-barcode="${escAttr(p.barcode)}" value="${escAttr(edits.get(p.barcode) ?? p.name)}">
-        <div class="code">${esc(p.barcode)}</div>
+        <div class="code">${esc(p.barcode)}${Number.isFinite(p.qty) ? ` · في النظام ${esc(p.qty)}` : ""}</div>
       </div>
       <button class="del" data-delproduct="${escAttr(p.barcode)}" aria-label="حذف الصنف">×</button>
     </li>`).join("") || `<li class="empty">${searching ? "مفيش نتيجة — دوّر بأول الاسم أو بالباركود" : "مفيش أصناف — استورد ملف الأصناف الأول"}</li>`;
@@ -453,30 +568,60 @@ $("btn-export-products").onclick = async () => {
   toast("بنجهّز الملف...");
   const rows = await db.listAllProducts().catch(() => []);   // whole catalog, not the page on screen
   if (!rows.length) { toast("مفيش أصناف تتحمّل"); return; }
+  // third column doubles as the stocktake sheet: fill it in and import it back
   downloadCsv("products.csv", [
-    ["الباركود", "اسم الصنف"],
-    ...rows.map(p => [p.barcode, p.name]),
+    ["الباركود", "اسم الصنف", "الكمية في النظام"],
+    ...rows.map(p => [p.barcode, p.name, Number.isFinite(p.qty) ? p.qty : ""]),
   ]);
   toast(`تم تحميل ${rows.length} صنف`);
 };
 
 /* ---------- catalog import ---------- */
 
-$("btn-import").onclick = () => $("import-file").click();
-$("import-file").onchange = async (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
+async function sheetRows(file) {
   const buf = await file.arrayBuffer();
   let text = new TextDecoder("utf-8").decode(buf);
   // Excel on Arabic Windows exports windows-1256; UTF-8 decode of that yields replacement chars
   if (text.includes("�")) text = new TextDecoder("windows-1256").decode(buf);
-  const rows = text.split(/\r?\n/).map(l => l.split(/[,;\t]/))
+  return text.split(/\r?\n/).map(l => l.split(/[,;\t]/));
+}
+
+const cell = (c) => String(c || "").trim().replace(/^﻿/, "");
+
+$("btn-import").onclick = () => $("import-file").click();
+$("import-file").onchange = async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const rows = (await sheetRows(file))
     .filter(c => c.length >= 2 && /\d/.test(c[0]) && c[1].trim());
   let n = 0;
   try {
     for (const c of rows) { await db.saveProductName(c[0].trim().replace(/^﻿/, ""), c.slice(1).join(" ").trim()); n++; }
     db.logAction(identity, "استيراد أصناف", `${n} صنف`);
     toast(`تم استيراد ${n} صنف`);
+  } catch (err) {
+    console.error(err);
+    toast(`اتسجل ${n} صنف وبعدين حصلت مشكلة — جرّب تاني`);
+  }
+  e.target.value = "";
+};
+
+/* ---------- stocktake sheet: barcode, name, system quantity ---------- */
+
+$("btn-import-stock").onclick = () => $("stock-file").click();
+$("stock-file").onchange = async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  // the quantity is always the last column, so a name with a comma in it still lands whole
+  const rows = (await sheetRows(file))
+    .map(c => ({ barcode: cell(c[0]), name: c.slice(1, -1).map(cell).join(" ").trim(), qty: parseInt(cell(c[c.length - 1]), 10) }))
+    .filter(r => r.barcode && /\d/.test(r.barcode) && r.name && Number.isFinite(r.qty) && r.qty >= 0);
+  if (!rows.length) { toast("الملف مفيهوش صفوف صالحة — لازم: باركود، اسم، كمية"); e.target.value = ""; return; }
+  let n = 0;
+  try {
+    for (const r of rows) { await db.saveProductRow(r.barcode, r.name, r.qty); n++; }
+    db.logAction(identity, "استيراد كميات الجرد", `${n} صنف`);
+    toast(`تم استيراد كميات ${n} صنف`);
   } catch (err) {
     console.error(err);
     toast(`اتسجل ${n} صنف وبعدين حصلت مشكلة — جرّب تاني`);
