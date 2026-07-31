@@ -91,6 +91,29 @@ const read = (f) => fs.readFileSync(path.join(__dirname, "..", f), "utf8");
   ok("the stylesheet is css", css.status === 200 && css.type.startsWith("text/css"));
   ok("a missing file is a 404, not a crash", (await get("/nope.js")).status === 404);
 
+  /* The served root gets the same treatment as the write root. A plain ../ is normalised away by
+     resolve and lands outside, but the subtle one is a SIBLING directory sharing the prefix:
+     /…/alaelah-mart and /…/alaelah-mart-evil, which a startsWith(root) check waves through. */
+  const web = path.join(__dirname, "..");
+  const sibling = web + "-evil";
+  const escaped = path.join(sibling, "secret.txt");
+  fs.mkdirSync(sibling, { recursive: true });
+  fs.writeFileSync(escaped, "should never be served");
+  try {
+    /* Measured 2026-08-01, because the first version of this check passed against the broken
+       guard and proved nothing. `new URL()` normalises "/../" away — and it decodes %2e first, so
+       "/%2e%2e/" is normalised too. What survives is the encoded SLASH: "..%2f" stays one segment
+       through URL parsing and only becomes "../" at decodeURIComponent, one line before resolve.
+       With that, /..%2f<sibling>/secret.txt resolves to the sibling — which a startsWith(WEB)
+       check waves straight through, because "…/alaelah-mart-evil" starts with "…/alaelah-mart". */
+    const hop = `/..%2f${path.basename(sibling)}/secret.txt`;
+    const r = await get(hop);
+    ok("a SIBLING directory sharing the root's name is refused", r.status !== 200);
+    ok("and it did not leak the file either", !r.body.includes("should never be served"));
+  } finally {
+    fs.rmSync(sibling, { recursive: true, force: true });
+  }
+
   fs.rmSync(ROOT, { recursive: true, force: true });
   console.log(bad ? "FAILED: " + bad : "all good");
   process.exit(bad ? 1 : 0);

@@ -45,8 +45,12 @@ function serve() {
   return new Promise((ok) => {
     const server = http.createServer(async (req, res) => {
       const rel = decodeURIComponent(new URL(req.url, "http://x").pathname);
-      const file = path.join(WEB, rel === "/" ? "index.html" : rel);
-      if (!file.startsWith(WEB)) { res.writeHead(403).end(); return; }
+      const file = path.resolve(WEB, "." + (rel === "/" ? "/index.html" : rel));
+      /* startsWith(WEB) is not the check it looks like: a SIBLING directory sharing the prefix
+         passes it, so serving from /…/alaelah-mart would also serve /…/alaelah-mart-evil. The
+         separator is what makes it mean "inside". Same shape as inside() below — one idea, one
+         spelling. */
+      if (file !== WEB && !file.startsWith(WEB + path.sep)) { res.writeHead(403).end(); return; }
       try {
         const body = await fs.readFile(file);
         res.writeHead(200, {

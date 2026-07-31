@@ -468,7 +468,16 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   `process` depends on whether the renderer is sandboxed, and `main.js` owns `ROOT` anyway.
   **The path guard is security, not tidiness**: a folder name arrives from a shipment type the
   shop typed into a publicly-writable settings doc, so `inside()` resolves it and proves it stayed
-  under the root. Four of the 18 checks are traversal attempts.
+  under the root. Six of the 20 checks are traversal attempts.
+  **`startsWith(root)` is not that check, and the served root got it wrong on the first pass**
+  (caught by review, 2026-08-01): a **sibling** directory sharing the prefix passes it, so serving
+  from `…/alaelah-mart` also served `…/alaelah-mart-evil`. The separator is what means "inside" —
+  `p === root || p.startsWith(root + path.sep)`, the same spelling in both places.
+  The reachable URL is **`/..%2f<sibling>/secret.txt`**, measured: `new URL()` decodes `%2e` and
+  then normalises `/../` away, so encoded dots do nothing — the encoded **slash** is what survives
+  parsing as one segment and only becomes `../` at `decodeURIComponent`, one line before the
+  resolve. The first version of that check used `%2e%2e` and **passed against the broken guard**;
+  a security check has to be run against the bug before it is worth anything.
   With a bridge present the admin page hides the folder picker entirely — a button that cannot
   change anything is a button that looks broken.
 - **UNVERIFIED in `desktop/`**: `npm run dist` has never been run (electron is a ~200 MB download
