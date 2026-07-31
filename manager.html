@@ -18,7 +18,9 @@
   <main>
     <section id="screen-pin" hidden>
       <h2>الرقم السري</h2>
-      <input id="pin-input" type="password" inputmode="numeric" maxlength="4" dir="ltr" placeholder="••••">
+      <!-- 8, like every other PIN box: a user PIN may be up to 8 digits and this one was cutting
+           them off at 4, so a manager with a long PIN could not sign in here at all -->
+      <input id="pin-input" type="password" inputmode="numeric" maxlength="8" dir="ltr" placeholder="••••">
       <button id="btn-pin" class="primary big">دخول</button>
     </section>
 

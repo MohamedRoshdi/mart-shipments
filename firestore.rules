@@ -96,7 +96,7 @@ service cloud.firestore {
             || (request.resource.data.users is list && request.resource.data.users.size() <= 40))
         // suppliers is the shop's list of vendor names, offered as the shipment name
         && (!('suppliers' in request.resource.data)
-            || (request.resource.data.suppliers is list && request.resource.data.suppliers.size() <= 300))
+            || (request.resource.data.suppliers is list && request.resource.data.suppliers.size() <= 1000))
         && request.resource.data.managerPin is string && request.resource.data.managerPin.size() <= 8
         && request.resource.data.adminPin is string && request.resource.data.adminPin.size() <= 8
         && request.resource.data.branches is list && request.resource.data.branches.size() <= 10

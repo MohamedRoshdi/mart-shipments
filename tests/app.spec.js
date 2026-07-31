@@ -530,6 +530,28 @@ test('admin: the supplier list is one line each, code optional, trimmed', async 
     ]);
 });
 
+test('a 5-digit PIN reaches the manager page: the box used to cut it at 4', async ({ page }) => {
+  await page.goto('/manager.html?test=1');
+  await expect(page.locator('#pin-input')).toHaveAttribute('maxlength', '8');
+  await seedUsers(page, [{ ...MGR, pin: '44112' }]);
+  await page.fill('#pin-input', '44112');
+  expect(await page.inputValue('#pin-input')).toBe('44112');     // not truncated to «4411»
+  await page.click('#btn-pin');
+  await expect(page.locator('#screen-manager')).toBeVisible();
+});
+
+test('admin: a supplier list bigger than 300 still saves — the shop has 425', async ({ page }) => {
+  await openAdmin(page);
+  const lines = Array.from({ length: 425 }, (_, i) => `${1000 + i}، مورد ${i + 1}`).join('\n');
+  await page.fill('#cfg-suppliers', lines);
+  await expect(page.locator('#suppliers-count')).toHaveText('425 مورد · 425 منهم بكود');
+  await page.click('#btn-save-config');
+  await expect(page.locator('#toast')).toContainText('تم حفظ الإعدادات');
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('test-config')).suppliers);
+  expect(saved).toHaveLength(425);
+  expect(saved[424]).toEqual({ code: '1424', name: 'مورد 425' });
+});
+
 test('admin: the supplier list can be imported from a sheet, header row dropped', async ({ page }) => {
   await openAdmin(page);
   await page.setInputFiles('#suppliers-file', {

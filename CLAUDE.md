@@ -25,7 +25,7 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 5. **`db.js` is the only file that knows where data lives.** `app.js` and
    `manager.js` never touch Firestore or localStorage keys directly.
 6. **Bump `CACHE` in `sw.js` on every deploy.** Serving is cache-first, so phones
-   keep the old bundle until the cache name changes. Currently `mart-v44`.
+   keep the old bundle until the cache name changes. Currently `mart-v45`.
    The bump only works because install fetches with `new Request(u, { cache: "reload" })` —
    a plain `addAll` reads the browser's HTTP cache and copies **stale** files into the new
    cache name (caught in Chrome 2026-07-31: `mart-v34` held a `style.css` 262 bytes behind
@@ -52,7 +52,7 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 | `firestore.rules` | shape validation; the only server-side guard that exists |
 | `SETUP.md` | Arabic guide for the shop owner |
 | `products-template.csv`, `stock-template.csv`, `suppliers-template.csv` | the three import shapes: barcode+name+**unit**, barcode+name+quantity, and **code+supplier name** |
-| `tests/app.spec.js` | 70 Playwright tests, all in localStorage mode |
+| `tests/app.spec.js` | 72 Playwright tests, all in localStorage mode |
 | `scripts/*.mjs` | live checks and screenshot helpers (see below) |
 
 ## Data model
@@ -106,7 +106,8 @@ mutations write a row, `update`/`delete` are denied by the rules.
 
 Rules in force (all live-tested):
 - `config`: only the doc id `app`, only those seven keys, PINs ≤ 8 chars, lists ≤ 10, users ≤ 40,
-  suppliers ≤ 300, `label` a map of ≤ 6 keys whose `logo` is a string ≤ 200,000 chars.
+  suppliers ≤ 1000 (the shop's real list is 425 — 300 was refusing their save), `label` a map of
+  ≤ 6 keys whose `logo` is a string ≤ 200,000 chars.
 - `logs`: create-only with the four keys; `update`/`delete` always denied.
 - create: key allow-list, types, sizes, `items` ≤ 200, optional `supplierCode` a string ≤ 20.
 - update: `name`, `items`, `type`, `supplierCode` may change; `createdBy`, `createdAt` and

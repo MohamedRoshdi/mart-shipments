@@ -397,7 +397,10 @@ $("btn-add-type").onclick = () => {
 };
 
 const isPin = (p) => /^\d{4,8}$/.test(p);
-const SUPPLIER_CAP = 300;              // the same ceiling firestore.rules enforces on the list
+// The same ceiling firestore.rules enforces. Raised from 300 on 2026-07-31: the shop's real list
+// is 425 and the save was being refused. 1000 × «كود، اسم» is ~60 KB inside a 1 MB document, and
+// every page reads that document once at boot.
+const SUPPLIER_CAP = 1000;
 
 $("btn-save-config").onclick = async () => {
   readInputs();
