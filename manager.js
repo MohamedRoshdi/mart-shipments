@@ -633,13 +633,14 @@ const stampOf = (ts) => new Date(ts).toLocaleString("sv-SE").replace(/[: ]/g, "-
    goes straight there — no Save dialog, folders created on the way, and never overwriting an
    earlier file for the same supplier. With no folder chosen it is the download it has always been.
    The bytes are identical either way: barcode TAB qty, same as the copy button. */
-async function downloadShipmentTxt(s) {
-  const folder = txtFolder(s.type);
+async function writeTxt(folder, row) {
   const taken = await listFolder(folder);
-  const name = uniqueName(safeName(s.name), ".txt", taken, s.permitNo || stampOf(s.createdAt));
-  const r = await saveText(folder, name, shipmentText(s));
+  const name = uniqueName(safeName(row.name), ".txt", taken, row.permitNo || stampOf(row.createdAt));
+  const r = await saveText(folder, name, shipmentText(row));
   toast(r.how === "disk" ? `اتحفظ في ${r.path}` : "تم تحميل ملف TXT", "ok");
 }
+
+const downloadShipmentTxt = (s) => writeTxt(txtFolder(s.type), s);
 
 const exportName = (ext) => `shipments-${filter === ALL ? "all" : safeName(filter)}.${ext}`;
 
@@ -699,7 +700,8 @@ function openDetail(s, kind = "ship") {
   $("detail-type-row").hidden = isCount;                  // a stocktake has no shipment type
   $("detail-meta").textContent = [s.branch || "بدون فرع", s.createdBy, fmtDate(s.createdAt),
     ...(s.supplierCode ? [`كود المورد ${s.supplierCode}`] : [])].join(" · ");
-  $("btn-download-txt").hidden = isCount;                 // a TXT of a count says nothing about it
+  // a count gets a TXT too — it goes to اذن جرد, but it is never «تم تحميلها»: nothing takes a
+  // stocktake into the shop's system on somebody's behalf
   $("detail-load").hidden = isCount || !canDo("download");   // a stocktake is never «تم تحميلها»
   paintLoaded();
   $("btn-delete-detail").textContent = isCount ? "حذف الجرد" : "حذف الشحنة";
@@ -806,6 +808,7 @@ $("btn-download").onclick = async () => {
 };
 $("btn-download-txt").onclick = async () => {
   const s = detailShipment();
+  if (current.kind === "count") return writeTxt("اذن جرد", s);
   // asked BEFORE «تم تحميلها» is written: a shipment somebody backed out of must not be marked
   if (!confirmNotTwin(s)) return;
   if (await markLoaded()) downloadShipmentTxt(s);

@@ -1322,7 +1322,15 @@ test('manager: the stocktake tab lists a count with its difference, exports it a
   await expect(page.locator('#all-counts li')).toContainText('الفرق ناقص 1');   // 3 short, 2 not in the system
 
   await page.click('#all-counts button[data-cact="view"]');
-  await expect(page.locator('#btn-download-txt')).toBeHidden();     // a TXT of a count says nothing
+  // a count gets a TXT too now — it goes to اذن جرد, and carries what was COUNTED on the shelf
+  const txt = (await Promise.all([
+    page.waitForEvent('download'),
+    page.click('#btn-download-txt'),
+  ]))[0];
+  expect(txt.suggestedFilename()).toBe('جرد التلاجة.txt');
+  expect(require('fs').readFileSync(await txt.path(), 'utf8')).toBe('111\t7\n222\t2');
+  await expect(page.locator('#detail-loaded')).toBeHidden();        // a stocktake is never «تم تحميلها»
+
   const exp = (await Promise.all([
     page.waitForEvent('download'),
     page.click('#btn-download'),

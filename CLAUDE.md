@@ -429,6 +429,13 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   `usableRoot(prompt)` takes a flag because Chrome re-asks for permission once per session in some
   versions: an **export must never raise a permission dialog nobody asked for**, so only the
   settings button passes `true`; everywhere else a lost permission silently means "download".
+- **A stocktake gets a TXT now, and it is still never «تم تحميلها».** `writeTxt(folder, row)` is
+  the one writer: shipments go to their type's folder, a count goes to `اذن جرد`, and both use
+  `shipmentText` — `barcode TAB qty`, where a count's `qty` is what was **counted on the shelf**,
+  never `sys` and never the difference. `#detail-load` stays hidden for a count: downloading a
+  stocktake is not taking it into the shop's system on somebody's behalf.
+  **Open with the shop**: whether PowerTech's جرد import wants the same two columns. If it wants a
+  third, `shipmentText` is the only line that changes.
 - **The TXT folder names are mapped, never derived.** The shop writes «اذن استلام» without the
   hamza and the app's shipment types carry it (`إذن استلام`), so `TXT_FOLDER` in `manager.js` maps
   them by hand. A folder name one character off is a second folder nobody looks in. A type the
