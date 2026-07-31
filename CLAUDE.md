@@ -22,7 +22,7 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 5. **`db.js` is the only file that knows where data lives.** `app.js` and
    `manager.js` never touch Firestore or localStorage keys directly.
 6. **Bump `CACHE` in `sw.js` on every deploy.** Serving is cache-first, so phones
-   keep the old bundle until the cache name changes. Currently `mart-v32`.
+   keep the old bundle until the cache name changes. Currently `mart-v33`.
 7. **Deploy = push to master.** GitHub Pages serves the repo root. Firestore rules
    deploy separately: `npx firebase deploy --only firestore:rules --project shipments-alaela-mart`.
 
@@ -220,6 +220,15 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
 - **Every `db.js` export awaits `live()`**, which resolves `initDb()`. Without it a
   call that lands before the Firebase SDK finishes throws on `fs` being null — this
   once made the catalog import silently save 0 rows.
+- **The look is one stylesheet and four rules** (2026-07-31 pass): filter chips live in a
+  single row that **scrolls sideways** (`.seg` is `nowrap` + `overflow-x:auto`) — wrapping rows
+  were pushing the list below the fold; a filter is labelled inside its row (`.filter-row` +
+  `.filter-label`), not by a heading above it; cards carry `box-shadow: var(--sh)` instead of a
+  border; and **no Arabic text ever gets `letter-spacing`** — it is a joined script and spacing
+  breaks the ligatures. `.code` is `direction:ltr` **plus `unicode-bidi:isolate`**, and it wraps
+  the barcode ONLY: putting Arabic inside it is what produced «فى الـنـظام» in the catalog rows.
+  A list row's actions stay on one line, with `عرض` filled ink and `حذف` the narrowest thing on
+  the card.
 - **`[hidden] { display: none !important }` in `style.css` must stay.** A class
   with `display: flex/grid` otherwise outranks the `hidden` attribute and the
   element stays visible.
@@ -272,6 +281,8 @@ node scripts/live-users-probe.mjs                # read-only users list; TIME=1 
 BASE=http://localhost:8087 node scripts/live-camera.mjs   # camera list/start/stop/fallback on a fake device
 OUT=/tmp/shots node scripts/shots.mjs            # local screenshots (needs the server above)
 OUT=/tmp/shots BASE=http://localhost:8080 node scripts/shots-expiry.mjs   # home + الصلاحيات screens
+OUT=/tmp/shots BASE=http://localhost:8080 node scripts/shots-all.mjs      # all 16 screens, the visual reference set
+OUT=/tmp/shots BASE=http://localhost:8080 node scripts/shots-search.mjs   # the name search on all three modes
 ```
 
 Writing live scripts: pull real barcodes from the catalog first — invented ones are

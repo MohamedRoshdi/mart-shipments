@@ -441,7 +441,7 @@ function renderItems() {
   $("items-list").innerHTML = state.items.map((i, idx) => `<li>
       <div class="card-main">
         <div class="card-title">${esc(i.name || "بدون اسم")}</div>
-        <div class="code">${esc(i.barcode)}</div>
+        <div class="meta"><span class="code">${esc(i.barcode)}</span>${i.unit ? ` · ${esc(i.unit)}` : ""}</div>
         ${itemNote(i)}
       </div>
       <span class="stamp">${esc(i.qty)}</span>
@@ -918,6 +918,7 @@ let dbBroken = false;
 
 function updateSync() {
   $("sync-state").textContent = dbBroken ? "إعدادات ناقصة" : (navigator.onLine ? "متصل" : "مستني الاتصال");
+  $("sync-state").classList.toggle("off", dbBroken || !navigator.onLine);   // the dot follows the word
 }
 addEventListener("online", updateSync);
 addEventListener("offline", updateSync);

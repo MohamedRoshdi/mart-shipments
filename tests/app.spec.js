@@ -669,7 +669,7 @@ test('admin: bulk delete can take one day, a range of days, or a stocktake', asy
     .toEqual(['شحنة الاتنين']);
 
   await page.click('#bulk-kind button[data-bulkkind="counts"]');   // الجرد, same tool
-  await expect(page.locator('#bulk-type')).toBeHidden();
+  await expect(page.locator('#bulk-type-row')).toBeHidden();
   await expect(page.locator('#btn-bulk-delete')).toHaveText('حذف المطابق (1)');
   await page.click('#btn-bulk-delete');
   await expect(page.locator('#toast')).toContainText('تم حذف 1 جرد');

@@ -28,10 +28,12 @@
         <button type="button" data-tab="count" aria-pressed="false">الجرد</button>
         <button type="button" data-tab="expiry" aria-pressed="false">الصلاحيات</button>
       </div>
-      <h2>الفرع</h2>
-      <div id="branch-filter" class="seg"></div>
-      <div id="type-filter-row">
-        <h2>نوع الشحنة</h2>
+      <div class="filter-row">
+        <span class="filter-label">الفرع</span>
+        <div id="branch-filter" class="seg"></div>
+      </div>
+      <div id="type-filter-row" class="filter-row">
+        <span class="filter-label">النوع</span>
         <div id="type-filter" class="seg"></div>
       </div>
       <div id="ships-block">
@@ -60,7 +62,7 @@
         <li id="tool-import">
           <div class="card-main">
             <div class="card-title">أسماء الأصناف</div>
-            <div class="meta">استورد ملف Excel/CSV مرة واحدة، والأسماء تظهر لوحدها مع كل مسح. لعرض الأصناف وتعديلها استخدم زرار «الأصناف» فوق.</div>
+            <div class="meta">ملف Excel/CSV: باركود، اسم، وحدة. الأسماء بتظهر لوحدها مع كل مسح.</div>
           </div>
           <div class="row-actions">
             <button id="btn-import">استيراد ملف</button>
@@ -71,8 +73,7 @@
         <li id="tool-stock">
           <div class="card-main">
             <div class="card-title">كميات الجرد</div>
-            <div class="meta">لكل فرع ملفه. اختار الفرع الأول، وبعدين استورد ملف Excel/CSV بثلاث خانات:
-              الباركود، اسم الصنف، الكمية اللي في النظام. استيراد فرع مش بيمسح كميات الفرع التاني.</div>
+            <div class="meta">اختار الفرع الأول. الملف: باركود، اسم، كمية النظام. كل فرع لوحده.</div>
           </div>
           <div id="stock-branch" class="seg"></div>
           <div class="row-actions">
@@ -84,7 +85,7 @@
         <li id="tool-export">
           <div class="card-main">
             <div class="card-title">تصدير الشحنات</div>
-            <div class="meta">Excel أو TXT: كل الشحنات الظاهرة في ملف واحد. ZIP: مجلد لكل يوم، وجواه مجلد لكل نوع، وكل شحنة في ملف لوحدها.</div>
+            <div class="meta">Excel/TXT: كل الشحنات الظاهرة في ملف. ZIP: مجلد لكل يوم وجواه الأنواع.</div>
           </div>
           <div class="row-actions">
             <button id="btn-export-all">Excel</button>
@@ -95,7 +96,7 @@
         <li id="tool-admin">
           <div class="card-main">
             <div class="card-title">إعدادات النظام</div>
-            <div class="meta">للأدمن بس: الفروع والأرقام السرية وأنواع الشحنات وآخر العمليات</div>
+            <div class="meta">للأدمن بس: المستخدمين والفروع والأنواع وآخر العمليات</div>
           </div>
           <div class="row-actions">
             <a id="link-admin-page" href="admin.html">فتح صفحة النظام</a>

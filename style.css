@@ -2,17 +2,23 @@
    Arabic system sans carries the words; tabular monospace carries machine data. */
 :root {
   --ink: #171a1c;
-  --ink-2: #4d565c;
-  --bg: #e8ebee;
+  --ink-2: #5b666d;
+  --bg: #eef1f4;
   --surface: #fff;
-  --line: #d6dbdf;
+  --line: #e2e7eb;
   --amber: #ffb020;
   --amber-2: #f09a00;
+  --amber-soft: #fff4dd;
   --good: #12854a;
   --bad: #c9302c;
-  --r: 14px;
+  --bad-soft: #fdeceb;
+  --r: 16px;
+  --r-sm: 12px;
   --bar: 60px;
   --pad: 16px;
+  /* one soft shadow instead of a border everywhere: cards lift, they do not box */
+  --sh: 0 1px 2px rgba(16, 24, 40, .05), 0 2px 8px rgba(16, 24, 40, .06);
+  --sh-lift: 0 2px 6px rgba(16, 24, 40, .08), 0 10px 24px rgba(16, 24, 40, .1);
   --mono: ui-monospace, "DejaVu Sans Mono", "Courier New", monospace;
   --center: max(var(--pad), calc((100% - 520px) / 2));
 }
@@ -43,24 +49,48 @@ body {
   background: var(--ink);
   color: #fff;
 }
-.appbar h1 { margin: 0; font-size: 1.02rem; font-weight: 600; }
+.appbar h1 { margin: 0; font-size: 1.06rem; font-weight: 700; white-space: nowrap; }
 .icon-btn {
-  background: rgba(255, 255, 255, .12);
+  background: rgba(255, 255, 255, .14);
   color: #fff;
   padding: 8px 12px;
-  border-radius: 10px;
-  font-size: 1.1rem;
+  border-radius: 999px;
+  font-size: 1.05rem;
   line-height: 1;
 }
 .who {
-  background: rgba(255, 255, 255, .12);
+  background: rgba(255, 255, 255, .14);
   color: #fff;
   font-size: .72rem;
   font-weight: 600;
-  padding: 5px 10px;
-  border-radius: 99px;
+  padding: 6px 11px;
+  border-radius: 999px;
+  max-inline-size: 45vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.sync { margin-inline-start: auto; font-size: .72rem; opacity: .85; white-space: nowrap; }
+/* the connection dot: a word plus a colour, never colour alone */
+.sync {
+  margin-inline-start: auto;
+  font-size: .72rem;
+  opacity: .9;
+  white-space: nowrap;
+  padding-inline-start: 14px;
+  position: relative;
+}
+.sync::before {
+  content: "";
+  position: absolute;
+  inset-inline-start: 0;
+  inset-block-start: 50%;
+  transform: translateY(-50%);
+  inline-size: 8px;
+  block-size: 8px;
+  border-radius: 50%;
+  background: #46d17a;
+}
+.sync.off::before { background: var(--amber); }
 
 /* ---------- layout ---------- */
 main {
@@ -68,11 +98,11 @@ main {
   padding-block-end: calc(var(--bar) + 56px + env(safe-area-inset-bottom));
 }
 section > * + * { margin-block-start: 12px; }
+/* Arabic is a joined script — letter-spacing pulls the letters apart, so headings never get it */
 h2 {
   margin: 0;
-  font-size: .82rem;
+  font-size: .86rem;
   font-weight: 700;
-  letter-spacing: .04em;
   color: var(--ink-2);
 }
 p { margin: 0; }
@@ -82,54 +112,79 @@ p { margin: 0; }
 button, input { font: inherit; color: inherit; }
 button {
   border: 0;
-  border-radius: 12px;
+  border-radius: var(--r-sm);
   padding: 12px 16px;
-  background: #dbe1e6;
+  background: #e6ebef;
   font-weight: 600;
   cursor: pointer;
+  transition: transform .06s ease-out, background .15s;
 }
-button:active { transform: translateY(1px); }
+button:active { transform: scale(.98); }
 button:disabled { opacity: .45; }
-button.primary { background: var(--amber); color: var(--ink); }
+button.primary { background: var(--amber); color: var(--ink); box-shadow: 0 2px 10px rgba(255, 176, 32, .35); }
 button.primary:active { background: var(--amber-2); }
+button.primary:disabled { box-shadow: none; }
 button.big { inline-size: 100%; padding-block: 16px; font-size: 1.05rem; }
 button.ghost { background: var(--surface); border: 1px solid var(--line); }
 button.link { background: none; color: var(--ink-2); text-decoration: underline; padding: 10px 0; }
-button.danger, a.danger { background: #fbeceb; color: var(--bad); border: 1px solid #f0cdcb; }
+button.danger, a.danger { background: var(--bad-soft); color: var(--bad); border: 1px solid #f0cdcb; }
 
 input[type=text], input[type=password], input[type=number] {
   inline-size: 100%;
   padding: 14px;
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: var(--r-sm);
 }
 input::placeholder { color: #93a0a8; }
+input:focus { border-color: var(--ink); }
 
 input[type=date] {
   inline-size: 100%;
   padding: 12px;
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: var(--r-sm);
   font-family: var(--mono);
 }
 
 /* ---------- home: one card per job, the receiving one leading ---------- */
-.actions { display: grid; gap: 10px; }
+.actions { display: grid; gap: 12px; }
 .action {
+  position: relative;
   display: grid;
   gap: 3px;
   text-align: start;
-  padding: 16px;
+  padding: 18px 44px 18px 18px;      /* room for the chevron on the inline-end side */
+  padding-inline: 18px 44px;
   background: var(--surface);
-  border: 1px solid var(--line);
+  border: 0;
   border-inline-start: 5px solid var(--amber);
+  border-radius: var(--r);
+  box-shadow: var(--sh);
 }
-.action-title { font-weight: 700; font-size: 1.06rem; }
-.action-sub { font-size: .78rem; color: var(--ink-2); }
-#btn-new { background: var(--amber); border-color: var(--amber-2); }
+/* a card that opens a screen says so — the arrow points the way the language runs */
+.action::after {
+  /* angle quotes are bidi-mirrored, so the glyph is pinned LTR and then points the way the
+     screen actually opens: leftwards, the direction Arabic runs */
+  content: "‹";
+  direction: ltr;
+  unicode-bidi: isolate;
+  position: absolute;
+  inset-inline-end: 16px;
+  inset-block-start: 50%;
+  transform: translateY(-50%);
+  font-size: 1.6rem;
+  line-height: 1;
+  color: var(--ink-2);
+  opacity: .55;
+}
+.action:active { box-shadow: var(--sh-lift); }
+.action-title { font-weight: 700; font-size: 1.1rem; }
+.action-sub { font-size: .8rem; color: var(--ink-2); }
+#btn-new { background: var(--amber); border-inline-start-color: var(--amber-2); }
 #btn-new .action-sub { color: #6d4b00; }
+#btn-new::after { color: #6d4b00; opacity: .7; }
 
 /* ---------- expiry: how close the date is, read as a colour down the edge of the card ---------- */
 li.exp { border-inline-start-width: 6px; }
@@ -141,19 +196,51 @@ li.exp-expired .card-title { color: var(--bad); }
 .month-head { font-size: 1.2rem; font-weight: 700; }
 .date-cell { margin-block-start: 6px; padding: 8px; font-size: .9rem; }
 
-/* segmented picker: branch choice, branch filter */
-.seg { display: flex; gap: 8px; flex-wrap: wrap; }
-.seg button { flex: 1 1 auto; background: var(--surface); border: 1px solid var(--line); padding-inline: 10px; white-space: nowrap; }
+/* Filter pills: ONE line that scrolls sideways. Wrapping was eating a third of the screen
+   before any data appeared — five branches used to push the list below the fold. */
+.seg {
+  display: flex;
+  gap: 8px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  scroll-snap-type: x proximity;
+  padding-block: 2px;         /* room for the focus ring */
+}
+.seg::-webkit-scrollbar { display: none; }
+.seg button {
+  flex: 0 0 auto;
+  scroll-snap-align: start;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 9px 14px;
+  font-size: .9rem;
+  white-space: nowrap;
+}
+.seg button[aria-pressed=true] { background: var(--ink); color: #fff; border-color: var(--ink); }
 .branch-line { font-weight: 700; }
+
+/* a filter reads as «الفرع: …», so the label sits in the row, not on a line of its own */
+.filter-row { display: flex; align-items: center; gap: 8px; }
+.filter-row > .filter-label {
+  flex: 0 0 auto;
+  font-size: .78rem;
+  font-weight: 700;
+  color: var(--ink-2);
+}
+.filter-row > .seg { flex: 1; min-inline-size: 0; }
+
 /* three lists behind one row of tabs: it has to stay reachable without scrolling back up */
 #list-tabs {
   position: sticky;
   inset-block-start: calc(var(--bar) + env(safe-area-inset-top));
   z-index: 10;
-  padding-block: 8px;
+  padding-block: 10px;
   background: var(--bg);
 }
-.seg button[aria-pressed=true] { background: var(--ink); color: #fff; border-color: var(--ink); }
+#list-tabs button { flex: 1 1 0; text-align: center; font-weight: 700; }
 
 /* ---------- scan button: sweep line echoes the scanner ---------- */
 button.scan {
@@ -193,8 +280,9 @@ button.scan::after {
 ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
 li {
   background: var(--surface);
-  border: 1px solid var(--line);
+  border: 1px solid transparent;
   border-radius: var(--r);
+  box-shadow: var(--sh);
   padding: 14px;
   display: flex;
   align-items: center;
@@ -203,13 +291,15 @@ li {
 }
 li.empty {
   background: transparent;
-  border-style: dashed;
+  border: 1px dashed var(--line);
+  box-shadow: none;
   color: var(--ink-2);
   justify-content: center;
-  padding-block: 24px;
+  text-align: center;
+  padding-block: 26px;
 }
-.card-main { flex: 1; min-inline-size: 0; display: grid; gap: 3px; }
-.card-title { font-weight: 700; }
+.card-main { flex: 1; min-inline-size: 0; display: grid; gap: 4px; }
+.card-title { font-weight: 700; font-size: 1.02rem; line-height: 1.35; }
 .row-actions { display: flex; gap: 8px; flex-wrap: wrap; inline-size: 100%; }
 .row-actions button.primary { background: var(--amber); }   /* must beat the plain rule below */
 .row-actions button, .row-actions a {
@@ -219,11 +309,30 @@ li.empty {
   font-size: .88rem;
   text-align: center;
   text-decoration: none;
-  border-radius: 12px;
-  background: #dbe1e6;
+  border-radius: var(--r-sm);
+  background: #e6ebef;
   color: var(--ink);
   font-weight: 600;
 }
+/* One action per card leads. «عرض» is the one anybody taps; the exports sit beside it at half
+   the weight, and the destructive one is never the widest thing on the card. */
+.row-actions button[data-act=view], .row-actions button[data-cact=view] {
+  flex: 1.7;
+  background: var(--ink);
+  color: #fff;
+}
+.row-actions button[data-act=del], .row-actions button[data-cact=del],
+.row-actions button[data-expdel] { flex: 0 0 auto; min-inline-size: 0; padding-inline: 14px; }
+/* a list row keeps its actions on ONE line — a delete button alone on a second row read as the
+   card's main action, which is the last thing it should look like */
+#all-shipments .row-actions, #all-counts .row-actions { flex-wrap: nowrap; }
+#all-shipments .row-actions button, #all-counts .row-actions button {
+  min-inline-size: 0;
+  padding-inline: 6px;
+  font-size: .84rem;
+}
+/* a chip row inside a card is a full-width control, not a neighbour of the text */
+li > .seg { inline-size: 100%; }
 
 /* quantity stamp: the one loud element */
 .stamp {
@@ -238,12 +347,16 @@ li.empty {
   min-inline-size: 54px;
   text-align: center;
 }
+/* machine data reads left-to-right even mid-sentence — isolated so it cannot drag the Arabic
+   around it, and never wrapped around Arabic words (that is what spaced-out ligatures mean) */
 .code {
   font-family: var(--mono);
   font-size: .76rem;
   letter-spacing: .03em;
   color: var(--ink-2);
   direction: ltr;
+  unicode-bidi: isolate;
+  display: inline-block;
 }
 button.del {
   background: #fbeceb;
@@ -288,18 +401,25 @@ input.qty-cell {
   align-items: center;
   padding: 10px var(--center);
   padding-block-end: calc(10px + env(safe-area-inset-bottom));
-  background: rgba(255, 255, 255, .95);
+  background: rgba(255, 255, 255, .92);
   border-block-start: 1px solid var(--line);
-  backdrop-filter: blur(10px);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 -6px 20px rgba(16, 24, 40, .06);
 }
 .bottombar .grow { flex: 1; }
+/* the running count is data, so it reads as a chip and not as another label */
 .bottombar .count {
   font-family: var(--mono);
   font-variant-numeric: tabular-nums;
-  font-size: .82rem;
+  font-size: .8rem;
+  font-weight: 700;
   color: var(--ink-2);
+  background: var(--bg);
+  padding: 8px 12px;
+  border-radius: 999px;
   white-space: nowrap;
 }
+.bottombar .count:empty { display: none; }
 
 /* ---------- item sheet ---------- */
 /* one primary action at a time: the sheet owns the screen while it is open */

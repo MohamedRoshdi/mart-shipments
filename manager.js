@@ -355,7 +355,7 @@ function renderMonthItems() {
     return `<li class="exp exp-${ex.statusOf(days)}">
       <div class="card-main">
         <div class="card-title">${esc(e.name || "بدون اسم")}</div>
-        <div class="code">${esc(e.barcode)}${e.branch ? ` · ${esc(shortBranch(e.branch))}` : ""}</div>
+        <div class="meta"><span class="code">${esc(e.barcode)}</span>${e.branch ? ` · ${esc(shortBranch(e.branch))}` : ""}</div>
         <div class="meta">${esc(ex.daysWord(days))}</div>
         <input class="date-cell" type="date" dir="ltr" min="2000-01-01" max="2100-12-31" data-edate="${escAttr(e._id)}"
           value="${escAttr(ex.isoOf(e))}" ${canDo("edit") ? "" : "disabled"}>
@@ -634,7 +634,8 @@ const noteText = (i) => (Number.isFinite(i.sys)
 function renderDetailItems() {
   const isCount = current.kind === "count";
   $("detail-items").innerHTML = current.items.map((i, idx) => `<tr>
-      <td><div>${esc(i.name || "بدون اسم")}</div><div class="code">${esc(i.barcode)}</div>
+      <td><div>${esc(i.name || "بدون اسم")}</div>
+        <div class="meta"><span class="code">${esc(i.barcode)}</span>${i.unit ? ` · ${esc(i.unit)}` : ""}</div>
         ${isCount ? `<div class="meta" data-note="${idx}">${esc(noteText(i))}</div>` : ""}</td>
       <td><input class="qty-cell" type="number" min="1" dir="ltr" data-qty="${idx}" value="${Number(i.qty) || 1}" ${canDo("edit") ? "" : "readonly"}></td>
       <td>${canDo("edit") ? `<button class="del" data-delitem="${idx}" aria-label="حذف الصنف">×</button>` : ""}</td>
@@ -730,7 +731,7 @@ function renderProducts() {
   $("products-list").innerHTML = page.map(p => `<li>
       <div class="card-main">
         <input class="product-name" type="text" maxlength="100" data-barcode="${escAttr(p.barcode)}" value="${escAttr(edits.get(p.barcode) ?? p.name)}">
-        <div class="code">${esc(p.barcode)}${p.unit ? ` · ${esc(p.unit)}` : ""}${stockLine(p)}</div>
+        <div class="meta"><span class="code">${esc(p.barcode)}</span>${p.unit ? ` · ${esc(p.unit)}` : ""}${stockLine(p)}</div>
       </div>
       <button class="del" data-delproduct="${escAttr(p.barcode)}" aria-label="حذف الصنف">×</button>
     </li>`).join("") || `<li class="empty">${searching ? "مفيش نتيجة — جرّب أي جزء من الاسم أو الباركود" : "مفيش أصناف — استورد ملف الأصناف الأول"}</li>`;
@@ -901,6 +902,7 @@ addEventListener("keydown", (e) => {
 
 function updateSync() {
   $("sync-state").textContent = navigator.onLine ? "متصل" : "مستني الاتصال";
+  $("sync-state").classList.toggle("off", !navigator.onLine);
 }
 addEventListener("online", updateSync);
 addEventListener("offline", updateSync);

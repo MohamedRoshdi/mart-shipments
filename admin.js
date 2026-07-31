@@ -319,7 +319,7 @@ function renderBulk() {
     `<button type="button" data-bulkkind="${k}" aria-pressed="${k === bulkKind}">${esc(label)}</button>`).join("");
   chips("bulk-branch", [ALL, ...cfg.branches.map(b => b.name)], bulkBranch, "bulkbranch");
   chips("bulk-type", [ALL, ...cfg.shipmentTypes], bulkType, "bulktype");
-  $("bulk-type").hidden = bulkKind !== "shipments";      // a stocktake has no type
+  $("bulk-type-row").hidden = bulkKind !== "shipments";  // a stocktake has no type
   // a count of 0 before the list arrives reads as "nothing to delete" — say what is happening
   $("btn-bulk-delete").textContent = shipmentsLoaded
     ? `حذف المطابق (${matching().length})`
@@ -445,6 +445,7 @@ addEventListener("keydown", (e) => {
 
 function updateSync() {
   $("sync-state").textContent = navigator.onLine ? "متصل" : "مستني الاتصال";
+  $("sync-state").classList.toggle("off", !navigator.onLine);
 }
 addEventListener("online", updateSync);
 addEventListener("offline", updateSync);
