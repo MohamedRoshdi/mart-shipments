@@ -2023,6 +2023,52 @@ test('admin: the folder section says what this browser can do', async ({ page })
   await expect(page.locator('#btn-folder-clear')).toBeHidden();
 });
 
+/* The whole of the sync request that was actually missing: every read in this app was one-shot,
+   so a change made on another machine arrived only at the next reload. In test mode watchConfig
+   listens for the storage event, which is what a second tab raises — dispatched by hand here. */
+/* A second permit for the same supplier, branch, type and quantities is a double stock entry once
+   it reaches the ERP. The app cannot know whether it is a mistake, so it asks — and asks BEFORE
+   «تم تحميلها» is written, or backing out would leave the shipment marked as loaded. */
+test('a shipment identical to another one asks before it makes a TXT', async ({ page }) => {
+  await signOut(page);
+  await page.goto('/manager.html?test=1');
+  await page.evaluate(() => {
+    // in test mode _id is String(createdAt), so the two must not share a millisecond or each
+    // would look like the other one's own row and neither would be seen as a twin
+    const twin = (ago) => ({
+      name: 'المراعي', createdBy: 'أحمد', createdAt: Date.now() - ago,
+      branch: 'فرع قويسنا', type: 'إذن استلام',
+      items: [{ barcode: '111', name: 'لبن', qty: 3 }],
+    });
+    localStorage.setItem('test-shipments', JSON.stringify([twin(0), twin(60000)]));
+  });
+  await page.fill('#pin-input', await page.evaluate(() => window.APP_CONFIG.managerPin));
+  await page.click('#btn-pin');
+  await page.click('.card-open');
+
+  page.once('dialog', d => d.dismiss());                    // «إلغاء»
+  await page.click('#btn-download-txt');
+  await expect(page.locator('#detail-loaded')).toBeHidden();  // backing out marks nothing
+
+  page.once('dialog', d => d.accept());                     // «إنشاء الإذن رغم ذلك»
+  await Promise.all([page.waitForEvent('download'), page.click('#btn-download-txt')]);
+  await expect(page.locator('#detail-loaded')).toContainText('تم تحميلها');
+});
+
+test('settings arrive live, with no reload', async ({ page }) => {
+  await openManagerPage(page);
+  await page.click('#btn-filters');
+  const before = await page.locator('#type-filter button').count();
+  await page.evaluate(() => {
+    const cfg = JSON.parse(localStorage.getItem('test-config') || '{}');
+    cfg.shipmentTypes = [...window.APP_CONFIG.shipmentTypes, 'إذن تحويل مخزن'];
+    localStorage.setItem('test-config', JSON.stringify(cfg));
+    dispatchEvent(new StorageEvent('storage', { key: 'test-config' }));
+  });
+  await expect(page.locator('#type-filter button')).toHaveCount(before + 1);
+  await expect(page.locator('#type-filter')).toContainText('إذن تحويل مخزن');
+});
+
 test('تم تحميلها: the export marks it, and somebody else has to confirm a second load', async ({ page }) => {
   await openManagerPage(page);
   await page.click('button[data-act="view"]');

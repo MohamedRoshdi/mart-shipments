@@ -267,6 +267,31 @@ export async function getConfig() {
   return snap.exists() ? snap.data() : {};
 }
 
+/* The settings doc, live. Firestore is already the sync layer this app was asked for — offline
+   writes queue and flush on reconnect, and only changed documents come down the wire — but every
+   read in the app was one-shot, so a manager's change reached another phone only when that phone
+   next opened the screen. This is the one listener that closes that: permissions, branches,
+   suppliers, PINs and the label settings all arrive in seconds.
+
+   A listener is also CHEAPER than the 10–30 s poll that was asked for: it costs one read per
+   actual change, where polling costs one per interval per phone against a 50k/day quota.
+
+   Returns its own unsubscribe. Fires once immediately with what is already cached, which is what
+   makes it safe to use instead of getConfig rather than after it. */
+export async function watchConfig(onChange) {
+  if (TEST_MODE) {
+    // the tests seed test-config and reload; another tab writing it is the only live case
+    const relay = (e) => { if (e.key === 'test-config') onChange(lsObj('test-config')); };
+    addEventListener('storage', relay);
+    onChange(lsObj('test-config'));
+    return () => removeEventListener('storage', relay);
+  }
+  await live();
+  return fs.onSnapshot(fs.doc(dbRef, 'config', 'app'),
+    (snap) => onChange(snap.exists() ? snap.data() : {}),
+    (e) => dispatchEvent(new CustomEvent('db-error', { detail: e })));
+}
+
 // A supplier is { code, name } — the code is the one in the shop's own system, typed once in the
 // admin page (or imported) and stamped on every shipment. Configs written before the code existed
 // hold plain names, and those still read fine.

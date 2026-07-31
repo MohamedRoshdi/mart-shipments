@@ -1149,6 +1149,18 @@ cfgReady = (async () => {
   if (!types().includes(state.type)) state.type = types()[0];
   renderBranchPicker();
 
+  /* From here the settings are live: a permission, a branch or a supplier the admin changes on
+     another machine reaches this phone in seconds instead of at the next reload. Only what is
+     derived from the config is repainted — the branch the employee is standing in is left alone
+     unless it stopped being one they are allowed to use, because moving it mid-shipment would
+     stamp the delivery with the wrong branch. */
+  db.watchConfig((cfg) => {
+    Object.assign(window.APP_CONFIG, cfg);
+    if (!allowedBranches().includes(state.branch)) state.branch = allowedBranches()[0];
+    renderBranchPicker();
+    renderSuppliers();
+  }).catch(console.error);
+
   const s = auth.session();
   const usersExist = (window.APP_CONFIG.users || []).length > 0;
   if (s && s.user && s.perms.includes("emp") && !myName()) {

@@ -596,6 +596,25 @@ $("btn-zip-expiry").onclick = () => {
   toast(`تم تحميل ${byDay.size} يوم في مجلدات`);
 };
 
+/* Two deliveries of the same goods from the same supplier on the same day are a real thing; the
+   same permit sent to the shop's system twice is a double stock entry. There is no way to tell
+   them apart automatically, so the app asks instead of deciding.
+
+   The fingerprint is computed on the fly — no stored hash, nothing to migrate and nothing that can
+   fall out of step with the items it describes. Quantities are part of it: a shipment with the
+   same products but different counts is a different delivery. */
+const fingerprint = (s) => [
+  s.type || "", s.branch || "", db.norm(s.name || ""),
+  (s.items || []).map(i => `${i.barcode}:${i.qty}`).sort().join(","),
+].join("|");
+
+function confirmNotTwin(s) {
+  const mine = fingerprint(s);
+  const twin = all.find(o => o._id !== s._id && fingerprint(o) === mine);
+  if (!twin) return true;
+  return confirm(`يوجد إذن مشابه تم إنشاؤه مسبقًا:\n«${twin.name}» — ${twin.createdBy || "؟"} · ${fmtWhen(twin.createdAt)}\n\nتحب تكمّل وتعمل الملف برضه؟`);
+}
+
 /* The shop's own folders, spelled the way the shop spells them — «اذن» without the hamza, while
    the app's shipment types carry it. Mapped explicitly, never derived: a folder name that is one
    character off is a second folder nobody looks in. A type the admin added later has no mapping
@@ -786,7 +805,10 @@ $("btn-download").onclick = async () => {
   if (await markLoaded()) downloadShipment(detailShipment());
 };
 $("btn-download-txt").onclick = async () => {
-  if (await markLoaded()) downloadShipmentTxt(detailShipment());
+  const s = detailShipment();
+  // asked BEFORE «تم تحميلها» is written: a shipment somebody backed out of must not be marked
+  if (!confirmNotTwin(s)) return;
+  if (await markLoaded()) downloadShipmentTxt(s);
 };
 
 // deleting from the card screen, not from the list: the row you are about to lose is on screen
@@ -1097,10 +1119,22 @@ if ("serviceWorker" in navigator && !new URLSearchParams(location.search).has("t
   navigator.serviceWorker.register("./sw.js");
 }
 
+/* The admin's settings, live. Everything else in this app is read once, which is why a supplier
+   or a shipment type added on another machine used to arrive only at the next reload.
+   Repaint only what is derived from the config — the list, the filters and the search are the
+   manager's own state and must not be reset under them mid-task. */
+function watchSettings() {
+  db.watchConfig((cfg) => {
+    Object.assign(window.APP_CONFIG, cfg);
+    renderTypeFilter();
+  }).catch(console.error);
+}
+
 // PIN screen paints straight away; the PIN check waits for this instead
 cfgReady = (async () => {
   await db.initDb().catch(console.error);
   Object.assign(window.APP_CONFIG, await db.getConfig().catch(() => ({})));
+  watchSettings();
   const s = auth.session();
   if (!s) return;
   if (s.perms.includes("mgr")) { enterManager(); return; }   // already signed in on another page

@@ -57,7 +57,7 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 | `firestore.rules` | shape validation; the only server-side guard that exists |
 | `SETUP.md` | Arabic guide for the shop owner |
 | `products-template.csv`, `stock-template.csv`, `suppliers-template.csv` | the three import shapes, **each one exactly what the ERP exports**: «كود الصنف، الوحدة، اسم الصنف، معامل التحويل»، «الرصيد، كود الصنف، الوحدة، اسم الصنف»، «كود المورد، اسم المورد» |
-| `tests/app.spec.js` | 84 Playwright tests, all in localStorage mode |
+| `tests/app.spec.js` | 86 Playwright tests, all in localStorage mode |
 | `scripts/*.mjs` | live checks and screenshot helpers (see below) |
 
 ## Data model
@@ -355,6 +355,25 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   That default is why a small barcode reads on one phone and not another; `ideal` (not `exact`)
   so a camera that cannot do it still starts. `navTo` calls `stopScan()` for any screen other
   than `screen-new`, otherwise the camera keeps running behind the settings screen.
+- **A duplicate permit is asked about, never decided.** `fingerprint()` in `manager.js` is
+  type + branch + normalised supplier + every `barcode:qty` sorted — computed on the fly, so there
+  is no stored hash to migrate or to fall out of step with the items. Two deliveries of the same
+  goods on the same day are a real thing, so the app cannot refuse; it names the earlier permit and
+  its author and lets the manager go on. The question is asked **before** `markLoaded()` — backing
+  out of a TXT must not leave the shipment marked «تم تحميلها».
+  Test-mode trap: `_id` is `String(createdAt)`, so two fixtures created in the same millisecond
+  share an id and each is skipped as "itself". Seed twins with different timestamps.
+- **`config/app` is the one live listener in the app, and admin.js deliberately has none.**
+  `db.watchConfig(cb)` is an `onSnapshot` that fires once immediately from the cache and again on
+  every change, so a permission, a branch, a supplier or a shipment type edited on another machine
+  reaches a phone in seconds. `app.js` and `manager.js` re-merge and repaint **only what is derived
+  from the config** — `state.branch` is left where it is unless it stopped being allowed, because
+  moving it mid-shipment would stamp the delivery with the wrong branch. **`admin.js` must never
+  watch**: the admin IS the writer and holds an unsaved working copy (`cfg`), so a live update
+  there would silently overwrite what somebody is typing.
+  This is also the answer to the «كل 10 إلى 30 ثانية» in the sync spec: a listener costs one read
+  per real change, a 30 s poll costs one per interval per phone against a 50k/day quota, and the
+  listener is faster. In `?test=1` it listens for the `storage` event — a second tab.
 - **`window.APP_CONFIG` is mutated at boot, not read fresh.** `app.js` awaits the merge
   inside its boot IIFE; `manager.js` and `admin.js` paint the PIN screen first and make the
   PIN handler `await cfgReady`. Anything that reads branches/types before that merge sees
@@ -461,7 +480,7 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
 ## Commands
 
 ```bash
-npx playwright test                 # 84 tests, localStorage mode, ~40s
+npx playwright test                 # 86 tests, localStorage mode, ~40s
 npx playwright test -g "catalog"    # one group
 python3 -m http.server 8080         # serve locally, then open /?test=1
 node scripts/make-icons.mjs         # regenerate the PWA icons
