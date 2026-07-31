@@ -1989,6 +1989,7 @@ test('files: the names are safe and unique, and no folder means the old download
       // a segment builder must never be able to emit a climb, whatever is downstream of it
       dots: f.safeSegment('..'),
       dot: f.safeSegment('.'),
+      trailing: f.safeSegment('شركة النور. '),   // Windows strips trailing dots/spaces at create time — lose them here or uniqueName compares a name the disk can never hold
       slashed: f.safeSegment('../../etc'),
       free: f.uniqueName('المراعي', '.txt', []),
       // the second file for the same supplier takes the permit number rather than overwriting
@@ -2004,6 +2005,7 @@ test('files: the names are safe and unique, and no folder means the old download
   expect(r.empty).toBe('ملف');
   expect(r.dots).toBe('ملف');
   expect(r.dot).toBe('ملف');
+  expect(r.trailing).toBe('شركة النور');
   // the dots survive inside a longer name, which is fine — what makes a climb is the SEPARATOR,
   // and there is none left, so this is one harmless segment rather than three
   expect(r.slashed).toBe('..-..-etc');

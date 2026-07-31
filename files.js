@@ -102,7 +102,7 @@ export async function forgetFolder() {
    names itself — but a segment builder that can emit ".." is only safe because of what happens to
    be downstream of it today, and that is not a property worth relying on. */
 export const safeSegment = (s) => {
-  const t = String(s || "").replace(/[\\/:*?"<>|]/g, "-").trim();
+  const t = String(s || "").replace(/[\\/:*?"<>|]/g, "-").trim().replace(/[. ]+$/, "");
   return !t || t === "." || t === ".." ? "ملف" : t;
 };
 
