@@ -104,7 +104,10 @@ service cloud.firestore {
     match /config/{doc} {
       allow read: if true;
       allow write: if doc == 'app'
-        && request.resource.data.keys().hasOnly(['managerPin', 'adminPin', 'branches', 'shipmentTypes', 'users', 'suppliers', 'label'])
+        && request.resource.data.keys().hasOnly(['managerPin', 'adminPin', 'branches', 'shipmentTypes', 'users', 'suppliers', 'label', 'filesMeta'])
+        // filesMeta = one stamp per imported file («آخر تحديث»), merged in by the imports
+        && (!('filesMeta' in request.resource.data)
+            || (request.resource.data.filesMeta is map && request.resource.data.filesMeta.size() <= 20))
         // label = the shelf-label size, the paper and the shop logo as a data URL. The logo is
         // capped because every page reads this doc at boot.
         && (!('label' in request.resource.data)

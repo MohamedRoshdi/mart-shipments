@@ -5,6 +5,7 @@ import { sheetRows, requireColumns } from "./sheet.js";
 import { versionLine } from "./version.js";
 import * as files from "./files.js";
 import { applyBrand } from "./brand.js";
+import { keepFresh } from "./fresh.js";
 
 const $ = (id) => document.getElementById(id);
 const esc = (t) => { const d = document.createElement("div"); d.textContent = t; return d.innerHTML; };
@@ -508,7 +509,15 @@ $("btn-save-config").onclick = async () => {
       name: u.name, pin: u.pin, branches: auth.branchesOf(u), perms: u.perms.slice(),
       ...(u.device ? { device: u.device } : {}),
     })),
+    // same trap as `device`: saveConfig replaces the whole doc, so the import stamps have to be
+    // carried through or every settings save silently erases «آخر تحديث» on every phone
+    filesMeta: { ...(window.APP_CONFIG.filesMeta || {}) },
   };
+  // a changed supplier list is a new file version — the stamp says so on every phone
+  const oldSup = JSON.stringify(db.supplierList(window.APP_CONFIG));
+  if (JSON.stringify(payload.suppliers) !== oldSup) {
+    payload.filesMeta["الموردين"] = { at: Date.now(), rows: payload.suppliers.length, by: identity };
+  }
   // The settings doc is the one write that waits for the server on purpose: a false «تم الحفظ»
   // on the PINs could lock the shop out. So the wait has to be visible — a silent dead button
   // is what a slow write (or an exhausted daily quota) used to look like.
@@ -699,6 +708,4 @@ cfgReady = (async () => {
   if (page && page !== "admin.html") auth.goTo(page);
 })();
 
-if ("serviceWorker" in navigator && !new URLSearchParams(location.search).has("test")) {
-  navigator.serviceWorker.register("./sw.js");
-}
+keepFresh(toast);

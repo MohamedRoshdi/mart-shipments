@@ -2113,6 +2113,56 @@ test('erp: the pulled file reads as imported, and our own file never does', asyn
     permit: '4552', noPermit: '', match: true, short: false });
 });
 
+/* «استبدالها بالكامل» (the owner's daily-files spec, 2026-08-01): a header-driven catalog file
+   is THE catalog — rows identical to what is stored are skipped (quota: a daily 10k-row file
+   must not be 10k writes), and what the file no longer carries is offered for deletion, with
+   the numbers on the dialog. A second import of the same file changes nothing and says so. */
+test('catalog import: replaces, skips the unchanged, and stamps the file', async ({ page }) => {
+  await openManagerPage(page);
+  await page.evaluate(() => localStorage.setItem('test-products', JSON.stringify({
+    111: { name: 'لبن' }, 999: { name: 'صنف قديم' },
+  })));
+  const file = {
+    name: 'items.csv', mimeType: 'text/csv',
+    buffer: Buffer.from('كود الصنف,اسم الصنف\n111,لبن\n222,جبنة\n', 'utf8'),
+  };
+  page.once('dialog', d => {
+    expect(d.message()).toContain('1 صنف موجودين في النظام ومش موجودين');
+    d.accept();
+  });
+  await page.setInputFiles('#import-file', file);
+  await expect(page.locator('#toast')).toContainText('اتحدث 1 · 1 زي ما هو · اتشال 1');
+  const after = await page.evaluate(() => JSON.parse(localStorage.getItem('test-products')));
+  expect(after['999']).toBeUndefined();          // gone with the file that no longer carries it
+  expect(after['222']).toEqual({ name: 'جبنة' });
+
+  // the same file again: nothing to write, nothing to delete, and the toast says exactly that
+  await page.setInputFiles('#import-file', file);
+  await expect(page.locator('#toast')).toContainText('اتحدث 0 · 2 زي ما هو');
+
+  // the stamp landed («رقم إصدار لكل ملف») and the screen shows it
+  const meta = await page.evaluate(() => JSON.parse(localStorage.getItem('test-config')).filesMeta);
+  expect(meta['الأصناف'].rows).toBe(2);
+  await page.click('#btn-products');
+  await expect(page.locator('#products-updated')).toContainText('آخر ملف أصناف');
+});
+
+/* The other phones' half of data freshness: the stamp rides the live config, and a local search
+   index built before the import is dropped the moment the stamp arrives. */
+test('a catalog stamp newer than the local index drops it', async ({ page }) => {
+  await page.goto('/?test=1');
+  const r = await page.evaluate(async () => {
+    const db = await import('./db.js');
+    localStorage.setItem('catalogIndex', JSON.stringify({ at: 1000, rows: [{ barcode: '1', name: 'x' }] }));
+    db.dropCatalogIndexIfOlder(999);                      // older stamp: the copy is still good
+    const kept = !!localStorage.getItem('catalogIndex');
+    db.dropCatalogIndexIfOlder(2000);                     // newer import: the copy is stale
+    const dropped = !localStorage.getItem('catalogIndex');
+    return { kept, dropped };
+  });
+  expect(r).toEqual({ kept: true, dropped: true });
+});
+
 /* The logo the admin uploads for the label is also the brand: app bar + tab icon, on every page,
    straight from the config — and a config with no logo changes nothing at all. */
 test('the uploaded logo lands in the app bar and the tab icon', async ({ page }) => {

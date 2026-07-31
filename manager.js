@@ -6,6 +6,7 @@ import { sheetRows, requireColumns, unitName, unitCode, clean as cell } from "./
 import { versionLine } from "./version.js";
 import { downloadBlob, saveText, listFolder, uniqueName, safeSegment } from "./files.js";
 import { applyBrand } from "./brand.js";
+import { keepFresh } from "./fresh.js";
 
 const $ = (id) => document.getElementById(id);
 const esc = (t) => { const d = document.createElement("div"); d.textContent = t; return d.innerHTML; };
@@ -976,6 +977,13 @@ function renderProducts() {
   $("products-count").textContent = searching
     ? `${found.length} نتيجة` + (found.length > PAGE ? ` — بيظهر أول ${PAGE}` : "")
     : (total ? `${total} صنف` + (total > products.length ? ` — بيظهر أول ${products.length}، دوّر عن الباقي` : "") : "");
+  // «تاريخ آخر تحديث لكل ملف»: the stamps ride the live config, so every phone shows the same ones
+  const meta = window.APP_CONFIG.filesMeta || {};
+  const cat = meta["الأصناف"], st = meta[`جرد ${stockBranch}`];
+  $("products-updated").textContent = [
+    cat ? `آخر ملف أصناف: ${fmtWhen(cat.at)} (${cat.rows} صنف)` : "",
+    st ? `آخر كميات ${shortBranch(stockBranch)}: ${fmtWhen(st.at)}` : "",
+  ].filter(Boolean).join(" · ");
   $("products-list").innerHTML = page.map(p => `<li>
       <div class="card-main">
         <input class="product-name" type="text" maxlength="100" data-barcode="${escAttr(p.barcode)}" value="${escAttr(edits.get(p.barcode) ?? p.name)}">
@@ -1110,18 +1118,65 @@ $("import-file").onchange = async (e) => {
   // a unit code the table does not know is a bad row: it is refused, and the person is told which
   const bad = usable.filter(r => r.unit === null);
   const rows = usable.filter(r => r.unit !== null);
-  let n = 0;
+
+  /* «يتم حذف البيانات القديمة واستبدالها بالكامل» (the owner, 2026-08-01) — a daily file. The
+     one full read below buys two things: rows identical to what is stored are SKIPPED (a 10k-row
+     daily import used to be 10k writes against a 20k/day quota; now it is only what changed),
+     and what the file no longer carries can leave the catalog — but only a header-driven file
+     (the ERP's real export), only after the manager reads the numbers, and never silently. */
+  let existingBy = null;
+  if (map && rows.length) {
+    try {
+      existingBy = new Map((await db.listAllProducts()).map(p => [String(p.barcode), p]));
+    } catch (err) { console.error(err); }        // offline: import everything, delete nothing
+  }
+  const sameStored = (p, r) => p && p.name === r.name
+    && (!r.unit || p.unit === r.unit)
+    && (!Number.isFinite(r.unitCode) || p.unitCode === r.unitCode)
+    && (!(Number.isFinite(r.price) && r.price >= 0) || p.price === r.price)
+    && (!(Number.isFinite(r.factor) && r.factor > 1) || p.factor === r.factor);
+
+  let n = 0, kept = 0, removed = 0;
   try {
-    for (const r of rows) { await db.saveProductName(r.barcode, r.name, r); n++; }
-    db.logAction(identity, "استيراد أصناف", `${n} صنف${bad.length ? ` · ${bad.length} مرفوض` : ""}`);
-    // amber when rows were dropped, green when the whole file landed — the colour is the summary
+    for (const r of rows) {
+      if (existingBy && sameStored(existingBy.get(r.barcode), r)) { kept++; continue; }
+      await db.saveProductName(r.barcode, r.name, r);
+      n++;
+    }
+    if (existingBy) {
+      const inFile = new Set(rows.map(r => r.barcode));
+      const gone = [...existingBy.values()].filter(p => !inFile.has(String(p.barcode)));
+      if (gone.length) {
+        // the numbers ARE the guard: a partial file shows a huge count and the manager backs out
+        const scary = gone.length > existingBy.size / 2;
+        const q = scary
+          ? `تحذير: الملف فيه ${rows.length} صنف بس، والنظام فيه ${existingBy.size}.\nلو كملت هيتشال ${gone.length} صنف — ده شكله ملف ناقص مش ملف الأصناف الكامل.\nمتأكد إنك عايز تشيلهم؟`
+          : `فيه ${gone.length} صنف موجودين في النظام ومش موجودين في الملف الجديد.\nنشيلهم عشان النظام يبقى مطابق للملف؟`;
+        if (confirm(q)) {
+          for (const p of gone) { await db.deleteProduct(p.barcode); removed++; }
+        }
+      }
+    }
+    const stamp = { at: Date.now(), rows: rows.length, by: identity };
+    // merged locally too: the importing machine must show its own stamp even before (or without)
+    // the server echoing it back through the config listener
+    window.APP_CONFIG.filesMeta = { ...(window.APP_CONFIG.filesMeta || {}), "الأصناف": stamp };
+    db.stampFile("الأصناف", stamp).catch(console.error);
+    db.logAction(identity, "استيراد أصناف",
+      `${n} اتحدث · ${kept} زي ما هو · ${removed} اتشال${bad.length ? ` · ${bad.length} مرفوض` : ""}`);
+    // amber when rows were dropped, green when the whole file landed — the colour is the summary.
+    // the detailed shape appears only when the diff found something to say
+    const sum = kept || removed
+      ? `الملف فيه ${rows.length} صنف: اتحدث ${n} · ${kept} زي ما هو${removed ? ` · اتشال ${removed}` : ""}`
+      : `تم استيراد ${n} صنف`;
     toast(bad.length
-      ? `تم استيراد ${n} صنف · اترفض ${bad.length} لكود وحدة مش معروف (${bad.slice(0, 3).map(r => r.barcode).join("، ")})`
-      : `تم استيراد ${n} صنف`, bad.length ? "warn" : "ok");
+      ? `${sum} · اترفض ${bad.length} لكود وحدة مش معروف (${bad.slice(0, 3).map(r => r.barcode).join("، ")})`
+      : sum, bad.length ? "warn" : "ok");
   } catch (err) {
     console.error(err);
     toast(`اتسجل ${n} صنف وبعدين حصلت مشكلة — جرّب تاني`, "bad");
   }
+  if (!$("screen-products").hidden) renderProducts();   // the screen behind the picker repaints now
   e.target.value = "";
 };
 
@@ -1155,12 +1210,16 @@ $("stock-file").onchange = async (e) => {
   let n = 0;
   try {
     for (const r of rows) { await db.saveProductRow(r.barcode, r.name, r.qty, branch, r); n++; }
+    const stamp = { at: Date.now(), rows: n, by: identity };
+    window.APP_CONFIG.filesMeta = { ...(window.APP_CONFIG.filesMeta || {}), [`جرد ${branch}`]: stamp };
+    db.stampFile(`جرد ${branch}`, stamp).catch(console.error);
     db.logAction(identity, "استيراد كميات الجرد", `${n} صنف · ${branch}`);
     toast(`تم استيراد كميات ${n} صنف لـ${branch}`, "ok");
   } catch (err) {
     console.error(err);
     toast(`اتسجل ${n} صنف وبعدين حصلت مشكلة — جرّب تاني`, "bad");
   }
+  if (!$("screen-products").hidden) renderProducts();
   e.target.value = "";
 };
 
@@ -1190,9 +1249,7 @@ updateSync();
 history.replaceState({ screen: "screen-pin" }, "");
 render("screen-pin");
 
-if ("serviceWorker" in navigator && !new URLSearchParams(location.search).has("test")) {
-  navigator.serviceWorker.register("./sw.js");
-}
+keepFresh(toast);
 
 /* The admin's settings, live. Everything else in this app is read once, which is why a supplier
    or a shipment type added on another machine used to arrive only at the next reload.
@@ -1202,6 +1259,10 @@ function watchSettings() {
   db.watchConfig((cfg) => {
     Object.assign(window.APP_CONFIG, cfg);
     applyBrand(window.APP_CONFIG);
+    // a catalog imported on another machine reaches this one's search and screen in seconds
+    const cat = (cfg.filesMeta || {})["الأصناف"];
+    if (cat && cat.at) db.dropCatalogIndexIfOlder(cat.at);
+    if (!$("screen-products").hidden) renderProducts();
     renderTypeFilter();
   }).catch(console.error);
 }

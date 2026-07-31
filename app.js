@@ -5,6 +5,7 @@ import * as lbl from "./label.js";
 
 import { versionLine } from "./version.js";
 import { applyBrand } from "./brand.js";
+import { keepFresh } from "./fresh.js";
 
 const $ = (id) => document.getElementById(id);
 const esc = (t) => { const d = document.createElement("div"); d.textContent = t; return d.innerHTML; };
@@ -1159,6 +1160,9 @@ cfgReady = (async () => {
   db.watchConfig((cfg) => {
     Object.assign(window.APP_CONFIG, cfg);
     applyBrand(window.APP_CONFIG);
+    // a catalog imported on any machine reaches this phone's name search in seconds, not in 7 days
+    const cat = (cfg.filesMeta || {})["الأصناف"];
+    if (cat && cat.at) db.dropCatalogIndexIfOlder(cat.at);
     if (!allowedBranches().includes(state.branch)) state.branch = allowedBranches()[0];
     renderBranchPicker();
     renderSuppliers();
@@ -1190,6 +1194,4 @@ cfgReady = (async () => {
   }
 })();
 
-if ("serviceWorker" in navigator && !new URLSearchParams(location.search).has("test")) {
-  navigator.serviceWorker.register("./sw.js");
-}
+keepFresh(toast);

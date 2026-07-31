@@ -119,6 +119,7 @@ const prodOf = (v) => (typeof v === 'string' ? { name: v } : (v || {}));
 const row = (barcode, v) => ({
   barcode, name: prodOf(v).name, qty: prodOf(v).qty, stock: prodOf(v).stock || {},
   unit: prodOf(v).unit || "",
+  unitCode: prodOf(v).unitCode,    // the ERP's own unit number, needed to tell "unchanged" honestly
   price: prodOf(v).price,          // the shelf label fills itself in when the catalog has one
   factor: prodOf(v).factor,        // معامل التحويل, shown on the item sheet only
 });
@@ -195,6 +196,31 @@ export async function catalogIndex() {
 export function dropCatalogIndex() {
   indexRows = null;
   try { localStorage.removeItem(INDEX_KEY); } catch (e) { console.error(e); }
+}
+
+/* The cross-phone half of freshness: an import stamps the config (one write), the config
+   listener every page already runs carries the stamp here in seconds, and a local copy built
+   before that import is dropped — so the next search re-pulls instead of serving last week's
+   names for up to the TTL. */
+export function dropCatalogIndexIfOlder(at) {
+  try {
+    const cached = JSON.parse(localStorage.getItem(INDEX_KEY) || 'null');
+    if ((cached && at > cached.at) || (!cached && indexRows)) dropCatalogIndex();
+  } catch { dropCatalogIndex(); }
+}
+
+/* «رقم إصدار أو تاريخ آخر تحديث لكل ملف» — one stamp per imported file, kept on the config doc
+   because that doc already reaches every phone live. Merge, never set: a stamp must not be able
+   to wipe the PINs, and two imports must not wipe each other. */
+export async function stampFile(kind, meta) {
+  if (TEST_MODE) {
+    const cfg = lsObj('test-config');
+    cfg.filesMeta = { ...(cfg.filesMeta || {}), [kind]: meta };
+    localStorage.setItem('test-config', JSON.stringify(cfg));
+    return;
+  }
+  await live();
+  await fs.setDoc(fs.doc(dbRef, 'config', 'app'), { filesMeta: { [kind]: meta } }, { merge: true });
 }
 
 // Arabic is typed loosely: أ/إ/آ for ا, ه for ة, ى for ي, plus tatweel and harakat. Search has to
