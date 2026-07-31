@@ -456,9 +456,11 @@ input.qty-cell {
   box-shadow: 0 -6px 20px rgba(16, 24, 40, .06);
 }
 .bottombar .grow { flex: 1; }
-/* the running count is data, so it reads as a chip and not as another label */
+/* The running count is data, so it reads as a chip and not as another label. No monospace: the
+   chip says «3 ليبل», and a mono face has no Arabic shaping — the letters came out disconnected
+   (caught on the live label screen 2026-07-31, the same failure as «فى الـنـظام» in the catalog).
+   Tabular figures alone give the steady number without touching the word. */
 .bottombar .count {
-  font-family: var(--mono);
   font-variant-numeric: tabular-nums;
   font-size: .8rem;
   font-weight: 700;

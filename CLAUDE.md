@@ -25,7 +25,7 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 5. **`db.js` is the only file that knows where data lives.** `app.js` and
    `manager.js` never touch Firestore or localStorage keys directly.
 6. **Bump `CACHE` in `sw.js` on every deploy.** Serving is cache-first, so phones
-   keep the old bundle until the cache name changes. Currently `mart-v42`.
+   keep the old bundle until the cache name changes. Currently `mart-v43`.
    The bump only works because install fetches with `new Request(u, { cache: "reload" })` —
    a plain `addAll` reads the browser's HTTP cache and copies **stale** files into the new
    cache name (caught in Chrome 2026-07-31: `mart-v34` held a `style.css` 262 bytes behind
@@ -311,6 +311,11 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   border; and **no Arabic text ever gets `letter-spacing`** — it is a joined script and spacing
   breaks the ligatures. `.code` is `direction:ltr` **plus `unicode-bidi:isolate`**, and it wraps
   the barcode ONLY: putting Arabic inside it is what produced «فى الـنـظام» in the catalog rows.
+  **Monospace is for machine data only** — a mono face has no Arabic shaping, so «3 ليبل» came out
+  with its letters disconnected in the bottom-bar chip (caught on the live label screen 2026-07-31,
+  the same failure as «فى الـنـظام» in the catalog rows). `.bottombar .count` keeps
+  `font-variant-numeric: tabular-nums` and nothing else; every remaining `--mono` rule wraps digits
+  or a barcode, never a word.
   **A list card carries no buttons at all** (2026-07-31, the owner's «a lot of buttons»): the card
   *is* the button (`button.card-open`, same drawn chevron as the home cards), and نسخ / Excel /
   TXT / حذف all live on the screen it opens — which is the same two taps they used to take. The
@@ -365,6 +370,7 @@ STAMP=$RANDOM node scripts/live-expiry.mjs       # الصلاحيات: record a 
 node scripts/live-expiry-cleanup.mjs             # janitor for a live-expiry run that died mid-way
 node scripts/live-expiry-server.mjs              # fresh context: what the SERVER holds, no local cache
 node scripts/live-users-probe.mjs                # read-only users list; TIME=1 also times one save ack
+STAMP=$RANDOM node scripts/live-newfields.mjs    # do the SERVER's rules accept products.price and shipments.supplierCode? writes, re-reads in a FRESH context, deletes
 node scripts/live-mobile-known.mjs               # read-only: Pixel 5 on the live site, a real catalog barcode
 OUT=/tmp/shots node scripts/shot-refused.mjs     # read-only: the refusal sheet, settled, on the live site
 OUT=/tmp/shots node scripts/shot-live-manager.mjs # read-only: one shot of the live manager screen
