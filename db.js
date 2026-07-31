@@ -157,7 +157,7 @@ export function dropCatalogIndex() {
 
 // Arabic is typed loosely: أ/إ/آ for ا, ه for ة, ى for ي, plus tatweel and harakat. Search has to
 // ignore all of that, otherwise half the catalog is unreachable from a phone keyboard.
-const norm = (s) => String(s || '').toLowerCase()
+export const norm = (s) => String(s || '').toLowerCase()
   .replace(/[ـً-ْ]/g, '')
   .replace(/[أإآ]/g, 'ا')
   .replace(/ى/g, 'ي')

@@ -22,7 +22,7 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 5. **`db.js` is the only file that knows where data lives.** `app.js` and
    `manager.js` never touch Firestore or localStorage keys directly.
 6. **Bump `CACHE` in `sw.js` on every deploy.** Serving is cache-first, so phones
-   keep the old bundle until the cache name changes. Currently `mart-v35`.
+   keep the old bundle until the cache name changes. Currently `mart-v36`.
    The bump only works because install fetches with `new Request(u, { cache: "reload" })` —
    a plain `addAll` reads the browser's HTTP cache and copies **stale** files into the new
    cache name (caught in Chrome 2026-07-31: `mart-v34` held a `style.css` 262 bytes behind
@@ -47,7 +47,7 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 | `firestore.rules` | shape validation; the only server-side guard that exists |
 | `SETUP.md` | Arabic guide for the shop owner |
 | `products-template.csv`, `stock-template.csv` | the two import shapes: barcode+name, and barcode+name+quantity |
-| `tests/app.spec.js` | 56 Playwright tests, all in localStorage mode |
+| `tests/app.spec.js` | 59 Playwright tests, all in localStorage mode |
 | `scripts/*.mjs` | live checks and screenshot helpers (see below) |
 
 ## Data model
@@ -77,7 +77,9 @@ one place that order is decided. Every product write is a **merge** — Firestor
 fields key by key, so importing شبين الكوم never touches what قويسنا imported, and renaming
 from the catalog screen drops neither.
 
-`config/app` — `{ managerPin, adminPin, branches: [{name}], shipmentTypes: [], users: [] }`.
+`config/app` — `{ managerPin, adminPin, branches: [{name}], shipmentTypes: [], users: [], suppliers: [] }`.
+`suppliers` is a plain list of vendor names, typed one per line in the admin page and offered as
+the shipment name — **a suggestion, never a constraint**: a name that is not on the list still saves.
 Each user is `{ name, pin, branches: [], perms: [], device? }`; `perms` holds ids from `auth.js` `PERMS`
 (`emp`/`mgr`/`adm` are screens, the rest are actions). **`branches: []` means every branch**, one
 name means locked to it, several means the user works across them. `auth.branchesOf()` also reads
@@ -89,7 +91,8 @@ shipped `firebase-config.js` is only a fallback. A missing doc changes nothing.
 mutations write a row, `update`/`delete` are denied by the rules.
 
 Rules in force (all live-tested):
-- `config`: only the doc id `app`, only those five keys, PINs ≤ 8 chars, lists ≤ 10, users ≤ 40.
+- `config`: only the doc id `app`, only those six keys, PINs ≤ 8 chars, lists ≤ 10, users ≤ 40,
+  suppliers ≤ 300.
 - `logs`: create-only with the four keys; `update`/`delete` always denied.
 - create: key allow-list, types, sizes, `items` ≤ 200.
 - update: `name`, `items`, `type` may change; `createdBy`, `createdAt` and
@@ -153,6 +156,12 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   back. The catalog sheet is the other file (`الباركود، الاسم، الوحدة`), and there `unitOf()`
   takes the last cell **unless it is numeric**, so a stocktake sheet imported into the wrong
   box cannot turn a quantity into a unit.
+- **The shipment name is the supplier, and the list only suggests.** `renderSuppliers()` in
+  `app.js` filters `APP_CONFIG.suppliers` with `db.norm` (prefix hits first, then anything
+  containing the term) and shows nothing during a stocktake — a shelf has no supplier. Typing a
+  name that is not on the list is allowed on purpose: a new supplier at the door must not block
+  a delivery. The manager's `#list-search` runs the same matcher over the shipment name **and**
+  the employee name, so one supplier's deliveries come up in one search.
 - **The difference is computed, never stored.** `countDiff()` in both `app.js` and
   `manager.js` sums `qty - (sys || 0)`; an item with no `sys` counts as pure surplus, which
   is what an unlisted product on the shelf actually is.
@@ -263,7 +272,7 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
 ## Commands
 
 ```bash
-npx playwright test                 # 56 tests, localStorage mode, ~25s
+npx playwright test                 # 59 tests, localStorage mode, ~30s
 npx playwright test -g "catalog"    # one group
 python3 -m http.server 8080         # serve locally, then open /?test=1
 node scripts/make-icons.mjs         # regenerate the PWA icons

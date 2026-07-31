@@ -257,8 +257,9 @@ $("type-picker").onclick = (e) => {
 function paintMode() {
   const c = counting();
   $("new-type-row").hidden = c;
-  $("new-name-head").textContent = c ? "اسم الجرد" : "اسم الشحنة";
-  $("shipment-name").placeholder = c ? "مثلاً: جرد رف اللبن" : "مثلاً: شحنة المراعي";
+  $("new-name-head").textContent = c ? "اسم الجرد" : "اسم المورد";
+  $("shipment-name").placeholder = c ? "مثلاً: جرد رف اللبن" : "اسم المورد";
+  $("supplier-results").hidden = true;         // suggestions open on focus, not on arrival
   $("btn-save-shipment").textContent = c
     ? "حفظ الجرد"
     : (state.editingId ? "حفظ التعديلات" : "حفظ الشحنة");
@@ -330,7 +331,39 @@ function openCount(c) {
   navTo("screen-new");
 }
 
-$("shipment-name").oninput = saveDraft;
+/* --- the shipment IS the supplier: the admin's list is offered as you type, and a name that is
+   not on it is still accepted (a new supplier must not block a delivery) --- */
+
+const suppliers = () => (window.APP_CONFIG.suppliers || []);
+
+function renderSuppliers() {
+  const box = $("supplier-results");
+  const q = db.norm($("shipment-name").value);
+  // a count is a shelf, not a delivery — the list belongs to shipments only
+  if (counting() || !suppliers().length) { box.hidden = true; return; }
+  const all = suppliers();
+  const hits = q
+    ? [...all.filter(s => db.norm(s).startsWith(q)), ...all.filter(s => !db.norm(s).startsWith(q) && db.norm(s).includes(q))]
+    : all;
+  // an exact hit means the employee already picked it; nothing left to suggest
+  if (hits.length === 1 && db.norm(hits[0]) === q) { box.hidden = true; return; }
+  box.hidden = false;
+  // the whole row is the target: a thumb on a phone should not have to find a small button
+  box.innerHTML = hits.slice(0, 20).map(s => `<li>
+      <button class="suggest" data-supplier="${escAttr(s)}">${esc(s)}</button>
+    </li>`).join("") || `<li class="empty">مورد جديد — هيتسجّل بالاسم اللي كتبته</li>`;
+}
+
+$("shipment-name").oninput = () => { saveDraft(); renderSuppliers(); };
+$("shipment-name").onfocus = renderSuppliers;
+
+$("supplier-results").onclick = (e) => {
+  const btn = e.target.closest("button[data-supplier]");
+  if (!btn) return;
+  $("shipment-name").value = btn.dataset.supplier;
+  $("supplier-results").hidden = true;
+  saveDraft();
+};
 
 $("btn-lookup").onclick = () => {
   const code = $("barcode-input").value.trim();
@@ -461,7 +494,7 @@ $("items-list").onclick = (e) => {
 
 $("btn-save-shipment").onclick = async () => {
   const name = $("shipment-name").value.trim();
-  if (!name) { toast(counting() ? "اكتب اسم الجرد الأول" : "اكتب اسم الشحنة الأول"); return; }
+  if (!name) { toast(counting() ? "اكتب اسم الجرد الأول" : "اكتب اسم المورد الأول"); return; }
   const editing = state.editingId;
   const perm = counting() ? (editing ? "edit" : "count") : (editing ? "edit" : "create");
   if (!canDo(perm)) { toast("مالكش صلاحية للخطوة دي — كلّم الأدمن"); return; }

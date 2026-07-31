@@ -136,8 +136,20 @@ input[type=text], input[type=password], input[type=number] {
   border: 1px solid var(--line);
   border-radius: var(--r-sm);
 }
-input::placeholder { color: #93a0a8; }
-input:focus { border-color: var(--ink); }
+input::placeholder, textarea::placeholder { color: #93a0a8; }
+input:focus, textarea:focus { border-color: var(--ink); }
+
+textarea {
+  font: inherit;
+  color: inherit;
+  inline-size: 100%;
+  padding: 14px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  resize: vertical;
+  line-height: 1.7;
+}
 
 input[type=date] {
   inline-size: 100%;
@@ -274,6 +286,24 @@ button.scan::after {
 .manual input { flex: 1; }
 /* the block moves between screens, so it spaces itself instead of leaning on `section > * + *` */
 #scan-block > * + * { margin-block-start: 12px; }
+
+/* Supplier suggestions sit under the name field. A shop with fifty suppliers would otherwise
+   push the scanner off the screen the moment the field is focused, so the list scrolls itself. */
+#supplier-results {
+  max-block-size: 38vh;
+  overflow-y: auto;
+  gap: 6px;
+  scrollbar-width: thin;
+}
+#supplier-results li { padding: 0; }
+button.suggest {
+  inline-size: 100%;
+  text-align: start;
+  background: transparent;
+  padding: 14px;
+  font-weight: 700;
+  border-radius: var(--r);
+}
 
 .date-range { display: flex; gap: 8px; flex-wrap: wrap; }
 .date-range label { flex: 1 1 44%; display: grid; gap: 4px; font-size: .78rem; color: var(--ink-2); }

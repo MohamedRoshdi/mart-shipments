@@ -498,6 +498,77 @@ test('PWA: manifest served, service worker registers', async ({ page }) => {
   expect(active).toBe(true);
 });
 
+// the shipment name is the supplier: the admin types the list, the employee picks from it
+async function seedSuppliers(page, list) {
+  await page.evaluate((s) => {
+    const cfg = JSON.parse(localStorage.getItem('test-config') || '{}');
+    localStorage.setItem('test-config', JSON.stringify({ ...window.APP_CONFIG, ...cfg, suppliers: s }));
+  }, list);
+  await page.reload();
+}
+
+test('admin: the supplier list is one name per line, trimmed', async ({ page }) => {
+  await openAdmin(page);
+  await page.fill('#cfg-suppliers', '  المراعي  \n\nجهينة\nبيبسي\n   \n');
+  await expect(page.locator('#suppliers-count')).toHaveText('3 مورد');
+  await page.click('#btn-save-config');
+  await expect(page.locator('#toast')).toContainText('تم حفظ الإعدادات');
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('test-config')).suppliers))
+    .toEqual(['المراعي', 'جهينة', 'بيبسي']);
+});
+
+test('supplier suggestions: loose Arabic, free text still allowed, none during a stocktake', async ({ page }) => {
+  await page.goto('/?test=1');
+  await page.evaluate(() => {
+    localStorage.setItem('employeeName', 'أحمد');
+    localStorage.setItem('test-products', JSON.stringify({ '111': 'لبن' }));
+  });
+  await seedSuppliers(page, ['المراعي', 'جهينة للألبان', 'بيبسي']);
+
+  await page.click('#btn-new');
+  await expect(page.locator('#supplier-results')).toBeHidden();      // not until it is asked for
+  await page.click('#shipment-name');
+  await expect(page.locator('#supplier-results li')).toHaveCount(3); // focus offers the whole list
+  await page.fill('#shipment-name', 'مراعى');                        // typed with ى, stored with ي
+  await expect(page.locator('#supplier-results li')).toHaveCount(1);
+  await page.click('#supplier-results button.suggest[data-supplier="المراعي"]');
+  await expect(page.locator('#shipment-name')).toHaveValue('المراعي');
+  await expect(page.locator('#supplier-results')).toBeHidden();      // an exact hit needs no list
+
+  await page.fill('#shipment-name', 'مورد جديد مش في القايمة');       // free text is never blocked
+  await expect(page.locator('#supplier-results li.empty')).toBeVisible();
+  await page.fill('#barcode-input', '111');
+  await page.click('#btn-lookup');
+  await page.click('#btn-add-item');
+  await page.click('#btn-save-shipment');
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('test-shipments'))[0].name))
+    .toBe('مورد جديد مش في القايمة');
+
+  await page.click('#btn-count');                                     // a shelf has no supplier
+  await page.click('#shipment-name');
+  await expect(page.locator('#supplier-results')).toBeHidden();
+  await expect(page.locator('#new-name-head')).toHaveText('اسم الجرد');
+});
+
+test('manager: the list search finds a supplier, and hides on the expiry tab', async ({ page }) => {
+  await page.goto('/manager.html?test=1');
+  await page.evaluate(() => localStorage.setItem('test-shipments', JSON.stringify([
+    { name: 'المراعي', createdBy: 'أحمد', branch: 'فرع قويسنا', type: 'إذن استلام', createdAt: 1753700000000, items: [] },
+    { name: 'جهينة للألبان', createdBy: 'سيد', branch: 'فرع قويسنا', type: 'إذن استلام', createdAt: 1753600000000, items: [] },
+  ])));
+  await page.fill('#pin-input', await page.evaluate(() => window.APP_CONFIG.managerPin));
+  await page.click('#btn-pin');
+  await expect(page.locator('#all-shipments li')).toHaveCount(2);
+  await page.fill('#list-search', 'البان');                          // no hamza, mid-name
+  await expect(page.locator('#all-shipments li')).toHaveCount(1);
+  await expect(page.locator('#all-shipments li')).toContainText('جهينة للألبان');
+  await page.fill('#list-search', 'سيد');                            // the employee's name too
+  await expect(page.locator('#all-shipments li')).toHaveCount(1);
+  await page.fill('#list-search', '');
+  await page.click('#list-tabs button[data-tab="expiry"]');
+  await expect(page.locator('#list-search')).toBeHidden();
+});
+
 test("catalog CSV import on manager page autofills names in employee app", async ({ page }) => {
   await openManagerPage(page);
   await page.setInputFiles("#import-file", "tests/fixtures/catalog.csv");

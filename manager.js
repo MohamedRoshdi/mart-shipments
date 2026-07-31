@@ -214,11 +214,23 @@ $("list-tabs").onclick = (e) => {
   renderList();
 };
 
+// the shipment name IS the supplier now, so this is how the manager finds one supplier's
+// deliveries: the same loose Arabic matching the catalog search uses, start or middle
+function matchesSearch(s) {
+  const q = db.norm($("list-search").value);
+  if (!q) return true;
+  return db.norm(s.name).includes(q) || db.norm(s.createdBy).includes(q);
+}
+
+$("list-search").oninput = renderList;
+
 function renderList() {
+  $("list-search").hidden = tab === "expiry";      // a month card is not a name
   if (tab === "count") { renderCounts(); return; }
   if (tab === "expiry") { renderMonths(); return; }
   shown = all.filter(s => (filter === ALL || s.branch === filter)
-    && (typeFilter === ALL || s.type === typeFilter));
+    && (typeFilter === ALL || s.type === typeFilter)
+    && matchesSearch(s));
   $("all-shipments").innerHTML = shown.map((s, i) => `<li>
       <div class="card-main">
         <div class="card-title">${esc(s.name)}</div>
@@ -266,7 +278,7 @@ const withSign = (n) => (n > 0 ? `+${n}` : String(n));            // files: Exce
 const diffWord = (n) => (n === 0 ? "مظبوط" : (n > 0 ? `زيادة ${n}` : `ناقص ${-n}`));
 
 function renderCounts() {
-  shownCounts = counts.filter(c => filter === ALL || c.branch === filter);
+  shownCounts = counts.filter(c => (filter === ALL || c.branch === filter) && matchesSearch(c));
   $("all-counts").innerHTML = shownCounts.map((c, i) => `<li>
       <div class="card-main">
         <div class="card-title">${esc(c.name)}</div>

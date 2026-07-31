@@ -105,8 +105,20 @@ function renderAll() {
   renderTypes();
   $("cfg-manager-pin").value = cfg.managerPin;
   $("cfg-admin-pin").value = cfg.adminPin;
+  // a shop with fifty suppliers should not tap «+ إضافة» fifty times: one line each, paste and go
+  $("cfg-suppliers").value = cfg.suppliers.join("\n");
+  paintSuppliers();
   renderBulk();
 }
+
+const suppliersTyped = () => $("cfg-suppliers").value.split("\n").map(s => s.trim()).filter(Boolean);
+
+function paintSuppliers() {
+  const n = suppliersTyped().length;
+  $("suppliers-count").textContent = n ? `${n} مورد` : "مفيش موردين — الموظف هيكتب الاسم بنفسه";
+}
+
+$("cfg-suppliers").oninput = () => { paintSuppliers(); markDirty(); };
 
 // one card per user: name, PIN, branch, and a tick for every screen and every action
 function renderUsers() {
@@ -211,6 +223,7 @@ function readInputs() {
   document.querySelectorAll("input[data-tname]").forEach(inp => cfg.shipmentTypes[+inp.dataset.tname] = inp.value.trim());
   cfg.managerPin = $("cfg-manager-pin").value.trim();
   cfg.adminPin = $("cfg-admin-pin").value.trim();
+  cfg.suppliers = suppliersTyped();
 }
 
 $("screen-admin").oninput = (e) => {
@@ -253,6 +266,7 @@ $("btn-add-type").onclick = () => {
 };
 
 const isPin = (p) => /^\d{4,8}$/.test(p);
+const SUPPLIER_CAP = 300;              // the same ceiling firestore.rules enforces on the list
 
 $("btn-save-config").onclick = async () => {
   readInputs();
@@ -272,12 +286,14 @@ $("btn-save-config").onclick = async () => {
   }
   const pins = [...cfg.users.map(u => u.pin), cfg.managerPin, cfg.adminPin];
   if (new Set(pins).size !== pins.length) { toast("في رقم سري متكرر — كل واحد لازم يكون لوحده"); return; }
+  if (cfg.suppliers.length > SUPPLIER_CAP) { toast(`الموردين أكتر من ${SUPPLIER_CAP} — شيل اللي مش شغال معاك`); return; }
 
   const payload = {
     managerPin: cfg.managerPin,
     adminPin: cfg.adminPin,
     branches: cfg.branches.map(b => ({ name: b.name })),   // a branch is a name, not a password
     shipmentTypes: cfg.shipmentTypes.filter(Boolean),
+    suppliers: cfg.suppliers,
     // device carries the phone this account is bound to — dropping it here would silently
     // unbind every user on any settings save
     users: cfg.users.map(u => ({
@@ -463,6 +479,7 @@ cfgReady = (async () => {
     adminPin: window.APP_CONFIG.adminPin,
     branches: window.APP_CONFIG.branches.map(b => ({ ...b })),
     shipmentTypes: [...window.APP_CONFIG.shipmentTypes],
+    suppliers: [...(window.APP_CONFIG.suppliers || [])],
     users: (window.APP_CONFIG.users || []).map(u => ({ ...u, branches: auth.branchesOf(u), perms: (u.perms || []).slice() })),
   };
   const s = auth.session();
