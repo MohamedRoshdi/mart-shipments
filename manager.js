@@ -4,6 +4,7 @@ import * as ex from "./expiry.js";
 import { zipBlob } from "./zip.js";
 import { sheetRows, requireColumns, unitName, unitCode, clean as cell } from "./sheet.js";
 import { versionLine } from "./version.js";
+import { downloadBlob, saveText, listFolder, uniqueName, safeSegment } from "./files.js";
 
 const $ = (id) => document.getElementById(id);
 const esc = (t) => { const d = document.createElement("div"); d.textContent = t; return d.innerHTML; };
@@ -519,15 +520,6 @@ async function copyShipment(s) {
   }
 }
 
-function downloadBlob(filename, blob) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 2000);
-}
-
 const download = (filename, text, type) => downloadBlob(filename, new Blob([text], { type }));
 
 // BOM + CRLF so Excel opens the Arabic columns correctly
@@ -604,9 +596,30 @@ $("btn-zip-expiry").onclick = () => {
   toast(`تم تحميل ${byDay.size} يوم في مجلدات`);
 };
 
-function downloadShipmentTxt(s) {
-  downloadTxt(`${safeName(s.name)}.txt`, shipmentText(s));   // barcode TAB qty, same as the copy button
-  toast("تم تحميل ملف TXT");
+/* The shop's own folders, spelled the way the shop spells them — «اذن» without the hamza, while
+   the app's shipment types carry it. Mapped explicitly, never derived: a folder name that is one
+   character off is a second folder nobody looks in. A type the admin added later has no mapping
+   and lands under its own name, which is better than the file disappearing into the root. */
+const TXT_FOLDER = {
+  "إذن استلام": "اذن استلام",
+  "إذن مرتجع": "اذن مرتجع",
+  "تحويل فرع": "تحويل فرع",
+};
+const txtFolder = (type) => TXT_FOLDER[type] || safeSegment(type || "شحنات");
+
+// the fallback half of a unique name: two files for one supplier on one day are still two files
+const stampOf = (ts) => new Date(ts).toLocaleString("sv-SE").replace(/[: ]/g, "-").slice(0, 16);
+
+/* Downloading the TXT is how a shipment reaches the shop's own system, so with a folder chosen it
+   goes straight there — no Save dialog, folders created on the way, and never overwriting an
+   earlier file for the same supplier. With no folder chosen it is the download it has always been.
+   The bytes are identical either way: barcode TAB qty, same as the copy button. */
+async function downloadShipmentTxt(s) {
+  const folder = txtFolder(s.type);
+  const taken = await listFolder(folder);
+  const name = uniqueName(safeName(s.name), ".txt", taken, s.permitNo || stampOf(s.createdAt));
+  const r = await saveText(folder, name, shipmentText(s));
+  toast(r.how === "disk" ? `اتحفظ في ${r.path}` : "تم تحميل ملف TXT", "ok");
 }
 
 const exportName = (ext) => `shipments-${filter === ALL ? "all" : safeName(filter)}.${ext}`;

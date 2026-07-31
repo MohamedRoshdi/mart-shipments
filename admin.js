@@ -3,6 +3,7 @@ import * as auth from "./auth.js";
 import * as lbl from "./label.js";
 import { sheetRows, requireColumns } from "./sheet.js";
 import { versionLine } from "./version.js";
+import * as files from "./files.js";
 
 const $ = (id) => document.getElementById(id);
 const esc = (t) => { const d = document.createElement("div"); d.textContent = t; return d.innerHTML; };
@@ -116,6 +117,7 @@ function renderAll() {
   paintSuppliers();
   renderLabelCfg();
   renderBulk();
+  renderFolder();       // per machine, not part of cfg — it just paints beside everything else
 }
 
 /* --- ليبل الرف: the size, the paper and the logo. Everything the printing screen reads. --- */
@@ -170,6 +172,46 @@ $("cfg-label-logo").onchange = async () => {
   renderLabelCfg();
   markDirty();
   toast("الشعار اتحمّل — اضغط «حفظ الإعدادات»");
+};
+
+/* ---------- the import folder ----------
+   Per machine, never in the settings doc: the folder is a property of the PC the manager works
+   on, the same reasoning as the camera settings. It is also the one thing here that CANNOT be
+   saved to Firestore — a directory handle is not data, it is a permission this browser holds. */
+
+async function renderFolder() {
+  const name = await files.folderName();
+  const ok = await files.available();
+  $("folder-now").hidden = !name;
+  $("folder-now").textContent = name
+    ? (ok ? `المجلد الحالي: ${name}` : `المجلد الحالي: ${name} — محتاج إذن تاني، دوس «اختار مجلد الاستيراد»`)
+    : "";
+  $("btn-folder-clear").hidden = !name;
+  $("btn-folder-pick").textContent = name ? "غيّر المجلد" : "اختار مجلد الاستيراد";
+  $("btn-folder-pick").disabled = !files.supported();
+  if (!files.supported()) {
+    $("folder-note").textContent =
+      "المتصفح ده مش بيسمح بالحفظ في مجلد. افتح الصفحة من كروم أو Edge على الويندوز، وساعتها الملفات هتتحفظ لوحدها من غير نافذة حفظ.";
+  }
+}
+
+$("btn-folder-pick").onclick = async () => {
+  try {
+    const name = await files.chooseFolder();
+    toast(`المجلد اتحدد: ${name}`, "ok");
+  } catch (err) {
+    // the user closing the picker is not a failure and must not shout at them
+    if (err && err.name === "AbortError") return;
+    console.error(err);
+    toast(err.message || "مقدرناش نحدد المجلد", "bad");
+  }
+  renderFolder();
+};
+
+$("btn-folder-clear").onclick = async () => {
+  await files.forgetFolder();
+  toast("اتشال المجلد — الملفات هترجع تتحمّل زي الأول");
+  renderFolder();
 };
 
 $("btn-label-logo-clear").onclick = () => {

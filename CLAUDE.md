@@ -25,7 +25,7 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 5. **`db.js` is the only file that knows where data lives.** `app.js` and
    `manager.js` never touch Firestore or localStorage keys directly.
 6. **Bump `CACHE` in `sw.js` on every deploy.** Serving is cache-first, so phones
-   keep the old bundle until the cache name changes. Currently `mart-v49`.
+   keep the old bundle until the cache name changes. Currently `mart-v50`.
    **Bump `version.js` in the same edit** — its `VERSION` ends in the cache generation
    (`1.0.49`) and `BUILD` is the day, and every page prints both in its footer. A footer that
    lags the cache is worse than no footer.
@@ -50,13 +50,14 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 | `zip.js` | store-only ZIP writer, ~80 lines, no dependency; used by the folder export |
 | `sheet.js` | everything about reading a spreadsheet: `sheetRows` (**a real `.xlsx`** — zip walk + `DecompressionStream` — or CSV read field by field, quotes and all, and the only place that knows Excel writes Arabic as windows-1256), `headerMap` (columns by Arabic heading, so the shop's own export order works), **`requireColumns`** (the guard: no headings → positional, headings with a column missing → **throws in Arabic naming it**), `unitName` (unit **code** → word, `null` for a code the table does not know) and `unitCode` (the number itself, kept only when it is 1–5). Used by the catalog/stock import (manager) and the supplier import (admin) |
 | `style.css` | one stylesheet for all three pages |
+| `files.js` | where a file goes when it leaves the app: `window.mart` bridge → File System Access folder handle (IndexedDB, chosen once) → the `<a download>` that has always happened. Also `listFolder`/`readText` (what the ERP check will read back), `uniqueName`, `safeSegment`, and the single copy of `downloadBlob` |
 | `version.js` | the release, in one place: `APP_NAME`, `VERSION`, `BUILD` and `versionLine()`. All three pages print it in a footer. `BUILD` is a literal on purpose — `new Date()` would print the day the page was *opened*, which looks like a build date and is not one |
 | `sw.js`, `manifest.json` | **one** installable PWA, on the main URL. `manager.html` and `admin.html` carry no manifest: the PIN routes people to their screen (`auth.landingPage`), and the home screen links to the other two. Dropped 2026-07-31 on the owner's call — a phone with three near-identical icons was the confusing part. |
 | `firebase-config.js` | Firebase keys **plus** `APP_CONFIG`: PINs (incl. `adminPin`), branches, shipment types, suppliers, label settings |
 | `firestore.rules` | shape validation; the only server-side guard that exists |
 | `SETUP.md` | Arabic guide for the shop owner |
 | `products-template.csv`, `stock-template.csv`, `suppliers-template.csv` | the three import shapes, **each one exactly what the ERP exports**: «كود الصنف، الوحدة، اسم الصنف، معامل التحويل»، «الرصيد، كود الصنف، الوحدة، اسم الصنف»، «كود المورد، اسم المورد» |
-| `tests/app.spec.js` | 82 Playwright tests, all in localStorage mode |
+| `tests/app.spec.js` | 84 Playwright tests, all in localStorage mode |
 | `scripts/*.mjs` | live checks and screenshot helpers (see below) |
 
 ## Data model
@@ -400,6 +401,24 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   TXT / حذف all live on the screen it opens — which is the same two taps they used to take. The
   branch filter row hides itself when the user is scoped to one branch, because a single disabled
   chip is a row that does nothing.
+- **A browser cannot write to `D:\` — but it can be handed a folder once.** `files.js` prefers a
+  `window.mart` desktop bridge (nothing provides one yet; the preference exists so an Electron
+  shell can be added without touching app code), then a File System Access directory handle the
+  manager picked once from the admin page, then the download. The handle lives in **IndexedDB**,
+  not localStorage — a directory handle is not JSON, it is a permission this browser holds — and
+  it is per machine, never in `config/app`, the same reasoning as the camera settings.
+  `usableRoot(prompt)` takes a flag because Chrome re-asks for permission once per session in some
+  versions: an **export must never raise a permission dialog nobody asked for**, so only the
+  settings button passes `true`; everywhere else a lost permission silently means "download".
+- **The TXT folder names are mapped, never derived.** The shop writes «اذن استلام» without the
+  hamza and the app's shipment types carry it (`إذن استلام`), so `TXT_FOLDER` in `manager.js` maps
+  them by hand. A folder name one character off is a second folder nobody looks in. A type the
+  admin adds later has no mapping and lands under its own name — better than vanishing into the
+  root. **The bytes never change either way**: `barcode TAB qty`, PowerTech's shape.
+- **UNVERIFIED, and it cannot be automated**: the actual disk write. `showDirectoryPicker` needs a
+  real user gesture and an OS dialog, so no Playwright run can reach the disk path — the tests
+  prove the names, and that a browser with no folder still falls all the way back to the download.
+  Somebody has to pick `D:\import` in a real Chrome once and confirm a file lands.
 - **A toast only changes colour when the code that raised it knows what it is.** `toast(msg, kind)`
   takes `ok` / `warn` / `bad`; the default is the charcoal box every one of the ~120 call sites
   already had, so nothing was swept and nothing can turn green by accident. Only the `catch`
@@ -442,7 +461,7 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
 ## Commands
 
 ```bash
-npx playwright test                 # 82 tests, localStorage mode, ~40s
+npx playwright test                 # 84 tests, localStorage mode, ~40s
 npx playwright test -g "catalog"    # one group
 python3 -m http.server 8080         # serve locally, then open /?test=1
 node scripts/make-icons.mjs         # regenerate the PWA icons

@@ -1966,6 +1966,63 @@ test('the version line names the system and the build on all three pages', async
   }
 });
 
+/* files.js decides where a file goes. The disk path needs a real folder pick, which no headless
+   browser can do — so what is provable here is the part that has to be right anyway: the names
+   it builds, and that a browser which CANNOT write to disk still falls all the way back to the
+   download every phone has always got. */
+test('files: the names are safe and unique, and no folder means the old download', async ({ page }) => {
+  await page.goto('/?test=1');
+  const r = await page.evaluate(async () => {
+    const f = await import('./files.js');
+    return {
+      // Windows refuses these outright, so a folder built from a supplier name has to lose them
+      safe: f.safeSegment('مورد/شحنة: 2026?'),
+      empty: f.safeSegment('   '),
+      free: f.uniqueName('المراعي', '.txt', []),
+      // the second file for the same supplier takes the permit number rather than overwriting
+      withExtra: f.uniqueName('المراعي', '.txt', ['المراعي.txt'], '4471'),
+      // and with no permit number it still cannot overwrite
+      noExtra: f.uniqueName('المراعي', '.txt', ['المراعي.txt', 'المراعي (2).txt']),
+      available: await f.available(),
+      listed: await f.listFolder('اذن استلام'),
+      read: await f.readText('اذن استلام', 'المراعي.txt'),
+    };
+  });
+  expect(r.safe).toBe('مورد-شحنة- 2026-');
+  expect(r.empty).toBe('ملف');
+  expect(r.free).toBe('المراعي.txt');
+  expect(r.withExtra).toBe('المراعي - 4471.txt');
+  expect(r.noExtra).toBe('المراعي (3).txt');
+  // nothing was ever chosen, so there is nothing to write to and nothing to read back
+  expect(r.available).toBe(false);
+  expect(r.listed).toEqual([]);
+  expect(r.read).toBeNull();
+
+  // and the export still hands the person their file, exactly as before
+  await page.goto('/manager.html?test=1');
+  const saved = await page.evaluate(async () => {
+    const f = await import('./files.js');
+    return (await f.saveText('اذن استلام', 'المراعي.txt', '111\t3')).how;
+  });
+  expect(saved).toBe('download');
+});
+
+test('admin: the folder section says what this browser can do', async ({ page }) => {
+  await openAdmin(page);
+  const supported = await page.evaluate(async () => (await import('./files.js')).supported());
+  // whichever way this browser goes, the screen must not lie about it: the button is live only
+  // where a folder can actually be picked, and the note explains itself where it cannot
+  if (supported) {
+    await expect(page.locator('#btn-folder-pick')).toBeEnabled();
+    await expect(page.locator('#folder-note')).toContainText('اختار المجلد مرة واحدة');
+  } else {
+    await expect(page.locator('#btn-folder-pick')).toBeDisabled();
+    await expect(page.locator('#folder-note')).toContainText('المتصفح ده مش بيسمح');
+  }
+  await expect(page.locator('#folder-now')).toBeHidden();       // nothing chosen yet
+  await expect(page.locator('#btn-folder-clear')).toBeHidden();
+});
+
 test('تم تحميلها: the export marks it, and somebody else has to confirm a second load', async ({ page }) => {
   await openManagerPage(page);
   await page.click('button[data-act="view"]');

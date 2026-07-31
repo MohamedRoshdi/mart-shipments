@@ -1,9 +1,9 @@
 // bump CACHE version on every deploy - cache-first serving keeps old assets until the name changes
 // bump version.js in the same edit — a footer that lags the cache is worse than no footer
-const CACHE = "mart-v49";
+const CACHE = "mart-v50";
 const ASSETS = ["./", "index.html", "style.css", "app.js", "db.js", "auth.js", "expiry.js", "label.js", "firebase-config.js",
   "manager.html", "manager.js", "products-template.csv", "stock-template.csv", "suppliers-template.csv",
-  "admin.html", "admin.js", "zip.js", "sheet.js", "version.js",
+  "admin.html", "admin.js", "zip.js", "sheet.js", "version.js", "files.js",
   "manifest.json", "vendor/html5-qrcode.min.js", "icon-192.png", "icon-512.png"];
 
 self.addEventListener("install", (e) => {
