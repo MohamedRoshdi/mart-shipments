@@ -164,27 +164,29 @@ input[type=date] {
   box-shadow: var(--sh);
 }
 /* a card that opens a screen says so — the arrow points the way the language runs */
+/* Drawn, not typed: an angle-quote glyph is bidi-mirrored, and setting `direction` on the
+   pseudo-element to stop that flips which edge `inset-inline-end` means — it landed on top of
+   the title. Two borders rotated 45° have no text direction at all. Physical sides on purpose:
+   this arrow always points the way the screen opens, and this app only ever runs RTL. */
 .action::after {
-  /* angle quotes are bidi-mirrored, so the glyph is pinned LTR and then points the way the
-     screen actually opens: leftwards, the direction Arabic runs */
-  content: "‹";
-  direction: ltr;
-  unicode-bidi: isolate;
+  content: "";
   position: absolute;
-  inset-inline-end: 16px;
+  inset-inline-end: 18px;
   inset-block-start: 50%;
-  transform: translateY(-50%);
-  font-size: 1.6rem;
-  line-height: 1;
+  inline-size: 9px;
+  block-size: 9px;
+  border-left: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: translateY(-50%) rotate(45deg);
   color: var(--ink-2);
-  opacity: .55;
+  opacity: .5;
 }
 .action:active { box-shadow: var(--sh-lift); }
 .action-title { font-weight: 700; font-size: 1.1rem; }
 .action-sub { font-size: .8rem; color: var(--ink-2); }
 #btn-new { background: var(--amber); border-inline-start-color: var(--amber-2); }
 #btn-new .action-sub { color: #6d4b00; }
-#btn-new::after { color: #6d4b00; opacity: .7; }
+#btn-new::after { color: #6d4b00; opacity: .65; }
 
 /* ---------- expiry: how close the date is, read as a colour down the edge of the card ---------- */
 li.exp { border-inline-start-width: 6px; }

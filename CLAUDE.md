@@ -22,7 +22,7 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 5. **`db.js` is the only file that knows where data lives.** `app.js` and
    `manager.js` never touch Firestore or localStorage keys directly.
 6. **Bump `CACHE` in `sw.js` on every deploy.** Serving is cache-first, so phones
-   keep the old bundle until the cache name changes. Currently `mart-v33`.
+   keep the old bundle until the cache name changes. Currently `mart-v34`.
 7. **Deploy = push to master.** GitHub Pages serves the repo root. Firestore rules
    deploy separately: `npx firebase deploy --only firestore:rules --project shipments-alaela-mart`.
 
