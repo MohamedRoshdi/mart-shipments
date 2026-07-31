@@ -355,7 +355,7 @@ function renderMonthItems() {
         <div class="card-title">${esc(e.name || "بدون اسم")}</div>
         <div class="code">${esc(e.barcode)}${e.branch ? ` · ${esc(shortBranch(e.branch))}` : ""}</div>
         <div class="meta">${esc(ex.daysWord(days))}</div>
-        <input class="date-cell" type="date" dir="ltr" data-edate="${escAttr(e._id)}"
+        <input class="date-cell" type="date" dir="ltr" min="2000-01-01" max="2100-12-31" data-edate="${escAttr(e._id)}"
           value="${escAttr(ex.isoOf(e))}" ${canDo("edit") ? "" : "disabled"}>
       </div>
       <input class="qty-cell" type="number" min="1" dir="ltr" data-eqty="${escAttr(e._id)}"

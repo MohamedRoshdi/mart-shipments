@@ -12,9 +12,17 @@ export const monthKey = (e) => `${e.year}-${pad(e.month)}`;
 
 // what <input type="date"> reads and writes
 export const isoOf = (e) => `${e.year}-${pad(e.month)}-${pad(e.day || 1)}`;
+
+// The same window the Firestore rules allow. A date field is one keystroke away from a year
+// like 202026 (typing into the year segment instead of the month one), and the writes do not
+// wait for the server — without this the phone would say saved and the row would never land.
+export const YEAR_MIN = 2000;
+export const YEAR_MAX = 2100;
+
 export function fromIso(s) {
   const [year, month, day] = String(s).split("-").map(Number);
   if (!year || !month || !day) return null;
+  if (year < YEAR_MIN || year > YEAR_MAX) return null;
   return { year, month, day };
 }
 

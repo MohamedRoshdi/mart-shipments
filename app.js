@@ -522,7 +522,11 @@ $("exp-months").onclick = (e) => {
 
 async function addExpiry(barcode, name, qty) {
   const d = ex.fromIso($("item-date").value);
-  if (!d) { toast("حدّد تاريخ انتهاء الصلاحية الأول"); return; }
+  if (!d) {
+    // an out-of-range year is the common slip: the date field puts the caret in the year segment
+    toast($("item-date").value ? "التاريخ مش مظبوط — السنة لازم بين ٢٠٠٠ و٢١٠٠" : "حدّد تاريخ انتهاء الصلاحية الأول");
+    return;
+  }
   // the same product with the same date is more of the same batch, not a second row
   const dup = state.expRows.find(e => e.barcode === barcode
     && e.year === d.year && e.month === d.month && e.day === d.day);
@@ -572,7 +576,7 @@ function renderMonthItems() {
         <div class="card-title">${esc(e.name || "بدون اسم")}</div>
         <div class="code">${esc(e.barcode)}</div>
         <div class="meta">${esc(ex.daysWord(days))}</div>
-        <input class="date-cell" type="date" dir="ltr" data-edate="${escAttr(e._id)}"
+        <input class="date-cell" type="date" dir="ltr" min="2000-01-01" max="2100-12-31" data-edate="${escAttr(e._id)}"
           value="${escAttr(ex.isoOf(e))}" ${canDo("edit") ? "" : "disabled"}>
       </div>
       <input class="qty-cell" type="number" min="1" dir="ltr" data-eqty="${escAttr(e._id)}"

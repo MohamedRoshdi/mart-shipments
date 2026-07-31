@@ -1070,6 +1070,25 @@ test('الصلاحيات: a scan opens the month, a second scan of the same date
   expect(rows[0]).toMatchObject({ barcode: '111', name: 'لبن', qty: 8, day: 14, month: 9, year: 2026, branch: 'فرع قويسنا' });
 });
 
+test('الصلاحيات: a year outside what the rules allow is refused before it is saved', async ({ page }) => {
+  await openExpiry(page);
+  const parsed = await page.evaluate(async () => {
+    const ex = await import('./expiry.js');
+    return { wild: ex.fromIso('202026-09-14'), far: ex.fromIso('9999-09-14'),
+      early: ex.fromIso('1999-09-14'), ok: ex.fromIso('2026-09-14') };
+  });
+  expect(parsed).toEqual({ wild: null, far: null, early: null, ok: { year: 2026, month: 9, day: 14 } });
+
+  await page.fill('#barcode-input', '111');
+  await page.click('#btn-lookup');
+  await page.fill('#item-date', '9999-09-14');          // the year segment eats a stray keystroke
+  await page.click('#btn-add-item');
+  await expect(page.locator('#toast')).toContainText('السنة لازم بين');
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('test-expiry')))).toHaveLength(0);
+  // the browser marks it too, so the field looks wrong before the button is even pressed
+  await expect(page.locator('#item-date')).toHaveAttribute('max', '2100-12-31');
+});
+
 test('الصلاحيات: months are sorted nearest first and carry both counters', async ({ page }) => {
   await openExpiry(page, EXP_ROWS);
   await expect(page.locator('#exp-months li')).toHaveCount(2);      // a month exists only while it has rows

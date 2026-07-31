@@ -22,7 +22,7 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 5. **`db.js` is the only file that knows where data lives.** `app.js` and
    `manager.js` never touch Firestore or localStorage keys directly.
 6. **Bump `CACHE` in `sw.js` on every deploy.** Serving is cache-first, so phones
-   keep the old bundle until the cache name changes. Currently `mart-v25`.
+   keep the old bundle until the cache name changes. Currently `mart-v27`.
 7. **Deploy = push to master.** GitHub Pages serves the repo root. Firestore rules
    deploy separately: `npx firebase deploy --only firestore:rules --project shipments-alaela-mart`.
 
@@ -43,7 +43,7 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 | `firestore.rules` | shape validation; the only server-side guard that exists |
 | `SETUP.md` | Arabic guide for the shop owner |
 | `products-template.csv`, `stock-template.csv` | the two import shapes: barcode+name, and barcode+name+quantity |
-| `tests/app.spec.js` | 50 Playwright tests, all in localStorage mode |
+| `tests/app.spec.js` | 51 Playwright tests, all in localStorage mode |
 | `scripts/*.mjs` | live checks and screenshot helpers (see below) |
 
 ## Data model
@@ -124,6 +124,11 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   left the item sheet open with no toast when the write sat behind a backoff, and it would do
   the same offline). The persistent cache applies the change immediately, so the screen repaints
   either way; a real failure surfaces through the `db-error` toast.
+- **`ex.fromIso` is where a date becomes trustworthy.** It returns null outside `YEAR_MIN`–`YEAR_MAX`
+  (2000–2100), the same window `firestore.rules` allows. Caught in the browser 2026-07-31: typing
+  into the year segment of an `<input type="date">` produces a year like **202026**, the client
+  accepted it, and because the write is fire-and-forget the phone would have said saved while the
+  server dropped the row. Every date input also carries `min`/`max` so the browser marks it first.
 - **الصلاحيات never counts a month, it derives one.** `ex.months(rows)` is the only place the
   grouping, the two counters, the nearest-first order and the four colours are decided, and both
   `app.js` and `manager.js` call it. Deleting the last row of a month leaves the screen through
@@ -206,7 +211,7 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
 ## Commands
 
 ```bash
-npx playwright test                 # 50 tests, localStorage mode, ~25s
+npx playwright test                 # 51 tests, localStorage mode, ~25s
 npx playwright test -g "catalog"    # one group
 python3 -m http.server 8080         # serve locally, then open /?test=1
 node scripts/make-icons.mjs         # regenerate the PWA icons
