@@ -715,6 +715,42 @@ test('admin: a repeated PIN is refused before it can hand over someone else\'s a
   expect(await page.evaluate(() => localStorage.getItem('test-config'))).toBeNull();
 });
 
+test('a user account sticks to the first phone, and only the admin frees it', async ({ page }) => {
+  await page.goto('/?test=1');
+  await seedUsers(page, [EMP]);
+  await page.fill('#login-pin', EMP.pin);
+  await page.click('#btn-login');
+  await expect(page.locator('#screen-home')).toBeVisible();
+  const phone1 = await page.evaluate(() => localStorage.getItem('deviceId'));
+  expect(phone1).toBeTruthy();
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('test-config')).users[0].device)).toBe(phone1);
+
+  await signOut(page);                                            // same PIN, another phone
+  await page.evaluate(() => localStorage.setItem('deviceId', 'phone-2'));
+  await page.goto('/?test=1');
+  await page.fill('#login-pin', EMP.pin);
+  await page.click('#btn-login');
+  await expect(page.locator('#toast')).toContainText('مربوط بموبايل تاني');
+  await expect(page.locator('#screen-login')).toBeVisible();
+
+  await openAdmin(page);
+  await page.click('#btn-save-config');                           // a plain save must not unbind anybody
+  await expect(page.locator('#toast')).toContainText('تم حفظ الإعدادات');
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('test-config')).users[0].device)).toBe(phone1);
+
+  await page.click('button[data-unbind="0"]');
+  await page.click('#btn-save-config');
+  await expect(page.locator('#toast')).toContainText('تم حفظ الإعدادات');
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('test-config')).users[0].device)).toBeUndefined();
+
+  await signOut(page);                                            // now the second phone gets in, and claims it
+  await page.goto('/?test=1');
+  await page.fill('#login-pin', EMP.pin);
+  await page.click('#btn-login');
+  await expect(page.locator('#screen-home')).toBeVisible();
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('test-config')).users[0].device)).toBe('phone-2');
+});
+
 test('login: one PIN box sends each user to the screen they are allowed', async ({ page }) => {
   await page.goto('/?test=1');
   await seedUsers(page, [EMP, MGR, ADM]);

@@ -22,7 +22,7 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 5. **`db.js` is the only file that knows where data lives.** `app.js` and
    `manager.js` never touch Firestore or localStorage keys directly.
 6. **Bump `CACHE` in `sw.js` on every deploy.** Serving is cache-first, so phones
-   keep the old bundle until the cache name changes. Currently `mart-v27`.
+   keep the old bundle until the cache name changes. Currently `mart-v28`.
 7. **Deploy = push to master.** GitHub Pages serves the repo root. Firestore rules
    deploy separately: `npx firebase deploy --only firestore:rules --project shipments-alaela-mart`.
 
@@ -43,7 +43,7 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 | `firestore.rules` | shape validation; the only server-side guard that exists |
 | `SETUP.md` | Arabic guide for the shop owner |
 | `products-template.csv`, `stock-template.csv` | the two import shapes: barcode+name, and barcode+name+quantity |
-| `tests/app.spec.js` | 51 Playwright tests, all in localStorage mode |
+| `tests/app.spec.js` | 52 Playwright tests, all in localStorage mode |
 | `scripts/*.mjs` | live checks and screenshot helpers (see below) |
 
 ## Data model
@@ -72,7 +72,7 @@ fields key by key, so importing شبين الكوم never touches what قويس�
 from the catalog screen drops neither.
 
 `config/app` — `{ managerPin, adminPin, branches: [{name, pin}], shipmentTypes: [], users: [] }`.
-Each user is `{ name, pin, branches: [], perms: [] }`; `perms` holds ids from `auth.js` `PERMS`
+Each user is `{ name, pin, branches: [], perms: [], device? }`; `perms` holds ids from `auth.js` `PERMS`
 (`emp`/`mgr`/`adm` are screens, the rest are actions). **`branches: []` means every branch**, one
 name means locked to it, several means the user works across them. `auth.branchesOf()` also reads
 the old single `branch` string, so users saved before this still work.
@@ -152,6 +152,17 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   reads it, so signing in once covers all three. **`canDo(perm)` returns true when there is no
   session at all** — that is what keeps the pre-users behaviour intact for a shop that never
   creates a user.
+- **A user account belongs to one phone.** `auth.deviceId()` writes a random id into
+  `localStorage.deviceId` once per phone. The first sign-in with a user PIN claims the account
+  (`db.claimDevice` patches only `users` on `config/app`, and never touches an account that
+  already carries a `device`); any other phone using that PIN gets `{ blocked: true }` from
+  `authenticate` and the three pages refuse it. Only the admin page frees it — «فك الارتباط»
+  drops `device`, and the next phone claims it. Two things this does not do: it does not end a
+  session already running on the old phone (12 h at most), and clearing the phone's site data
+  makes a new id, so that phone also needs unbinding. Legacy PINs (admin/manager/branch) are
+  never bound — the code admin PIN stays the way back in.
+- **`device` must survive a settings save.** `admin.js` builds the payload key by key, so any
+  new user field has to be copied there or every save silently unbinds every user.
 - **Branch scope is a list, never a single value.** `manager.js` keeps `scopes`: empty = every
   branch (filter chips show all), one = the chip is locked and the title becomes that branch,
   several = chips are `الكل` plus that subset. The employee page mirrors it with
@@ -211,7 +222,7 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
 ## Commands
 
 ```bash
-npx playwright test                 # 51 tests, localStorage mode, ~25s
+npx playwright test                 # 52 tests, localStorage mode, ~25s
 npx playwright test -g "catalog"    # one group
 python3 -m http.server 8080         # serve locally, then open /?test=1
 node scripts/make-icons.mjs         # regenerate the PWA icons

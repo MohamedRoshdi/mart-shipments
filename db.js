@@ -178,6 +178,30 @@ export async function saveConfig(cfg) {
   await fs.setDoc(fs.doc(dbRef, 'config', 'app'), cfg);
 }
 
+// Bind a user account to the phone that just signed in with it. Writes the users list only,
+// so the admin's other settings are untouched, and never claims an account that already has a
+// phone. Fire-and-forget on purpose: a login must not wait on the server (see saveConfig).
+export async function claimDevice(pin, device) {
+  try {
+    if (TEST_MODE) {
+      const cfg = lsObj('test-config');
+      if (!Array.isArray(cfg.users)) return;
+      cfg.users = cfg.users.map((u) => (u.pin === pin && !u.device ? { ...u, device } : u));
+      localStorage.setItem('test-config', JSON.stringify(cfg));
+      return;
+    }
+    await live();
+    const snap = await fs.getDoc(fs.doc(dbRef, 'config', 'app'));
+    const stored = snap.exists() ? snap.data() : null;
+    if (!stored || !Array.isArray(stored.users)) return;   // users only live in the code config
+    if (!stored.users.some((u) => u.pin === pin && !u.device)) return;
+    const users = stored.users.map((u) => (u.pin === pin && !u.device ? { ...u, device } : u));
+    await fs.updateDoc(fs.doc(dbRef, 'config', 'app'), { users });
+  } catch (e) {
+    console.error(e);
+  }
+}
+
 // Audit row. Never throws and never blocks the action it records — a lost log line
 // must not turn a working delete into a failed one.
 export async function logAction(who, action, target) {

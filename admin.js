@@ -51,6 +51,8 @@ $("btn-pin").onclick = async () => {
   const entered = $("pin-input").value;
   const who = auth.authenticate(entered, window.APP_CONFIG, CODE_ADMIN_PIN);
   if (!who) { toast("الرقم السري غلط"); return; }
+  if (who.blocked) { toast("الرقم ده مربوط بموبايل تاني — كلّم الأدمن يفكّه الأول"); return; }
+  if (who.claim) db.claimDevice(entered, who.claim);
   if (!who.perms.includes("adm")) {                 // right PIN, but not for this screen
     const page = auth.landingPage(who.perms);
     if (!page) { toast("المستخدم ده مالوش صلاحيات — كلّم الأدمن"); return; }
@@ -109,6 +111,10 @@ function renderUsers() {
           <input type="text" inputmode="numeric" maxlength="8" dir="ltr" data-upin="${i}" value="${escAttr(u.pin)}" placeholder="الرقم السري">
           <button class="del" data-deluser="${i}" aria-label="حذف المستخدم">×</button>
         </div>
+        <div class="user-row">
+          <span class="meta">${u.device ? "مربوط بموبايل واحد" : "مش مربوط بموبايل — أول موبايل يدخل بيه هيتربط"}</span>
+          ${u.device ? `<button type="button" class="ghost" data-unbind="${i}">فك الارتباط</button>` : ""}
+        </div>
       </div>
       <div class="seg" data-ubranch="${i}">
         ${branchOpts.map(b => `<button type="button" data-branchpick="${escAttr(b)}" aria-pressed="${b ? auth.branchesOf(u).includes(b) : auth.branchesOf(u).length === 0}">${esc(b || "كل الفروع")}</button>`).join("")}
@@ -127,6 +133,16 @@ $("users-list").onclick = (e) => {
     renderUsers();
     markDirty();
     toast(`اتشال «${gone.name || "مستخدم"}»`);
+    return;
+  }
+  const unbind = e.target.closest("button[data-unbind]");
+  if (unbind) {
+    readInputs();
+    const u = cfg.users[+unbind.dataset.unbind];
+    delete u.device;
+    renderUsers();
+    markDirty();
+    toast(`«${u.name || "المستخدم"}» يقدر يدخل من موبايل جديد — اضغط «حفظ الإعدادات»`);
     return;
   }
   const perm = e.target.closest("button[data-perm]");
@@ -259,7 +275,12 @@ $("btn-save-config").onclick = async () => {
     adminPin: cfg.adminPin,
     branches: cfg.branches.map(b => ({ name: b.name, pin: b.pin })),
     shipmentTypes: cfg.shipmentTypes.filter(Boolean),
-    users: cfg.users.map(u => ({ name: u.name, pin: u.pin, branches: auth.branchesOf(u), perms: u.perms.slice() })),
+    // device carries the phone this account is bound to — dropping it here would silently
+    // unbind every user on any settings save
+    users: cfg.users.map(u => ({
+      name: u.name, pin: u.pin, branches: auth.branchesOf(u), perms: u.perms.slice(),
+      ...(u.device ? { device: u.device } : {}),
+    })),
   };
   // The settings doc is the one write that waits for the server on purpose: a false «تم الحفظ»
   // on the PINs could lock the shop out. So the wait has to be visible — a silent dead button

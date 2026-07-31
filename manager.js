@@ -71,6 +71,8 @@ $("btn-pin").onclick = async () => {
   const entered = $("pin-input").value;
   const who = auth.authenticate(entered, window.APP_CONFIG, CODE_ADMIN_PIN);
   if (!who) { toast("الرقم السري غلط"); return; }
+  if (who.blocked) { toast("الرقم ده مربوط بموبايل تاني — كلّم الأدمن يفكّه الأول"); return; }
+  if (who.claim) db.claimDevice(entered, who.claim);
   if (!who.perms.includes("mgr")) {                        // right PIN, wrong screen → send them home
     const page = auth.landingPage(who.perms);
     if (!page) { toast("المستخدم ده مالوش صلاحيات — كلّم الأدمن"); return; }

@@ -22,6 +22,18 @@ export const SCREEN_PERMS = ["emp", "mgr", "adm"];
 
 const KEY = "session";
 const MAX_AGE = 12 * 60 * 60 * 1000;   // one shift; after that the PIN is asked again
+const DEV_KEY = "deviceId";
+
+// One id per phone, written once and kept. A user account sticks to the first phone that
+// signs in with it, so a shared PIN cannot travel to a second phone until the admin frees it.
+export function deviceId() {
+  let id = localStorage.getItem(DEV_KEY);
+  if (!id) {
+    id = crypto.randomUUID ? crypto.randomUUID() : `d${Date.now()}${Math.random().toString(16).slice(2)}`;
+    localStorage.setItem(DEV_KEY, id);
+  }
+  return id;
+}
 
 export function session() {
   let s = null;
@@ -54,7 +66,15 @@ export function can(perm) {
 // PINs keep working, so a wrong users list can never lock the shop out of its own data.
 export function authenticate(pin, cfg, codeAdminPin) {
   const user = (cfg.users || []).find((u) => u.pin === pin);
-  if (user) return { name: user.name, branches: branchesOf(user), perms: (user.perms || []).slice(), user: true };
+  if (user) {
+    const dev = deviceId();
+    // bound to another phone → refused here; only the admin may unbind it
+    if (user.device && user.device !== dev) return { blocked: true, name: user.name, branches: [], perms: [] };
+    return {
+      name: user.name, branches: branchesOf(user), perms: (user.perms || []).slice(), user: true,
+      claim: user.device ? null : dev,     // first phone to use this account claims it
+    };
+  }
   if (pin && (pin === cfg.adminPin || pin === codeAdminPin)) {
     return { name: "الأدمن", branches: [], perms: ALL_PERMS.slice() };
   }

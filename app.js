@@ -170,6 +170,7 @@ $("btn-login").onclick = async () => {
   const cfg = window.APP_CONFIG;
   const who = auth.authenticate(pin, cfg, CODE_ADMIN_PIN);
   if (!who) { toast("الرقم السري غلط"); return; }
+  if (who.blocked) { toast("الرقم ده مربوط بموبايل تاني — كلّم الأدمن يفكّه الأول"); return; }
   if (who.branchPin) {                       // a branch PIN is still the old employee setup
     state.branch = who.branches[0];
     renderBranchPicker();
@@ -179,6 +180,7 @@ $("btn-login").onclick = async () => {
     return;
   }
   if (!who.perms.length) { toast("المستخدم ده مالوش صلاحيات — كلّم الأدمن"); return; }
+  if (who.claim) db.claimDevice(pin, who.claim);
   auth.startSession(who.name, who.branches, who.perms, who.user);
   $("login-pin").value = "";
   if (who.perms.includes("emp")) {
