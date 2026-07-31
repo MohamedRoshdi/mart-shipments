@@ -280,11 +280,19 @@ async function openManager() {
   render("screen-manager");
   if (scopes.length === 1) $("screen-title").textContent = shortBranch(scopes[0]);
   await loadMonth();
-  // an empty current month on the first of the month would look like an empty app; ask for
-  // everything once in that case, and let the picker say so
-  if (!all.length && !counts.length && month !== MONTH_ALL) {
-    month = MONTH_ALL;
+  /* An empty daily view must not look like an empty app — but the owner's call («ثبتها على
+     الشهر الحالي», 2026-08-01) is that it lands on the current month, not on «كل الشهور»:
+     at midnight on the 1st that jump was showing the whole archive. Everything stays one
+     step behind the picker. What counts as empty is what the view will SHOW — the daily view
+     loads finished shipments it then hides, and those must not stop the fallback. */
+  const showing = () => (openView() ? all.filter(isOpen) : all).length + counts.length;
+  if (!showing() && month !== MONTH_ALL) {
+    month = monthOf(Date.now());
     await loadMonth();
+    if (!showing()) {
+      month = MONTH_ALL;
+      await loadMonth();
+    }
   }
   // الصلاحيات is filed by the expiry date, not by the day it was typed, so its own tab groups it
   expRows = canDo("expiry") ? await db.listExpiry().catch(() => []) : [];

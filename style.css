@@ -650,15 +650,19 @@ input[type=range] { flex: 1; inline-size: 100%; accent-color: var(--amber); bloc
   align-items: center;
   justify-items: center;
   gap: .4mm;
-  padding: 1.2mm 2mm;
+  padding: 2.4mm 3.2mm;
   background: #fff;
   color: #000;
   text-align: center;
   overflow: hidden;
   break-inside: avoid;
-  /* the cut line: the shop cuts A4 sheets by hand, and a thermal label reads as a card */
-  border: .3mm solid #000;
+  /* the cut line — drawn 1.2mm INSIDE the edge, not on it: a thermal roll's @page has no
+     margin, so a border on the very edge sat in the printer's unprintable strip and came out
+     clipped (the owner's photo, 2026-08-01). An outline with a negative offset keeps the
+     label's outer size exact, which is what the pre-cut A4 sheets need. */
   border-radius: 1.5mm;
+  outline: .3mm solid #000;
+  outline-offset: -1.2mm;
 }
 .lbl-logo { max-block-size: 6mm; max-inline-size: 70%; object-fit: contain; }
 /* the price is the one thing a customer reads from two metres away */

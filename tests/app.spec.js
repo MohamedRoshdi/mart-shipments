@@ -2064,12 +2064,15 @@ test('admin: the folder section says what this browser can do', async ({ page })
   const supported = await page.evaluate(async () => (await import('./files.js')).supported());
   // whichever way this browser goes, the screen must not lie about it: the button is live only
   // where a folder can actually be picked, and the note explains itself where it cannot
+  // either way the note now leads with WHY the folder exists — the owner read the old one on
+  // his phone and asked «دى لايه» (2026-08-01)
+  await expect(page.locator('#folder-note')).toContainText('للكمبيوتر اللي بيستورد');
   if (supported) {
     await expect(page.locator('#btn-folder-pick')).toBeEnabled();
-    await expect(page.locator('#folder-note')).toContainText('اختار المجلد مرة واحدة');
+    await expect(page.locator('#folder-note')).toContainText('مرة واحدة');
   } else {
     await expect(page.locator('#btn-folder-pick')).toBeDisabled();
-    await expect(page.locator('#folder-note')).toContainText('المتصفح ده مش بيسمح');
+    await expect(page.locator('#folder-note')).toContainText('مش للموبايل');
   }
   await expect(page.locator('#folder-now')).toBeHidden();       // nothing chosen yet
   await expect(page.locator('#btn-folder-clear')).toBeHidden();
@@ -2148,6 +2151,34 @@ test('the daily view keeps what is unfinished and drops what is done', async ({ 
   await page.selectOption('#month-pick', '');
   await expect(page.locator('#all-shipments li')).toHaveCount(4);
   await expect(page.locator('#all-shipments')).toContainText('خلصت من زمان');
+});
+
+/* «ثبتها على الشهر الحالي» (the owner, 2026-08-01): an empty daily view used to jump straight
+   to «كل الشهور», which at midnight on the 1st meant opening on the whole archive. It now tries
+   the current month first, and only an empty month falls through to everything. */
+test('an empty daily view falls back to the current month before the archive', async ({ page }) => {
+  await signOut(page);
+  await page.goto('/manager.html?test=1');
+  await page.evaluate(() => {
+    // this month but NOT today (so the daily view is empty), and finished (same reason)
+    const d = new Date();
+    d.setDate(d.getDate() === 15 ? 14 : 15);
+    localStorage.setItem('test-shipments', JSON.stringify([
+      { name: 'خلصت الشهر ده', createdBy: 'أحمد', branch: 'فرع قويسنا', type: 'إذن استلام',
+        createdAt: d.getTime(), loadedAt: d.getTime(), erpAt: d.getTime(),
+        items: [{ barcode: '111', name: 'لبن', qty: 1 }] },
+    ]));
+  });
+  await page.fill('#pin-input', await page.evaluate(() => window.APP_CONFIG.managerPin));
+  await page.click('#btn-pin');
+
+  const thisMonth = await page.evaluate(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  });
+  await expect(page.locator('#month-pick')).toHaveValue(thisMonth);   // not «كل الشهور»
+  await expect(page.locator('#all-shipments li')).toHaveCount(1);
+  await expect(page.locator('#all-shipments')).toContainText('خلصت الشهر ده');
 });
 
 test('settings arrive live, with no reload', async ({ page }) => {
