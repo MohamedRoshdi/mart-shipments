@@ -2,6 +2,7 @@ import * as db from "./db.js";
 import * as auth from "./auth.js";
 import * as lbl from "./label.js";
 import { sheetRows, requireColumns } from "./sheet.js";
+import { versionLine } from "./version.js";
 
 const $ = (id) => document.getElementById(id);
 const esc = (t) => { const d = document.createElement("div"); d.textContent = t; return d.innerHTML; };
@@ -13,13 +14,16 @@ const ALL = "الكل";
 // stored one — without it a wrong save (or a stranger's) would lock the owner out for good
 const CODE_ADMIN_PIN = window.APP_CONFIG.adminPin;
 
-function toast(msg) {
-  $("toast").textContent = msg;
-  $("toast").classList.add("show");
-  setTimeout(() => $("toast").classList.remove("show"), 2200);
+function toast(msg, kind) {
+  const t = $("toast");
+  t.textContent = msg;
+  t.className = kind ? `show t-${kind}` : "show";
+  setTimeout(() => { t.className = ""; }, 2200);
 }
 
-const TITLES = { "screen-pin": "النظام", "screen-admin": "إعدادات النظام", "screen-logs": "آخر العمليات" };
+$("version-line").textContent = versionLine();
+
+const TITLES = { "screen-pin": "العائلة مارت — النظام", "screen-admin": "إعدادات النظام", "screen-logs": "آخر العمليات" };
 
 let cfg = null;        // working copy of the settings
 let identity = "الأدمن";
@@ -156,7 +160,7 @@ $("cfg-label-logo").onchange = async () => {
     data = await shrinkImage(file);
   } catch (err) {
     console.error(err);
-    toast("مقدرناش نقرا الصورة — جرّب صورة تانية");
+    toast("مقدرناش نقرا الصورة — جرّب صورة تانية", "bad");
     return;
   }
   if (data.length > LOGO_CAP) { toast("الصورة كبيرة — استخدم صورة أصغر أو أوضح"); return; }
@@ -239,7 +243,7 @@ $("suppliers-file").onchange = async () => {
     map = requireColumns(rows, ["supplierCode", "supplierName"]);
   } catch (err) {
     console.error(err);
-    toast(err.message || "مقدرناش نقرا الملف — تأكد إنه Excel أو CSV");
+    toast(err.message || "مقدرناش نقرا الملف — تأكد إنه Excel أو CSV", "bad");
     $("suppliers-file").value = "";
     return;
   }
@@ -262,7 +266,7 @@ $("suppliers-file").onchange = async () => {
   $("cfg-suppliers").value = list.map(supplierLine).join("\n");
   paintSuppliers();
   markDirty();
-  toast(`اتقرأ ${list.length} مورد — اضغط «حفظ الإعدادات»`);
+  toast(`اتقرأ ${list.length} مورد — اضغط «حفظ الإعدادات»`, "ok");
 };
 
 // one card per user: name, PIN, branch, and a tick for every screen and every action
@@ -463,7 +467,7 @@ $("btn-save-config").onclick = async () => {
     await db.saveConfig(payload);
   } catch (err) {
     console.error(err);
-    toast("الحفظ ما نفعش — جرّب تاني");
+    toast("الحفظ ما نفعش — جرّب تاني", "bad");
     return;
   } finally {
     clearTimeout(slow);
@@ -556,7 +560,7 @@ $("btn-bulk-delete").onclick = async () => {
     await db.deleteMany(bulkKind, hit.map(s => s._id));
   } catch (err) {
     console.error(err);
-    toast("الحذف ما نفعش — جرّب تاني");
+    toast("الحذف ما نفعش — جرّب تاني", "bad");
     return;
   }
   db.logAction(identity, "حذف بالجملة", `${hit.length} ${noun} · ${scope}`);
@@ -575,7 +579,7 @@ $("btn-wipe-products").onclick = async () => {
     await db.deleteMany("products", rows.map(p => p.barcode));
   } catch (err) {
     console.error(err);
-    toast("المسح ما نفعش — جرّب تاني");
+    toast("المسح ما نفعش — جرّب تاني", "bad");
     return;
   }
   db.logAction(identity,"مسح ملف الأصناف", `${rows.length} صنف`);

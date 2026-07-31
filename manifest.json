@@ -1,11 +1,11 @@
 {
-  "name": "شحنات المحل",
-  "short_name": "شحنات",
+  "name": "العائلة مارت – نظام إدارة الشحنات والجرد",
+  "short_name": "العائلة مارت",
   "id": "./",
   "start_url": "./",
   "display": "standalone",
   "background_color": "#ffffff",
-  "theme_color": "#0a7d33",
+  "theme_color": "#171a1c",
   "dir": "rtl",
   "lang": "ar",
   "icons": [

@@ -25,7 +25,10 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 5. **`db.js` is the only file that knows where data lives.** `app.js` and
    `manager.js` never touch Firestore or localStorage keys directly.
 6. **Bump `CACHE` in `sw.js` on every deploy.** Serving is cache-first, so phones
-   keep the old bundle until the cache name changes. Currently `mart-v48`.
+   keep the old bundle until the cache name changes. Currently `mart-v49`.
+   **Bump `version.js` in the same edit** — its `VERSION` ends in the cache generation
+   (`1.0.49`) and `BUILD` is the day, and every page prints both in its footer. A footer that
+   lags the cache is worse than no footer.
    The bump only works because install fetches with `new Request(u, { cache: "reload" })` —
    a plain `addAll` reads the browser's HTTP cache and copies **stale** files into the new
    cache name (caught in Chrome 2026-07-31: `mart-v34` held a `style.css` 262 bytes behind
@@ -47,12 +50,13 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 | `zip.js` | store-only ZIP writer, ~80 lines, no dependency; used by the folder export |
 | `sheet.js` | everything about reading a spreadsheet: `sheetRows` (**a real `.xlsx`** — zip walk + `DecompressionStream` — or CSV read field by field, quotes and all, and the only place that knows Excel writes Arabic as windows-1256), `headerMap` (columns by Arabic heading, so the shop's own export order works), **`requireColumns`** (the guard: no headings → positional, headings with a column missing → **throws in Arabic naming it**), `unitName` (unit **code** → word, `null` for a code the table does not know) and `unitCode` (the number itself, kept only when it is 1–5). Used by the catalog/stock import (manager) and the supplier import (admin) |
 | `style.css` | one stylesheet for all three pages |
+| `version.js` | the release, in one place: `APP_NAME`, `VERSION`, `BUILD` and `versionLine()`. All three pages print it in a footer. `BUILD` is a literal on purpose — `new Date()` would print the day the page was *opened*, which looks like a build date and is not one |
 | `sw.js`, `manifest.json` | **one** installable PWA, on the main URL. `manager.html` and `admin.html` carry no manifest: the PIN routes people to their screen (`auth.landingPage`), and the home screen links to the other two. Dropped 2026-07-31 on the owner's call — a phone with three near-identical icons was the confusing part. |
 | `firebase-config.js` | Firebase keys **plus** `APP_CONFIG`: PINs (incl. `adminPin`), branches, shipment types, suppliers, label settings |
 | `firestore.rules` | shape validation; the only server-side guard that exists |
 | `SETUP.md` | Arabic guide for the shop owner |
 | `products-template.csv`, `stock-template.csv`, `suppliers-template.csv` | the three import shapes, **each one exactly what the ERP exports**: «كود الصنف، الوحدة، اسم الصنف، معامل التحويل»، «الرصيد، كود الصنف، الوحدة، اسم الصنف»، «كود المورد، اسم المورد» |
-| `tests/app.spec.js` | 81 Playwright tests, all in localStorage mode |
+| `tests/app.spec.js` | 82 Playwright tests, all in localStorage mode |
 | `scripts/*.mjs` | live checks and screenshot helpers (see below) |
 
 ## Data model
@@ -396,6 +400,18 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   TXT / حذف all live on the screen it opens — which is the same two taps they used to take. The
   branch filter row hides itself when the user is scoped to one branch, because a single disabled
   chip is a row that does nothing.
+- **A toast only changes colour when the code that raised it knows what it is.** `toast(msg, kind)`
+  takes `ok` / `warn` / `bad`; the default is the charcoal box every one of the ~120 call sites
+  already had, so nothing was swept and nothing can turn green by accident. Only the `catch`
+  blocks, the `db-error` listener and the import outcomes pass a kind — the catalog import passes
+  `warn` when rows were dropped and `ok` when the whole file landed, so the colour IS the summary.
+  Measured 2026-07-31 with `scripts/shots-wide.mjs`: `rgb(18,133,74)` / `rgb(240,154,0)` /
+  `rgb(201,48,44)`.
+- **The phone column widens, the employee screens do not.** `--col` is 520px, 680px at 760px wide,
+  and 1040px at 1100px **only on `body.wide`** — which `manager.html` and `admin.html` carry and
+  `index.html` deliberately does not: scanning and typing do not get better wide, and the camera
+  preview certainly does not. Above 1100px the manager's card lists become a grid. Measured: 2
+  columns at 1440px.
 - **`[hidden] { display: none !important }` in `style.css` must stay.** A class
   with `display: flex/grid` otherwise outranks the `hidden` attribute and the
   element stays visible.
@@ -426,7 +442,7 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
 ## Commands
 
 ```bash
-npx playwright test                 # 81 tests, localStorage mode, ~40s
+npx playwright test                 # 82 tests, localStorage mode, ~40s
 npx playwright test -g "catalog"    # one group
 python3 -m http.server 8080         # serve locally, then open /?test=1
 node scripts/make-icons.mjs         # regenerate the PWA icons
@@ -460,6 +476,7 @@ BASE=http://localhost:8087 node scripts/live-camera.mjs   # camera list/start/st
 OUT=/tmp/shots node scripts/shots.mjs            # local screenshots (needs the server above)
 OUT=/tmp/shots BASE=http://localhost:8080 node scripts/shots-expiry.mjs   # home + الصلاحيات screens
 OUT=/tmp/shots BASE=http://localhost:8080 node scripts/shots-all.mjs      # all 16 screens, the visual reference set
+OUT=/tmp/shots BASE=http://localhost:8080 node scripts/shots-wide.mjs    # the ONLY check of the 1100px breakpoint and the toast colours (exits 1 if the manager list is still one column at 1440px) — shots-all.mjs is phone-width only
 OUT=/tmp/shots BASE=http://localhost:8080 node scripts/shots-search.mjs   # the name search on all three modes
 OUT=/tmp/shots BASE=http://localhost:8080 node scripts/shots-supplier.mjs # the supplier list, admin side and employee side
 OUT=/tmp/shots BASE=http://localhost:8080 node scripts/shots-label.mjs    # ليبل الرف + prints 3 copies to PDF and measures the page (exits 1 if the paper is wrong)

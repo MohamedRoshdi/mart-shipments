@@ -24,7 +24,26 @@
   --sh: 0 1px 2px rgba(16, 24, 40, .05), 0 2px 8px rgba(16, 24, 40, .06);
   --sh-lift: 0 2px 6px rgba(16, 24, 40, .08), 0 10px 24px rgba(16, 24, 40, .1);
   --mono: ui-monospace, "DejaVu Sans Mono", "Courier New", monospace;
-  --center: max(var(--pad), calc((100% - 520px) / 2));
+  --col: 520px;
+  --center: max(var(--pad), calc((100% - var(--col)) / 2));
+}
+
+/* The app was only ever a phone app, so on a desktop it was a 520 px strip down the middle of an
+   empty screen. The column widens on a tablet and the manager's card list runs in columns on a
+   wide one. The employee screens keep the narrow column on purpose: scanning and typing do not
+   get better wide, and the camera preview certainly does not. */
+@media (min-width: 760px) { :root { --col: 680px; } }
+@media (min-width: 1100px) {
+  body.wide { --col: 1040px; }
+  body.wide #all-shipments,
+  body.wide #all-counts,
+  body.wide #products-list,
+  body.wide #logs-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 12px;
+    align-items: start;
+  }
 }
 
 * { box-sizing: border-box; }
@@ -675,3 +694,23 @@ a.lbl-link {
   pointer-events: none;
 }
 #toast.show { opacity: 1; transform: none; }
+/* the default box is charcoal — «معلومات» in the identity. A toast only changes colour when the
+   code that raised it knows what it is, so a plain confirmation never turns green by accident. */
+#toast.t-ok { background: var(--good); }
+#toast.t-warn { background: var(--amber-2); color: var(--ink); }
+#toast.t-bad { background: var(--bad); }
+
+/* ---------- version line ---------- */
+.version {
+  margin: 0;
+  padding: 10px var(--center) calc(10px + env(safe-area-inset-bottom));
+  color: var(--ink-2);
+  font-size: .72rem;
+  text-align: center;
+}
+/* A bottom bar is fixed, so on a screen that has one the line would sit underneath it. :has() asks
+   the question directly instead of adding a body class that every navTo would have to maintain —
+   and if it ever fails, the line hides behind the bar rather than anything breaking. */
+body:has(section:not([hidden]) .bottombar) .version {
+  padding-block-end: calc(var(--bar) + 26px + env(safe-area-inset-bottom));
+}

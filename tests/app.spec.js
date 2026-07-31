@@ -1956,6 +1956,16 @@ test('suppliers: the file is read by its headings, in whatever order they come',
   expect(typed).toBe('1042، جهينة الجديدة\n1043، المراعي، مصر');
 });
 
+// The version line is the only way somebody on a phone can tell you which build they are on.
+// A missing import or a renamed element would leave it silently blank, which is the failure
+// that matters — the text itself is checked so a stale BUILD is at least visible in a diff.
+test('the version line names the system and the build on all three pages', async ({ page }) => {
+  for (const url of ['/?test=1', '/manager.html?test=1', '/admin.html?test=1']) {
+    await page.goto(url);
+    await expect(page.locator('#version-line')).toHaveText(/العائلة مارت \| Version \d+\.\d+\.\d+ \| Build \d{2}-\d{2}-\d{4}/);
+  }
+});
+
 test('تم تحميلها: the export marks it, and somebody else has to confirm a second load', async ({ page }) => {
   await openManagerPage(page);
   await page.click('button[data-act="view"]');

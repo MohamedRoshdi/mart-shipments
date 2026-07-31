@@ -4,13 +4,14 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#171a1c">
-  <title>شحنات المحل — المدير</title>
+  <title>العائلة مارت – المدير</title>
   <link rel="stylesheet" href="style.css">
 </head>
-<body>
+<!-- wide: a manager reads this on a PC, so the column grows and the cards run in a grid -->
+<body class="wide">
   <header class="appbar">
     <button id="btn-back" class="icon-btn" hidden aria-label="رجوع">→</button>
-    <h1 id="screen-title">شاشة المدير</h1>
+    <h1 id="screen-title">العائلة مارت</h1>
     <button id="btn-products" class="icon-btn" hidden>الأصناف</button>
     <span id="sync-state" class="sync"></span>
   </header>
@@ -180,6 +181,7 @@
     </section>
   </main>
 
+  <p class="version" id="version-line"></p>
   <div id="toast"></div>
   <script src="firebase-config.js"></script>
   <script type="module" src="manager.js"></script>

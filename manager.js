@@ -3,6 +3,7 @@ import * as auth from "./auth.js";
 import * as ex from "./expiry.js";
 import { zipBlob } from "./zip.js";
 import { sheetRows, requireColumns, unitName, unitCode, clean as cell } from "./sheet.js";
+import { versionLine } from "./version.js";
 
 const $ = (id) => document.getElementById(id);
 const esc = (t) => { const d = document.createElement("div"); d.textContent = t; return d.innerHTML; };
@@ -14,14 +15,17 @@ const fmtWhen = (ts) => `${fmtDate(ts)} ${new Date(ts).toLocaleTimeString("ar-EG
   { hour: "2-digit", minute: "2-digit" })}`;
 const ALL = "الكل";
 
-function toast(msg) {
-  $("toast").textContent = msg;
-  $("toast").classList.add("show");
-  setTimeout(() => $("toast").classList.remove("show"), 2200);
+function toast(msg, kind) {
+  const t = $("toast");
+  t.textContent = msg;
+  t.className = kind ? `show t-${kind}` : "show";
+  setTimeout(() => { t.className = ""; }, 2200);
 }
 
+$("version-line").textContent = versionLine();
+
 const TITLES = {
-  "screen-pin": "شاشة المدير",
+  "screen-pin": "العائلة مارت — المدير",
   "screen-manager": "الشحنات",
   "screen-detail": "تعديل شحنة",
   "screen-products": "الأصناف",
@@ -454,7 +458,7 @@ $("m-items").onclick = async (e) => {
     toast("تم الحذف");
   } catch (err) {
     console.error(err);
-    toast("الحذف ما نفعش — جرّب تاني");
+    toast("الحذف ما نفعش — جرّب تاني", "bad");
   }
   await reloadExpiry();
 };
@@ -468,7 +472,7 @@ $("btn-save-month").onclick = async () => {
     toast(`تم حفظ ${n} تعديل`);
   } catch (err) {
     console.error(err);
-    toast(`اتحفظ ${n} تعديل وبعدين حصلت مشكلة — جرّب تاني`);
+    toast(`اتحفظ ${n} تعديل وبعدين حصلت مشكلة — جرّب تاني`, "bad");
   }
   await reloadExpiry();      // a row whose date moved is in another month now, and may empty this one
 };
@@ -746,7 +750,7 @@ async function markLoaded(force) {
     await db.markLoaded(current._id, identity, at);
   } catch (err) {
     console.error(err);
-    toast("ما اتسجلش إن الشحنة اتحمّلت");
+    toast("ما اتسجلش إن الشحنة اتحمّلت", "bad");
     return true;                       // the file itself is not worth blocking over
   }
   current.loadedBy = identity;
@@ -783,7 +787,7 @@ $("btn-delete-detail").onclick = async () => {
     toast("تم الحذف");
   } catch (err) {
     console.error(err);
-    toast("الحذف ما نفعش — جرّب تاني");
+    toast("الحذف ما نفعش — جرّب تاني", "bad");
     return;
   }
   // the detail screen is gone with the row, so it must not stay behind the back button
@@ -812,7 +816,7 @@ $("btn-save-edit").onclick = async () => {
     openManager();
   } catch (err) {
     console.error(err);
-    toast("الحفظ ما نفعش — جرّب تاني");
+    toast("الحفظ ما نفعش — جرّب تاني", "bad");
   }
 };
 
@@ -919,7 +923,7 @@ $("products-list").onclick = async (e) => {
     toast("تم حذف الصنف");
   } catch (err) {
     console.error(err);
-    toast("الحذف ما نفعش — جرّب تاني");
+    toast("الحذف ما نفعش — جرّب تاني", "bad");
   }
 };
 
@@ -938,7 +942,7 @@ $("btn-save-products").onclick = async () => {
     toast(`تم حفظ ${n} اسم`);
   } catch (err) {
     console.error(err);
-    toast(`اتحفظ ${n} اسم وبعدين حصلت مشكلة — جرّب تاني`);
+    toast(`اتحفظ ${n} اسم وبعدين حصلت مشكلة — جرّب تاني`, "bad");
   }
   renderProducts();
 };
@@ -989,7 +993,7 @@ $("import-file").onchange = async (e) => {
   try {
     all = await sheetRows(file);
     map = requireColumns(all, ["barcode", "name"]);
-  } catch (err) { toast(err.message); e.target.value = ""; return; }
+  } catch (err) { toast(err.message, "bad"); e.target.value = ""; return; }
   const usable = (map ? all.slice(1) : all)
     .map(c => productRow(c, map))
     .filter(r => r.barcode && /\d/.test(r.barcode) && r.name);
@@ -1000,12 +1004,13 @@ $("import-file").onchange = async (e) => {
   try {
     for (const r of rows) { await db.saveProductName(r.barcode, r.name, r); n++; }
     db.logAction(identity, "استيراد أصناف", `${n} صنف${bad.length ? ` · ${bad.length} مرفوض` : ""}`);
+    // amber when rows were dropped, green when the whole file landed — the colour is the summary
     toast(bad.length
       ? `تم استيراد ${n} صنف · اترفض ${bad.length} لكود وحدة مش معروف (${bad.slice(0, 3).map(r => r.barcode).join("، ")})`
-      : `تم استيراد ${n} صنف`);
+      : `تم استيراد ${n} صنف`, bad.length ? "warn" : "ok");
   } catch (err) {
     console.error(err);
-    toast(`اتسجل ${n} صنف وبعدين حصلت مشكلة — جرّب تاني`);
+    toast(`اتسجل ${n} صنف وبعدين حصلت مشكلة — جرّب تاني`, "bad");
   }
   e.target.value = "";
 };
@@ -1022,7 +1027,7 @@ $("stock-file").onchange = async (e) => {
   try {
     all = await sheetRows(file);
     map = requireColumns(all, ["qty", "barcode", "name"]);
-  } catch (err) { toast(err.message); e.target.value = ""; return; }
+  } catch (err) { toast(err.message, "bad"); e.target.value = ""; return; }
   const rows = (map ? all.slice(1) : all)
     .map(c => (map
       ? { barcode: cell(c[map.barcode]), name: cell(c[map.name]),
@@ -1041,10 +1046,10 @@ $("stock-file").onchange = async (e) => {
   try {
     for (const r of rows) { await db.saveProductRow(r.barcode, r.name, r.qty, branch, r); n++; }
     db.logAction(identity, "استيراد كميات الجرد", `${n} صنف · ${branch}`);
-    toast(`تم استيراد كميات ${n} صنف لـ${branch}`);
+    toast(`تم استيراد كميات ${n} صنف لـ${branch}`, "ok");
   } catch (err) {
     console.error(err);
-    toast(`اتسجل ${n} صنف وبعدين حصلت مشكلة — جرّب تاني`);
+    toast(`اتسجل ${n} صنف وبعدين حصلت مشكلة — جرّب تاني`, "bad");
   }
   e.target.value = "";
 };

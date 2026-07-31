@@ -3,6 +3,8 @@ import * as auth from "./auth.js";
 import * as ex from "./expiry.js";
 import * as lbl from "./label.js";
 
+import { versionLine } from "./version.js";
+
 const $ = (id) => document.getElementById(id);
 const esc = (t) => { const d = document.createElement("div"); d.textContent = t; return d.innerHTML; };
 const escAttr = (t) => esc(t).replace(/"/g, "&quot;").replace(/'/g, "&#39;");
@@ -12,14 +14,19 @@ const myName = () => localStorage.getItem("employeeName");
 const myBranch = () => localStorage.getItem("employeeBranch") || branches()[0].name;
 const fmtDate = (ts) => new Date(ts).toLocaleDateString("ar-EG");
 
-function toast(msg) {
-  $("toast").textContent = msg;
-  $("toast").classList.add("show");
-  setTimeout(() => $("toast").classList.remove("show"), 2200);
+/* kind is optional and the default is the charcoal box every call already gets, so no existing
+   toast had to be touched: only the places that know they are reporting a failure say so. */
+function toast(msg, kind) {
+  const t = $("toast");
+  t.textContent = msg;
+  t.className = kind ? `show t-${kind}` : "show";
+  setTimeout(() => { t.className = ""; }, 2200);
 }
 
+$("version-line").textContent = versionLine();
+
 const TITLES = {
-  "screen-login": "دخول",
+  "screen-login": "العائلة مارت",
   "screen-name": "بيانات الموظف",
   "screen-home": "شحناتي",
   "screen-new": "شحنة جديدة",
@@ -526,7 +533,7 @@ $("btn-save-shipment").onclick = async () => {
     });
   } catch (e) {
     console.error(e);
-    toast("الحفظ ما نفعش — حاول تاني");
+    toast("الحفظ ما نفعش — حاول تاني", "bad");
     return;
   }
   if (!editing && !counting()) localStorage.removeItem("draft");
@@ -586,7 +593,7 @@ async function addExpiry(barcode, name, qty) {
     else await db.saveExpiry({ barcode, name, qty, ...d, branch: state.branch, createdBy: myName() });
   } catch (err) {
     console.error(err);
-    toast("الحفظ ما نفعش — حاول تاني");
+    toast("الحفظ ما نفعش — حاول تاني", "bad");
     return;
   }
   hideSheet();
@@ -681,7 +688,7 @@ $("month-items").onclick = async (e) => {
     toast("تم الحذف");
   } catch (err) {
     console.error(err);
-    toast("الحذف ما نفعش — جرّب تاني");
+    toast("الحذف ما نفعش — جرّب تاني", "bad");
   }
   await loadExpiry();
   paintMonth();
@@ -695,7 +702,7 @@ $("btn-save-month").onclick = async () => {
     toast(`تم حفظ ${n} تعديل`);
   } catch (err) {
     console.error(err);
-    toast(`اتحفظ ${n} تعديل وبعدين حصلت مشكلة — جرّب تاني`);
+    toast(`اتحفظ ${n} تعديل وبعدين حصلت مشكلة — جرّب تاني`, "bad");
   }
   await loadExpiry();
   paintMonth();          // a row whose date moved is now in another month, and may empty this one
@@ -1119,7 +1126,7 @@ addEventListener("keydown", (e) => {
 
 /* ---------- boot ---------- */
 
-addEventListener("db-error", () => toast("مشكلة في مزامنة البيانات — اتأكد من الاتصال والإعدادات"));
+addEventListener("db-error", () => toast("مشكلة في مزامنة البيانات — اتأكد من الاتصال والإعدادات", "bad"));
 
 let dbBroken = false;
 
