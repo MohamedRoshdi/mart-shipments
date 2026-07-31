@@ -411,8 +411,9 @@ button.card-open {
 }
 /* the one destructive control on a card screen: soft, full width, and below the exports */
 .row-actions button[data-expdel] { flex: 0 0 auto; min-inline-size: 0; padding-inline: 14px; }
-/* «تم تحميلها»: a state, so it is said in words on the card and repeated on the screen it opens */
-.tag-loaded {
+/* «تم تحميلها» and the ERP state: a state is said in WORDS on the card, never colour alone —
+   the same rule as the الصلاحيات colours. The tint is there to be scanned, not to be read. */
+.tag-loaded, .tag-erp {
   display: inline-block;
   margin-inline-start: 6px;
   padding: 1px 8px;
@@ -423,6 +424,34 @@ button.card-open {
   font-weight: 700;
   vertical-align: middle;
 }
+.tag-erp.erp-new { background: var(--bg); color: var(--ink-2); }
+.tag-erp.erp-ready { background: var(--amber-soft); color: #8a5a00; }
+.tag-erp.erp-done { background: #e3f3ea; color: var(--good); }
+
+/* Four numbers, and all four have to be ON the screen. The filter chips scroll sideways because
+   there can be any number of them; these are exactly four, and the one that scrolled off a phone
+   was «معلّقة» — the number the manager most needs to see. Two by two on a phone, one row above. */
+.counters {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+}
+@media (min-width: 560px) { .counters { grid-template-columns: repeat(4, 1fr); } }
+.counters li {
+  min-inline-size: 0;
+  padding: 8px 12px;
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  box-shadow: var(--sh);
+  text-align: center;
+}
+.counters b { display: block; font-size: 1.3rem; font-variant-numeric: tabular-nums; }
+.counters span { font-size: .72rem; color: var(--ink-2); }
+.counters li.erp-ready b { color: #8a5a00; }
+.counters li.erp-done b { color: var(--good); }
 .loaded-line {
   margin-block: 8px 0;
   padding: 8px 10px;

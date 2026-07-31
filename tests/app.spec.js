@@ -2098,6 +2098,49 @@ test('a shipment identical to another one asks before it makes a TXT', async ({ 
   await expect(page.locator('#detail-loaded')).toContainText('تم تحميلها');
 });
 
+/* «تظل الشحنة ظاهرة حتى تنتهي جميع مراحلها» — the daily screen is today's shipments plus every
+   older one that has not finished, and a shipment leaves it only when both stages are done. */
+test('the daily view keeps what is unfinished and drops what is done', async ({ page }) => {
+  await signOut(page);
+  await page.goto('/manager.html?test=1');
+  await page.evaluate(() => {
+    const day = 86400000;
+    const row = (name, extra) => ({
+      name, createdBy: 'أحمد', branch: 'فرع قويسنا', type: 'إذن استلام',
+      items: [{ barcode: '111', name: 'لبن', qty: 1 }], ...extra,
+    });
+    localStorage.setItem('test-shipments', JSON.stringify([
+      row('جديدة النهارده', { createdAt: Date.now() }),
+      row('اتعملها ملف', { createdAt: Date.now(), loadedBy: 'أحمد', loadedAt: Date.now() }),
+      // last month, finished — the archive, and the only reason the list is not endless
+      row('خلصت من زمان', { createdAt: Date.now() - 20 * day, loadedAt: Date.now() - 20 * day,
+                            erpAt: Date.now() - 19 * day }),
+      row('لسه معلقة من زمان', { createdAt: Date.now() - 20 * day }),
+    ]));
+  });
+  await page.fill('#pin-input', await page.evaluate(() => window.APP_CONFIG.managerPin));
+  await page.click('#btn-pin');
+
+  await expect(page.locator('#month-pick')).toHaveValue('open');
+  await expect(page.locator('#all-shipments li')).toHaveCount(3);
+  await expect(page.locator('#all-shipments')).not.toContainText('خلصت من زمان');
+  await expect(page.locator('#all-shipments')).toContainText('لسه معلقة من زمان');
+
+  // the three states, said in words
+  const tags = await page.locator('#all-shipments .tag-erp').allTextContents();
+  expect(tags).toContain('جديدة');
+  expect(tags).toContain('جاهزة للاستيراد');
+
+  // the counters count what is loaded, not what the list is showing
+  const counts = await page.locator('#erp-counts li b').allTextContents();
+  expect(counts).toEqual(['2', '1', '0', '2']);   // today · ready · imported today · pending
+
+  // and the archive still has everything
+  await page.selectOption('#month-pick', '');
+  await expect(page.locator('#all-shipments li')).toHaveCount(4);
+  await expect(page.locator('#all-shipments')).toContainText('خلصت من زمان');
+});
+
 test('settings arrive live, with no reload', async ({ page }) => {
   await openManagerPage(page);
   await page.click('#btn-filters');
@@ -2134,7 +2177,8 @@ test('تم تحميلها: the export marks it, and somebody else has to confirm
     JSON.parse(localStorage.getItem('test-logs')).filter(l => l.action === 'تحميل شحنة').length)).toBe(1);
 
   await page.click('#btn-back');
-  await expect(page.locator('#all-shipments .tag-loaded')).toHaveText('تم تحميلها');
+  // the card now carries the ERP state, and a file having been made IS «جاهزة للاستيراد»
+  await expect(page.locator('#all-shipments .tag-erp')).toHaveText('جاهزة للاستيراد');
   await expect(page.locator('#all-shipments li')).toContainText('حمّلها');
 
   // somebody else opens it: the warning names who loaded it, and cancelling loads nothing

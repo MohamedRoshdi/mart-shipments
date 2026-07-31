@@ -203,23 +203,66 @@ const monthOf = (ts) => {
   const d = new Date(ts);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 };
-let month = monthOf(Date.now());
+let month = "open";        // VIEW_OPEN — the daily screen, not an archive month
+
+/* Where a shipment is in its life. Derived, never stored: the absence of a key IS a state, the
+   same shape as «تم تحميلها». A file was made → «جاهزة للاستيراد»; the shop's system took it in
+   → «تم الاستيراد». Nothing sets erpAt yet — reading the success flag out of the TXT needs a real
+   sample of one PowerTech has touched, and guessing at it would mark a shipment as imported when
+   it was not. The state model is here so the rest of the screen can be built against it. */
+const ERP = {
+  new: { label: "جديدة", cls: "erp-new" },
+  ready: { label: "جاهزة للاستيراد", cls: "erp-ready" },
+  done: { label: "تم الاستيراد", cls: "erp-done" },
+};
+const erpState = (s) => (s.erpAt ? "done" : s.loadedAt ? "ready" : "new");
+
+const dayKey = (ts) => new Date(ts).toLocaleDateString("en-CA");
+const isToday = (ts) => dayKey(ts) === dayKey(Date.now());
+
+/* The default view, and the reason the page stays fast as the months pile up: today's shipments
+   plus everything older that has not finished its life. A shipment leaves the screen only when
+   both stages are done — which is exactly «تظل الشحنة ظاهرة حتى تنتهي جميع مراحلها». Picking a
+   real month, or «كل الشهور», is the archive and shows everything in it. */
+const VIEW_OPEN = "open";
+const openView = () => month === VIEW_OPEN;
+const isOpen = (s) => isToday(s.createdAt) || erpState(s) !== "done";
 
 function renderMonthPick() {
   const now = new Date();
-  const opts = Array.from({ length: 12 }, (_, i) => {
+  const opts = [`<option value="${VIEW_OPEN}"${openView() ? " selected" : ""}>النهارده والمعلّق</option>`];
+  opts.push(...Array.from({ length: 12 }, (_, i) => {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
     const k = monthOf(d.getTime());
     return `<option value="${k}"${k === month ? " selected" : ""}>${
       d.toLocaleDateString("ar-EG", { month: "long", year: "numeric" })}</option>`;
-  });
+  }));
   opts.push(`<option value=""${month === MONTH_ALL ? " selected" : ""}>كل الشهور</option>`);
   $("month-pick").innerHTML = opts.join("");
 }
 
+// the month before this one, built from its parts: setMonth(-1) on the 31st lands back in this
+// month, because June has no 31st
+const lastMonth = () => {
+  const d = new Date();
+  return monthOf(new Date(d.getFullYear(), d.getMonth() - 1, 1).getTime());
+};
+
 async function loadMonth() {
-  all = await db.listShipments(month).catch(() => []);
-  counts = canDo("count") ? await db.listCounts(month).catch(() => []) : [];
+  if (openView()) {
+    /* This month AND last. An unfinished shipment must not vanish at midnight on the 1st, and two
+       bounded reads are still nothing like reading every month ever saved. Anything older than
+       that is the archive — «كل الشهور» finds it. */
+    const [a, b] = await Promise.all([
+      db.listShipments(monthOf(Date.now())).catch(() => []),
+      db.listShipments(lastMonth()).catch(() => []),
+    ]);
+    all = [...a, ...b];
+    counts = canDo("count") ? await db.listCounts(monthOf(Date.now())).catch(() => []) : [];
+  } else {
+    all = await db.listShipments(month).catch(() => []);
+    counts = canDo("count") ? await db.listCounts(month).catch(() => []) : [];
+  }
   // never hold a branch this user may not see: the filter runs before anything is painted
   if (scopes.length) {
     all = all.filter(s => scopes.includes(s.branch));
@@ -308,6 +351,21 @@ $("btn-filters").onclick = () => {
   renderFilterBar();
 };
 
+/* The strip above the list. It counts what is LOADED, not what the filters happen to be showing —
+   a manager narrowing to one branch still needs to know how many permits are waiting overall, and
+   a counter that moved with the search box would be a different number every keystroke. */
+function renderCounters() {
+  const mine = all.filter(s => filter === ALL || s.branch === filter);
+  const cells = [
+    ["شحنات النهارده", mine.filter(s => isToday(s.createdAt)).length, ""],
+    ["جاهزة للاستيراد", mine.filter(s => erpState(s) === "ready").length, "erp-ready"],
+    ["اتستوردت النهارده", mine.filter(s => s.erpAt && isToday(s.erpAt)).length, "erp-done"],
+    ["معلّقة", mine.filter(s => erpState(s) === "new").length, "erp-new"],
+  ];
+  $("erp-counts").innerHTML = cells.map(([label, n, cls]) =>
+    `<li class="${cls}"><b>${n}</b><span>${label}</span></li>`).join("");
+}
+
 function renderList() {
   renderFilterBar();
   $("list-search").hidden = tab === "expiry";      // a month card is not a name
@@ -315,14 +373,16 @@ function renderList() {
   if (tab === "expiry") { renderMonths(); return; }
   shown = all.filter(s => (filter === ALL || s.branch === filter)
     && (typeFilter === ALL || s.type === typeFilter)
+    && (!openView() || isOpen(s))
     && matchesSearch(s));
+  renderCounters();
   // One card, one tap. Five buttons on every row turned the list into a wall of controls (the
   // owner's words, 2026-07-31); copy/Excel/TXT/delete all live on the screen the card opens,
   // which is the same two taps they took before.
   $("all-shipments").innerHTML = shown.map((s, i) => `<li>
       <button class="card-open" data-act="view" data-i="${i}">
-        <span class="card-title">${esc(s.name)}${s.loadedAt ? ` <span class="tag-loaded">تم تحميلها</span>` : ""}</span>
-        <span class="meta">${esc(s.type || "بدون نوع")} · ${esc(s.branch || "بدون فرع")} · ${esc(s.createdBy)} · ${fmtDate(s.createdAt)} · ${s.items.length} صنف${s.loadedAt ? ` · حمّلها ${esc(s.loadedBy || "؟")} ${fmtWhen(s.loadedAt)}` : ""}</span>
+        <span class="card-title">${esc(s.name)} <span class="tag-erp ${ERP[erpState(s)].cls}">${ERP[erpState(s)].label}</span></span>
+        <span class="meta">${esc(s.type || "بدون نوع")} · ${esc(s.branch || "بدون فرع")} · ${esc(s.createdBy)} · ${fmtWhen(s.createdAt)} · ${s.items.length} صنف${s.loadedAt ? ` · حمّلها ${esc(s.loadedBy || "؟")} ${fmtWhen(s.loadedAt)}` : ""}${s.erpAt ? ` · اتستوردت ${fmtWhen(s.erpAt)}` : ""}</span>
       </button>
     </li>`).join("") || `<li class="empty">${filter === ALL ? "مفيش شحنات لسه" : "مفيش شحنات في الفرع ده"}</li>`;
 }

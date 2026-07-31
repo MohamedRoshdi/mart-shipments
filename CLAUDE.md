@@ -25,9 +25,9 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 5. **`db.js` is the only file that knows where data lives.** `app.js` and
    `manager.js` never touch Firestore or localStorage keys directly.
 6. **Bump `CACHE` in `sw.js` on every deploy.** Serving is cache-first, so phones
-   keep the old bundle until the cache name changes. Currently `mart-v50`.
+   keep the old bundle until the cache name changes. Currently `mart-v51`.
    **Bump `version.js` in the same edit** — its `VERSION` ends in the cache generation
-   (`1.0.50`) and `BUILD` is the day, and every page prints both in its footer. A footer that
+   (`1.0.51`) and `BUILD` is the day, and every page prints both in its footer. A footer that
    lags the cache is worse than no footer.
    The bump only works because install fetches with `new Request(u, { cache: "reload" })` —
    a plain `addAll` reads the browser's HTTP cache and copies **stale** files into the new
@@ -58,7 +58,7 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 | `firestore.rules` | shape validation; the only server-side guard that exists |
 | `SETUP.md` | Arabic guide for the shop owner |
 | `products-template.csv`, `stock-template.csv`, `suppliers-template.csv` | the three import shapes, **each one exactly what the ERP exports**: «كود الصنف، الوحدة، اسم الصنف، معامل التحويل»، «الرصيد، كود الصنف، الوحدة، اسم الصنف»، «كود المورد، اسم المورد» |
-| `tests/app.spec.js` | 87 Playwright tests, all in localStorage mode |
+| `tests/app.spec.js` | 88 Playwright tests, all in localStorage mode |
 | `scripts/*.mjs` | live checks and screenshot helpers (see below) |
 
 ## Data model
@@ -356,6 +356,26 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   That default is why a small barcode reads on one phone and not another; `ideal` (not `exact`)
   so a camera that cannot do it still starts. `navTo` calls `stopScan()` for any screen other
   than `screen-new`, otherwise the camera keeps running behind the settings screen.
+- **The ERP state is derived, never stored.** `erpState(s)` reads `erpAt` → «تم الاستيراد»,
+  `loadedAt` → «جاهزة للاستيراد», neither → «جديدة». The absence of a key IS a state, the same
+  shape as «تم تحميلها»; there is no status column to keep in step with the two timestamps that
+  already say everything. **Nothing sets `erpAt` yet** — reading PowerTech's success flag out of
+  the TXT needs a real sample of one it has touched, and a guessed parser would mark a shipment
+  «تم الاستيراد» when it was never imported, which is the worst failure this feature has. The
+  state model is in place so the screen could be built against it.
+- **The manager opens on «النهارده والمعلّق», and that is a filter, not a query.** `#month-pick`
+  gained it as its first option and its default. It reads **this month and last** — two bounded
+  reads, because an unfinished shipment must not vanish at midnight on the 1st — and then shows
+  today's shipments plus every older one that is not «تم الاستيراد» (`isOpen`). A shipment leaves
+  the screen only when both stages are done. Anything older than last month is the archive, behind
+  a real month or «كل الشهور». `lastMonth()` builds the date from its parts: `setMonth(-1)` on the
+  31st lands back in the same month, because June has no 31st.
+- **The counters count what is loaded, not what is shown.** A manager narrowing to one branch still
+  needs the overall backlog, and a number that moved with every keystroke in the search box would
+  be noise. They honour the branch filter and nothing else. Four numbers, laid out **2×2 on a phone
+  and 1×4 above 560px** — the filter chips scroll sideways because there can be any number of them;
+  these are exactly four, and the one that scrolled off a 412px phone was «معلّقة», the number the
+  manager most needs. Caught in a screenshot, not by a test.
 - **A duplicate permit is asked about, never decided.** `fingerprint()` in `manager.js` is
   type + branch + normalised supplier + every `barcode:qty` sorted — computed on the fly, so there
   is no stored hash to migrate or to fall out of step with the items. Two deliveries of the same
@@ -521,7 +541,7 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
 ## Commands
 
 ```bash
-npx playwright test                 # 87 tests, localStorage mode, ~40s
+npx playwright test                 # 88 tests, localStorage mode, ~40s
 node scripts/desktop-check.cjs      # 18 checks of desktop/main.js with electron stubbed out — the
                                     # path guards and the local server, no 200 MB download needed
 npx playwright test -g "catalog"    # one group
@@ -560,6 +580,7 @@ BASE=http://localhost:8087 node scripts/live-camera.mjs   # camera list/start/st
 OUT=/tmp/shots node scripts/shots.mjs            # local screenshots (needs the server above)
 OUT=/tmp/shots BASE=http://localhost:8080 node scripts/shots-expiry.mjs   # home + الصلاحيات screens
 OUT=/tmp/shots BASE=http://localhost:8080 node scripts/shots-all.mjs      # all 16 screens, the visual reference set
+OUT=/tmp/shots BASE=http://localhost:8080 node scripts/shots-dash.mjs    # the manager's daily screen: the four counters and all three ERP states, phone + 1440px. Its fixtures use MINUTE offsets on purpose — hour-scale ones run at 00:30 put "today" in yesterday and the counters look wrong when they are right
 OUT=/tmp/shots BASE=http://localhost:8080 node scripts/shots-wide.mjs    # the ONLY check of the 1100px breakpoint and the toast colours (exits 1 if the manager list is still one column at 1440px) — shots-all.mjs is phone-width only
 OUT=/tmp/shots BASE=http://localhost:8080 node scripts/shots-search.mjs   # the name search on all three modes
 OUT=/tmp/shots BASE=http://localhost:8080 node scripts/shots-supplier.mjs # the supplier list, admin side and employee side
