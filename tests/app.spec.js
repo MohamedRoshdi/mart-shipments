@@ -245,7 +245,10 @@ test('branch: picked at setup, stamped on shipment, filters manager list', async
   await page.fill('#pin-input', await page.evaluate(() => window.APP_CONFIG.managerPin));
   await page.click('#btn-pin');
   await expect(page.locator('#all-shipments li')).toHaveCount(1);
+  await expect(page.locator('#filters')).toBeHidden();         // chips are one tap away, not always on
+  await page.click('#btn-filters');
   await page.click(`button[data-branch="${cfg[0].name}"]`);   // other branch → empty
+  await expect(page.locator('#btn-filters')).toHaveText(/قويسنا/);   // the toggle says what is filtered
   await expect(page.locator('#all-shipments li')).toContainText('مفيش شحنات');
   await page.click(`button[data-branch="${b2}"]`);
   await expect(page.locator('#all-shipments li')).toContainText('شحنة شبين');
@@ -292,6 +295,7 @@ test('shipment type: picked under the branch, saved, filtered and editable', asy
   await page.fill('#pin-input', await page.evaluate(() => window.APP_CONFIG.managerPin));
   await page.click('#btn-pin');
   await expect(page.locator('#all-shipments li')).toContainText(t2);
+  await page.click('#btn-filters');
   await page.click(`button[data-typefilter="${t1}"]`);                     // wrong type → empty
   await expect(page.locator('#all-shipments li')).toContainText('مفيش شحنات');
   await page.click(`button[data-typefilter="${t2}"]`);
@@ -675,6 +679,7 @@ test('admin: a saved branch and type reach the employee app and the manager', as
   await page.goto('/manager.html?test=1');                      // manager: both appear as filters
   await page.fill('#pin-input', await page.evaluate(() => window.APP_CONFIG.managerPin));
   await page.click('#btn-pin');
+  await page.click('#btn-filters');
   await expect(page.locator('#branch-filter button[data-branch="فرع بنها"]')).toBeVisible();
   await expect(page.locator('#type-filter button[data-typefilter="إذن تحويل مخزن"]')).toBeVisible();
 });
@@ -924,6 +929,7 @@ test('a two-branch user picks the branch per shipment, and the manager view span
 
   await page.click('#link-manager');                                       // manager side, same session
   await expect(page.locator('#screen-manager')).toBeVisible();
+  await page.click('#btn-filters');
   await expect(page.locator('#branch-filter button')).toHaveCount(3);       // الكل + the two branches
   await expect(page.locator('#branch-filter button').first()).toBeEnabled();
   await expect(page.locator('#all-shipments li')).toHaveCount(1);

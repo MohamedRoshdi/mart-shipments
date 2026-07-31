@@ -34,6 +34,15 @@ await page.waitForTimeout(300);
 await shot("m2-card");
 
 await page.click("#btn-back");
+await page.click("#btn-filters");                       // the chips, one tap away
+await page.waitForTimeout(200);
+await shot("m4-filters-open");
+await page.click('#type-filter button[data-typefilter="تحويل فرع"]');
+await page.waitForTimeout(200);
+await shot("m5-filtered");                              // the toggle now says what is filtered
+console.log("toggle:", await page.locator("#btn-filters").innerText());
+
+await page.click('#type-filter button[data-typefilter="الكل"]');
 await page.click('#list-tabs button[data-tab="count"]');
 await page.waitForTimeout(300);
 await shot("m3-counts");

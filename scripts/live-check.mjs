@@ -90,6 +90,7 @@ async function findRow() {
 }
 let mi = await findRow();
 log("5. manager sees employee's edit:", mi >= 0, "|", (await mgr.locator("#all-shipments li").allInnerTexts())[mi]);
+await mgr.click("#btn-filters");                               // the chips live behind the toggle now
 await mgr.click(`button[data-typefilter="${type}"]`);          // filter by the type the employee picked
 await mgr.waitForTimeout(500);
 log("5b. type filter keeps it:", (await findRow()) >= 0, "| type:", type);

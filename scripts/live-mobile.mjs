@@ -142,6 +142,7 @@ async function waitForRow(p, stamp, tries = 10) {
 const { at: mi, texts: rows } = await waitForRow(mgr, STAMP);
 log("11. manager sees it:", mi >= 0, "| type shown:", rows[mi]?.includes(type),
   "| branch shown:", rows[mi]?.includes(branchNames[1]), "| by:", rows[mi]?.includes("فحص موبايل"));
+await mgr.tap("#btn-filters");                                 // the chips live behind the toggle now
 await mgr.tap(`button[data-typefilter="${type}"]`);
 await mgr.waitForTimeout(500);
 log("12. type filter keeps it:", (await mgr.locator("#all-shipments li").allInnerTexts()).some(t => t.includes(STAMP)));

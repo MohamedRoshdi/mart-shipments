@@ -25,7 +25,7 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 5. **`db.js` is the only file that knows where data lives.** `app.js` and
    `manager.js` never touch Firestore or localStorage keys directly.
 6. **Bump `CACHE` in `sw.js` on every deploy.** Serving is cache-first, so phones
-   keep the old bundle until the cache name changes. Currently `mart-v38`.
+   keep the old bundle until the cache name changes. Currently `mart-v39`.
    The bump only works because install fetches with `new Request(u, { cache: "reload" })` —
    a plain `addAll` reads the browser's HTTP cache and copies **stale** files into the new
    cache name (caught in Chrome 2026-07-31: `mart-v34` held a `style.css` 262 bytes behind
@@ -269,8 +269,12 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   once made the catalog import silently save 0 rows.
 - **The look is one stylesheet and four rules** (2026-07-31 pass): filter chips live in a
   single row that **scrolls sideways** (`.seg` is `nowrap` + `overflow-x:auto`) — wrapping rows
-  were pushing the list below the fold; a filter is labelled inside its row (`.filter-row` +
-  `.filter-label`), not by a heading above it; cards carry `box-shadow: var(--sh)` instead of a
+  were pushing the list below the fold — and on the manager page those rows are **behind
+  `#btn-filters`**, on the same line as the search box. `renderFilterBar()` keeps `#filters` open
+  whenever a filter is actually on and writes the active values onto the button, so a filtered
+  list can never look like the whole list; the button hides itself when there is nothing to
+  filter (one branch in scope, and not the shipments tab). A filter is labelled inside its row
+  (`.filter-row` + `.filter-label`), not by a heading above it; cards carry `box-shadow: var(--sh)` instead of a
   border; and **no Arabic text ever gets `letter-spacing`** — it is a joined script and spacing
   breaks the ligatures. `.code` is `direction:ltr` **plus `unicode-bidi:isolate`**, and it wraps
   the barcode ONLY: putting Arabic inside it is what produced «فى الـنـظام» in the catalog rows.

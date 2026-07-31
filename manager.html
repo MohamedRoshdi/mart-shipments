@@ -28,15 +28,20 @@
         <button type="button" data-tab="count" aria-pressed="false">الجرد</button>
         <button type="button" data-tab="expiry" aria-pressed="false">الصلاحيات</button>
       </div>
-      <div class="filter-row" id="branch-filter-row">
-        <span class="filter-label">الفرع</span>
-        <div id="branch-filter" class="seg"></div>
+      <div class="filter-bar">
+        <input id="list-search" type="text" maxlength="60" placeholder="ابحث باسم المورد أو الموظف">
+        <button id="btn-filters" type="button" class="ghost" aria-expanded="false">فلترة</button>
       </div>
-      <div id="type-filter-row" class="filter-row">
-        <span class="filter-label">النوع</span>
-        <div id="type-filter" class="seg"></div>
+      <div id="filters" hidden>
+        <div class="filter-row" id="branch-filter-row">
+          <span class="filter-label">الفرع</span>
+          <div id="branch-filter" class="seg"></div>
+        </div>
+        <div id="type-filter-row" class="filter-row">
+          <span class="filter-label">النوع</span>
+          <div id="type-filter" class="seg"></div>
+        </div>
       </div>
-      <input id="list-search" type="text" maxlength="60" placeholder="ابحث باسم المورد أو الموظف">
       <div id="ships-block">
         <h2>الشحنات</h2>
         <ul id="all-shipments"></ul>

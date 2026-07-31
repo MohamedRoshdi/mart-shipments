@@ -236,6 +236,13 @@ li.exp-expired .card-title { color: var(--bad); }
 .seg button[aria-pressed=true] { background: var(--ink); color: #fff; border-color: var(--ink); }
 .branch-line { font-weight: 700; }
 
+/* search and the filter toggle share one line; the chips live under it, only when they are needed */
+.filter-bar { display: flex; gap: 8px; align-items: center; }
+.filter-bar input { flex: 1; min-inline-size: 0; }
+.filter-bar button { flex: 0 0 auto; white-space: nowrap; }
+#btn-filters.on { background: var(--ink); color: #fff; border-color: var(--ink); }
+#filters { display: grid; gap: 10px; }
+
 /* a filter reads as «الفرع: …», so the label sits in the row, not on a line of its own */
 .filter-row { display: flex; align-items: center; gap: 8px; }
 .filter-row > .filter-label {

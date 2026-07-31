@@ -227,7 +227,32 @@ function matchesSearch(s) {
 
 $("list-search").oninput = renderList;
 
+/* Three rows of chips sat above every list — the branch, the type and the tabs — and pushed the
+   first card near the fold. The chips are one button away now, and the button says what is
+   filtered, so a list that is showing a subset can never look like the whole thing. */
+
+let filtersOpen = false;
+
+function renderFilterBar() {
+  const parts = [];
+  if (filter !== ALL && !$("branch-filter-row").hidden) parts.push(shortBranch(filter));
+  if (typeFilter !== ALL && tab === "ship") parts.push(typeFilter);
+  const nothingToFilter = $("branch-filter-row").hidden && tab !== "ship";
+  $("btn-filters").hidden = nothingToFilter;
+  $("btn-filters").textContent = parts.length ? parts.join(" · ") : "فلترة";
+  $("btn-filters").classList.toggle("on", parts.length > 0);
+  // an active filter is never hidden: the row stays open while it is on, whatever the toggle says
+  $("filters").hidden = nothingToFilter || !(filtersOpen || parts.length);
+  $("btn-filters").setAttribute("aria-expanded", String(!$("filters").hidden));
+}
+
+$("btn-filters").onclick = () => {
+  filtersOpen = !filtersOpen;
+  renderFilterBar();
+};
+
 function renderList() {
+  renderFilterBar();
   $("list-search").hidden = tab === "expiry";      // a month card is not a name
   if (tab === "count") { renderCounts(); return; }
   if (tab === "expiry") { renderMonths(); return; }
