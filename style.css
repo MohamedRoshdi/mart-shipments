@@ -559,24 +559,39 @@ input[type=range] { flex: 1; inline-size: 100%; accent-color: var(--amber); bloc
   color-scheme: light;            /* the label is ink on paper, whatever the phone is doing */
   forced-color-adjust: none;
   display: grid;
-  grid-template-rows: auto auto 1fr auto auto;
+  grid-template-rows: auto auto auto 1fr auto;
   align-items: center;
   justify-items: center;
-  gap: .5mm;
-  padding: 1.5mm 2mm;
+  gap: .4mm;
+  padding: 1.2mm 2mm;
   background: #fff;
   color: #000;
   text-align: center;
   overflow: hidden;
   break-inside: avoid;
+  /* the cut line: the shop cuts A4 sheets by hand, and a thermal label reads as a card */
+  border: .3mm solid #000;
+  border-radius: 1.5mm;
 }
-.lbl-logo { max-block-size: 7mm; max-inline-size: 70%; object-fit: contain; }
-.lbl-name { font-size: 3.4mm; font-weight: 700; line-height: 1.2; overflow: hidden; }
-.lbl-bars { inline-size: 100%; block-size: 100%; min-block-size: 7mm; display: flex; align-items: center; }
+.lbl-logo { max-block-size: 6mm; max-inline-size: 70%; object-fit: contain; }
+/* the price is the one thing a customer reads from two metres away */
+.lbl-price { font-size: 8mm; font-weight: 800; line-height: 1; direction: ltr; }
+.lbl-cur { font-size: 3.2mm; font-weight: 700; margin-inline-start: 1mm; vertical-align: super; }
+.lbl-name { font-size: 3.2mm; font-weight: 700; line-height: 1.15; overflow: hidden; }
+.lbl-bars { inline-size: 100%; block-size: 100%; min-block-size: 6mm; display: flex; align-items: center; }
 .lbl-svg { inline-size: 100%; block-size: 100%; }
 .lbl-plain { font-family: var(--mono); font-size: 4mm; }   /* a code no symbology can carry */
-.lbl-code { font-family: var(--mono); font-size: 3.2mm; direction: ltr; }
-.lbl-price { font-size: 5.5mm; font-weight: 800; direction: ltr; }
+/* the number sits centred under the bars, and the print date tucks into the corner */
+.lbl-foot { position: relative; inline-size: 100%; }
+.lbl-code { font-family: var(--mono); font-size: 3mm; direction: ltr; }
+.lbl-date {
+  position: absolute;
+  inset-inline-end: 0;
+  inset-block-end: -0.5mm;
+  font-size: 2.2mm;
+  direction: ltr;
+  opacity: .75;
+}
 .label-preview { display: flex; justify-content: center; }
 .label-preview .lbl { box-shadow: var(--sh); border-radius: 2mm; }
 

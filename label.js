@@ -137,20 +137,29 @@ const ESCAPES = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&
 // text and attributes both: product names and the logo URL are publicly writable
 const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ESCAPES[c]);
 
-// The five rows are always in the markup, so a label with no logo and no price still lines up.
-// price is optional and unstored — the day the catalog carries one, pass it here and nothing
-// else changes.
+// The date the label was printed, small in the corner — the shop's own labels carry one, and it
+// is how they tell a re-priced shelf from an old one. Passed in so the markup stays pure.
+const printDate = (d) => (d || new Date()).toLocaleDateString("en-GB");
+
+// The shop's own layout: logo, then the price as the one loud thing, then the name, the bars and
+// the number, with the date in the corner. Every row is always in the markup, so a label with no
+// logo and no price still lines up. price is optional — the day the catalog carries one, it
+// arrives here and nothing else changes.
 export function labelHtml(item, cfg) {
   const c = labelCfg(cfg);
   const price = String(item.price == null ? "" : item.price).trim();
   const bars = barcodeSvg(item.barcode);
   return `<div class="lbl" style="inline-size:${c.w}mm;block-size:${c.h}mm">`
     + (c.logo ? `<img class="lbl-logo" src="${esc(c.logo)}" alt="">` : `<span class="lbl-logo"></span>`)
+    + (price ? `<div class="lbl-price">${esc(price)}<span class="lbl-cur">LE</span></div>` : `<span class="lbl-price"></span>`)
     + `<div class="lbl-name">${esc(item.name)}</div>`
     + `<div class="lbl-bars">${bars || `<span class="lbl-plain">${esc(item.barcode)}</span>`}</div>`
-    + `<div class="lbl-code">${esc(item.barcode)}</div>`
-    + (price ? `<div class="lbl-price">${esc(price)} ج</div>` : `<span class="lbl-price"></span>`)
+    + `<div class="lbl-foot"><span class="lbl-code">${esc(item.barcode)}</span>`
+    + `<span class="lbl-date">${esc(printDate(item.date))}</span></div>`
     + `</div>`;
 }
 
-export const sheetHtml = (items, cfg) => items.map((i) => labelHtml(i, cfg)).join("");
+// One entry per copy: a queue of {barcode, name, price, copies} becomes the pages to print.
+export const sheetHtml = (items, cfg) => items
+  .flatMap((i) => Array.from({ length: Math.max(1, Number(i.copies) || 1) }, () => labelHtml(i, cfg)))
+  .join("");

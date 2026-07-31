@@ -1619,6 +1619,46 @@ test('label: pick a product, preview it, print the copies asked for', async ({ p
   await expect(page.locator('#label-copies')).toHaveValue('3');
 });
 
+test('label: several items queue up and print in one go', async ({ page }) => {
+  await page.goto('/?test=1');
+  await page.evaluate(() => {
+    localStorage.setItem('employeeName', 'أحمد');
+    localStorage.setItem('test-products', JSON.stringify({ '111': 'لبن', '222': 'جبنة', '333': 'زيت' }));
+  });
+  await page.reload();
+  await page.evaluate(() => { window.printed = 0; window.print = () => { window.printed++; }; });
+  await page.click('#btn-label');
+
+  const pick = async (code) => {
+    await page.fill('#barcode-input', code);
+    await page.click('#btn-lookup');
+    await expect(page.locator('#label-preview .lbl-code')).toHaveText(code);
+  };
+
+  await pick('111');
+  await page.fill('#label-copies', '2');
+  await page.click('#btn-queue-label');
+  await expect(page.locator('#label-queue li')).toHaveCount(1);
+  await expect(page.locator('#label-box')).toBeHidden();         // ready for the next scan
+  await expect(page.locator('#label-count')).toHaveText('2 ليبل');
+
+  await pick('222');
+  await page.fill('#label-price', '19.5');
+  await page.fill('#label-copies', '3');
+  await expect(page.locator('#label-count')).toHaveText('5 ليبل');  // the queue plus what is on screen
+
+  await page.click('#btn-print-label');
+  await expect(page.locator('#print-area .lbl')).toHaveCount(5);
+  expect(await page.evaluate(() => window.printed)).toBe(1);       // one job, not one per item
+  const printed = await page.locator('#print-area .lbl-code').allTextContents();
+  expect(printed).toEqual(['111', '111', '222', '222', '222']);
+  await expect(page.locator('#print-area .lbl-price').first()).toHaveText('');   // لبن had no price
+  await expect(page.locator('#print-area .lbl-price').last()).toContainText('19.5');
+
+  await page.click('#label-queue button[data-delqueue="0"]');      // a row can be pulled back out
+  await expect(page.locator('#label-count')).toHaveText('3 ليبل');
+});
+
 test('label: the admin sets the size, the paper and the logo, and the screen uses them', async ({ page }) => {
   await openAdmin(page);
   await page.fill('#cfg-label-w', '50');

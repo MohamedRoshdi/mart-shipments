@@ -123,8 +123,15 @@
           <input id="label-copies" type="number" value="1" min="1" max="200" dir="ltr" aria-label="عدد النسخ">
           <button id="copies-plus" aria-label="نسخ أكتر">+</button>
         </div>
-        <button id="btn-print-label" class="primary big">طباعة</button>
-        <button id="btn-clear-label" class="link">صنف تاني</button>
+        <button id="btn-queue-label" class="ghost big">+ ضيف الصنف ده وامسح واحد تاني</button>
+      </div>
+      <div id="label-queue-block" hidden>
+        <h2>الأصناف اللي هتتطبع</h2>
+        <ul id="label-queue"></ul>
+      </div>
+      <div class="bottombar">
+        <span id="label-count" class="count"></span>
+        <button id="btn-print-label" class="primary grow" disabled>طباعة</button>
       </div>
     </section>
 

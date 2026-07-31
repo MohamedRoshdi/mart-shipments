@@ -704,14 +704,17 @@ const printCfg = () => ({ copies: 1, ...JSON.parse(localStorage.getItem("printSe
 const savePrint = (patch) => localStorage.setItem("printSettings", JSON.stringify({ ...printCfg(), ...patch }));
 
 let labelItem = null;
+let labelQueue = [];        // {barcode, name, price, copies} — printed in one go at the end
 
 function openLabel(barcode) {
   state.mode = "label";
   state.editingId = null;
   state.items = [];
   state.currentBarcode = null;
+  labelQueue = [];
   clearFind();
   clearLabel();
+  renderQueue();
   navTo("screen-label");
   if (barcode) onBarcode(barcode).catch(() => toast("حصلت مشكلة — جرّب تاني"));
 }
@@ -733,6 +736,7 @@ function clearLabel() {
   labelItem = null;
   $("label-box").hidden = true;
   $("label-empty").hidden = false;
+  renderQueue();               // the bottom bar counts the queue even with nothing on screen
 }
 
 function showLabel(barcode, name) {
@@ -742,6 +746,7 @@ function showLabel(barcode, name) {
   $("label-price").value = "";
   $("label-copies").value = Math.max(1, printCfg().copies);
   paintLabel();
+  renderQueue();
 }
 
 // the preview IS the label: same HTML, same millimetres, so what the printer gets is on screen
@@ -752,14 +757,62 @@ function paintLabel() {
 }
 
 $("label-price").oninput = paintLabel;
-$("btn-clear-label").onclick = () => { clearLabel(); $("find-input").focus(); };
-$("copies-plus").onclick = () => { $("label-copies").value = Math.min(200, +$("label-copies").value + 1); };
-$("copies-minus").onclick = () => { $("label-copies").value = Math.max(1, +$("label-copies").value - 1); };
+// the bottom bar counts what will actually come out, so it follows the copies box
+$("label-copies").oninput = () => renderQueue();
+$("copies-plus").onclick = () => { $("label-copies").value = Math.min(200, +$("label-copies").value + 1); renderQueue(); };
+$("copies-minus").onclick = () => { $("label-copies").value = Math.max(1, +$("label-copies").value - 1); renderQueue(); };
+
+// what is on the screen right now, as a queue row
+const currentRow = () => (labelItem ? {
+  ...labelItem,
+  price: $("label-price").value.trim(),
+  copies: Math.min(200, Math.max(1, parseInt($("label-copies").value, 10) || 1)),
+} : null);
+
+// «طباعة» prints the queue plus whatever is still on the screen, so printing one label is one
+// tap and printing twenty is one tap per item plus one at the end
+const toPrint = () => {
+  const cur = currentRow();
+  return cur ? [...labelQueue, cur] : [...labelQueue];
+};
+
+$("btn-queue-label").onclick = () => {
+  const row = currentRow();
+  if (!row) return;
+  labelQueue.push(row);
+  clearLabel();
+  renderQueue();
+  $("find-input").focus();
+  toast(`اتضاف «${row.name}» — امسح الصنف اللي بعده`);   // toast writes textContent
+};
+
+function renderQueue() {
+  const rows = toPrint();
+  const labels = rows.reduce((n, r) => n + r.copies, 0);
+  $("label-queue-block").hidden = !labelQueue.length;
+  $("label-queue").innerHTML = labelQueue.map((r, i) => `<li>
+      <div class="card-main">
+        <div class="card-title">${esc(r.name)}</div>
+        <div class="meta"><span class="code">${esc(r.barcode)}</span>${r.price ? ` · ${esc(r.price)} ج` : ""}</div>
+      </div>
+      <span class="stamp">${esc(r.copies)}</span>
+      <button class="del" data-delqueue="${i}" aria-label="شيل الصنف">×</button>
+    </li>`).join("");
+  $("label-count").textContent = labels ? `${labels} ليبل` : "";
+  $("btn-print-label").disabled = !labels;
+}
+
+$("label-queue").onclick = (e) => {
+  const btn = e.target.closest("button[data-delqueue]");
+  if (!btn) return;
+  labelQueue.splice(+btn.dataset.delqueue, 1);
+  renderQueue();
+};
 
 $("btn-print-label").onclick = () => {
-  if (!labelItem) return;
-  const copies = Math.min(200, Math.max(1, parseInt($("label-copies").value, 10) || 1));
-  savePrint({ copies });
+  const rows = toPrint();
+  if (!rows.length) return;
+  savePrint({ copies: rows[rows.length - 1].copies });
   const cfg = lbl.labelCfg(window.APP_CONFIG);
   // a roll printer wants one label per page at the label's own size; an A4 sheet wants them
   // tiled on one page, which is a different @page and a different flow
@@ -767,8 +820,7 @@ $("btn-print-label").onclick = () => {
     ? "@page { size: A4; margin: 6mm; }"
     : `@page { size: ${cfg.w}mm ${cfg.h}mm; margin: 0; }`;
   document.body.classList.toggle("print-a4", cfg.sheet === "a4");
-  const item = { ...labelItem, price: $("label-price").value.trim() };
-  $("print-area").innerHTML = lbl.sheetHtml(Array.from({ length: copies }, () => item), window.APP_CONFIG);
+  $("print-area").innerHTML = lbl.sheetHtml(rows, window.APP_CONFIG);
   print();
 };
 

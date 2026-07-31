@@ -25,7 +25,7 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 5. **`db.js` is the only file that knows where data lives.** `app.js` and
    `manager.js` never touch Firestore or localStorage keys directly.
 6. **Bump `CACHE` in `sw.js` on every deploy.** Serving is cache-first, so phones
-   keep the old bundle until the cache name changes. Currently `mart-v40`.
+   keep the old bundle until the cache name changes. Currently `mart-v41`.
    The bump only works because install fetches with `new Request(u, { cache: "reload" })` —
    a plain `addAll` reads the browser's HTTP cache and copies **stale** files into the new
    cache name (caught in Chrome 2026-07-31: `mart-v34` held a `style.css` 262 bytes behind
@@ -52,7 +52,7 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 | `firestore.rules` | shape validation; the only server-side guard that exists |
 | `SETUP.md` | Arabic guide for the shop owner |
 | `products-template.csv`, `stock-template.csv`, `suppliers-template.csv` | the three import shapes: barcode+name+**unit**, barcode+name+quantity, and **code+supplier name** |
-| `tests/app.spec.js` | 67 Playwright tests, all in localStorage mode |
+| `tests/app.spec.js` | 68 Playwright tests, all in localStorage mode |
 | `scripts/*.mjs` | live checks and screenshot helpers (see below) |
 
 ## Data model
@@ -178,7 +178,18 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
 - **Nothing about a label is saved.** No collection, no draft, no audit row — the screen reads a
   product and prints. Only the copy count is remembered, in `localStorage.printSettings`, per
   phone (the same reasoning as the camera settings). The price is typed on the screen and dies
-  with it.
+  with it, and so does the print queue: leaving the screen empties it.
+- **The label is the shop's own design, and the price is the loud part** (their label software,
+  2026-07-31): logo, then the price at 8 mm with a small `LE`, then the name, the bars, the number
+  centred and the print date tucked in the corner. Every row is always in the markup — a label
+  with no logo and no price still lines up, because the rows are a fixed `grid-template-rows`.
+  `.lbl` carries a real 0.3 mm border: on A4 it is the cut line, on a roll it frames the label.
+  It sits on the very edge of the page, so a printer with an unprintable margin will clip it —
+  inset the label if that ever shows up on paper.
+- **«طباعة» prints the queue plus whatever is still on the screen.** One label stays one tap;
+  twenty items are one tap each plus one at the end. `sheetHtml` expands `copies` per row, so the
+  page count is the sum, and `#label-count` in the bottom bar is what will actually come out —
+  which is why the copies box re-renders it on every keystroke.
 - **`#label=<barcode>` is consumed once.** The manager's catalog row links to the employee app
   with that hash; `openDeepLabel()` runs from `goHome()`, drops the hash with `replaceState`
   before opening the screen, and re-checks the permission. Without dropping it, every later trip
