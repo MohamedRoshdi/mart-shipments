@@ -27,7 +27,7 @@ await page.waitForTimeout(4000);              // let the SDK connect before anyt
 
 const written = await page.evaluate(async ({ barcode, name }) => {
   const db = await import("./db.js");
-  await db.saveProductName(barcode, name, "كرتونة", 45.95, 12);
+  await db.saveProductName(barcode, name, { unit: "كرتونة", unitCode: 4, price: 45.95, factor: 12 });
   await db.saveShipment({
     name: `مورد فحص ${name}`, createdBy: "فحص آلي", branch: "فرع قويسنا",
     type: "إذن استلام", supplierCode: "9042",

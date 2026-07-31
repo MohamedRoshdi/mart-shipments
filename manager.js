@@ -2,7 +2,7 @@ import * as db from "./db.js";
 import * as auth from "./auth.js";
 import * as ex from "./expiry.js";
 import { zipBlob } from "./zip.js";
-import { sheetRows, headerMap, unitName, clean as cell } from "./sheet.js";
+import { sheetRows, requireColumns, unitName, unitCode, clean as cell } from "./sheet.js";
 
 const $ = (id) => document.getElementById(id);
 const esc = (t) => { const d = document.createElement("div"); d.textContent = t; return d.innerHTML; };
@@ -975,18 +975,21 @@ const productRow = (c, map) => (map
     barcode: cell(c[map.barcode]),
     name: cell(c[map.name]),
     unit: unitName(map.unit !== undefined ? c[map.unit] : ""),
+    unitCode: map.unit !== undefined ? unitCode(c[map.unit]) : null,
     price: map.price !== undefined ? Number(cell(c[map.price])) : NaN,
     factor: map.factor !== undefined ? Number(cell(c[map.factor])) : NaN,
   }
-  : { barcode: cell(c[0]), name: nameOf(c), unit: unitOf(c), price: NaN, factor: NaN });
+  : { barcode: cell(c[0]), name: nameOf(c), unit: unitOf(c), unitCode: null, price: NaN, factor: NaN });
 
 $("btn-import").onclick = () => $("import-file").click();
 $("import-file").onchange = async (e) => {
   const file = e.target.files[0];
   if (!file) return;
-  let all;
-  try { all = await sheetRows(file); } catch (err) { toast(err.message); e.target.value = ""; return; }
-  const map = headerMap(all[0]);
+  let all, map;
+  try {
+    all = await sheetRows(file);
+    map = requireColumns(all, ["barcode", "name"]);
+  } catch (err) { toast(err.message); e.target.value = ""; return; }
   const usable = (map ? all.slice(1) : all)
     .map(c => productRow(c, map))
     .filter(r => r.barcode && /\d/.test(r.barcode) && r.name);
@@ -995,7 +998,7 @@ $("import-file").onchange = async (e) => {
   const rows = usable.filter(r => r.unit !== null);
   let n = 0;
   try {
-    for (const r of rows) { await db.saveProductName(r.barcode, r.name, r.unit, r.price, r.factor); n++; }
+    for (const r of rows) { await db.saveProductName(r.barcode, r.name, r); n++; }
     db.logAction(identity, "استيراد أصناف", `${n} صنف${bad.length ? ` · ${bad.length} مرفوض` : ""}`);
     toast(bad.length
       ? `تم استيراد ${n} صنف · اترفض ${bad.length} لكود وحدة مش معروف (${bad.slice(0, 3).map(r => r.barcode).join("، ")})`
@@ -1015,22 +1018,28 @@ $("stock-file").onchange = async (e) => {
   if (!file) return;
   // With a header row the columns can be in any order (theirs is الرصيد first); without one the
   // quantity is the last column, so a name with a comma in it still lands whole.
-  let all;
-  try { all = await sheetRows(file); } catch (err) { toast(err.message); e.target.value = ""; return; }
-  const map = headerMap(all[0]);
+  let all, map;
+  try {
+    all = await sheetRows(file);
+    map = requireColumns(all, ["qty", "barcode", "name"]);
+  } catch (err) { toast(err.message); e.target.value = ""; return; }
   const rows = (map ? all.slice(1) : all)
     .map(c => (map
       ? { barcode: cell(c[map.barcode]), name: cell(c[map.name]),
-          qty: parseInt(cell(map.qty !== undefined ? c[map.qty] : ""), 10) }
+          qty: parseInt(cell(map.qty !== undefined ? c[map.qty] : ""), 10),
+          // the ERP's stock export carries the unit too; writeProduct merges, so it is safe to
+          // carry across — but only when the column is there, or a stock file would blank it
+          unit: unitName(map.unit !== undefined ? c[map.unit] : "") || "",
+          unitCode: map.unit !== undefined ? unitCode(c[map.unit]) : null }
       : { barcode: cell(c[0]), name: c.slice(1, -1).map(cell).join(" ").trim(),
-          qty: parseInt(cell(c[c.length - 1]), 10) }))
+          qty: parseInt(cell(c[c.length - 1]), 10), unit: "", unitCode: null }))
     .filter(r => r.barcode && /\d/.test(r.barcode) && r.name && Number.isFinite(r.qty) && r.qty >= 0);
   if (!rows.length) { toast("الملف مفيهوش صفوف صالحة — لازم: باركود، اسم، كمية"); e.target.value = ""; return; }
   if (!stockBranch) { toast("اختار الفرع الأول"); e.target.value = ""; return; }
   const branch = stockBranch;                    // a chip tapped mid-import must not move the rows
   let n = 0;
   try {
-    for (const r of rows) { await db.saveProductRow(r.barcode, r.name, r.qty, branch); n++; }
+    for (const r of rows) { await db.saveProductRow(r.barcode, r.name, r.qty, branch, r); n++; }
     db.logAction(identity, "استيراد كميات الجرد", `${n} صنف · ${branch}`);
     toast(`تم استيراد كميات ${n} صنف لـ${branch}`);
   } catch (err) {

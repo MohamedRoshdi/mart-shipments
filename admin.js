@@ -1,7 +1,7 @@
 import * as db from "./db.js";
 import * as auth from "./auth.js";
 import * as lbl from "./label.js";
-import { sheetRows } from "./sheet.js";
+import { sheetRows, requireColumns } from "./sheet.js";
 
 const $ = (id) => document.getElementById(id);
 const esc = (t) => { const d = document.createElement("div"); d.textContent = t; return d.innerHTML; };
@@ -201,13 +201,17 @@ async function shrinkImage(file) {
 
 const isCode = (s) => /^[0-9A-Za-z\-_/]{1,20}$/.test(s);
 
-function parseSupplier(line) {
-  const parts = line.split(/[,،;\t]/).map(s => s.trim()).filter(Boolean);
+// one row, already split into cells — from a typed line or from a sheet with no header row
+function supplierCells(cells) {
+  const parts = cells.map(c => String(c == null ? "" : c).trim()).filter(Boolean);
   if (!parts.length) return null;
   // only a leading cell that looks like a code is one: an Arabic first cell is part of the name
   if (parts.length >= 2 && isCode(parts[0])) return { code: parts[0], name: parts.slice(1).join(" ") };
   return { code: "", name: parts.join(" ") };
 }
+
+// the textarea: a person types «كود، اسم» by hand, and that shape must not change
+const parseSupplier = (line) => supplierCells(line.split(/[,،;\t]/));
 
 const supplierLine = (s) => (s.code ? `${s.code}، ${s.name}` : s.name);
 const suppliersTyped = () => $("cfg-suppliers").value.split("\n").map(parseSupplier).filter(Boolean);
@@ -228,17 +232,31 @@ $("btn-suppliers-file").onclick = () => $("suppliers-file").click();
 $("suppliers-file").onchange = async () => {
   const file = $("suppliers-file").files[0];
   if (!file) return;
-  let rows = [];
+  let rows = [], map = null;
   try {
     rows = await sheetRows(file);
+    // the ERP exports «كود المورد | اسم المورد»; the header is what makes that order stop mattering
+    map = requireColumns(rows, ["supplierCode", "supplierName"]);
   } catch (err) {
     console.error(err);
     toast(err.message || "مقدرناش نقرا الملف — تأكد إنه Excel أو CSV");
+    $("suppliers-file").value = "";
     return;
   }
-  const list = rows
-    .map(cells => parseSupplier(cells.join(",")))
-    .filter(s => s && !/اسم المورد|كود المورد/.test(s.name));   // drop the header row
+  const read = map
+    ? rows.slice(1).map(c => ({ code: String(c[map.supplierCode] || "").trim(),
+                               name: String(c[map.supplierName] || "").trim() }))
+    : rows.map(supplierCells);
+  // the same code twice in one file is one supplier, the later row winning — «تحديث لا تكرار»
+  const byCode = new Map();
+  const list = [];
+  for (const s of read) {
+    if (!s || !s.name) continue;
+    if (!s.code) { list.push(s); continue; }
+    if (byCode.has(s.code)) { list[byCode.get(s.code)] = s; continue; }
+    byCode.set(s.code, list.length);
+    list.push(s);
+  }
   $("suppliers-file").value = "";
   if (!list.length) { toast("الملف مفيهوش موردين"); return; }
   $("cfg-suppliers").value = list.map(supplierLine).join("\n");

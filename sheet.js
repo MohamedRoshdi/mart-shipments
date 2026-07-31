@@ -10,29 +10,78 @@
 const HEADERS = [
   ["barcode", /^(الباركود|باركود|كود الصنف|كود|الكود)$/],
   ["name", /^(اسم الصنف|الاسم|الصنف|اسم)$/],
-  ["unit", /^(الوحدة|الوحده|وحدة|وحده)$/],
+  ["unit", /^(الوحدة|الوحده|وحدة|وحده|كود الوحدة|كود الوحده)$/],
   // «الكمية في النظام» is the shipped template's heading and «الكمية في فرع قويسنا» is what the
   // catalog export writes — the file that comes out has to be the file that goes back in
   ["qty", /^(الرصيد|رصيد|المخزون|كمية النظام|الكمية|الكميه)( في .+)?$/],
   ["price", /^(اخر سعر بيع|آخر سعر بيع|سعر البيع|السعر|سعر)$/],
   // how many of the small unit are in the big one. Carried and shown, never multiplied by.
   ["factor", /^(معامل التحويل|معامل تحويل|المعامل|معامل)$/],
+  // the supplier file is its own two columns, and its «كود» is not a product's
+  ["supplierCode", /^(كود المورد|كود مورد)$/],
+  ["supplierName", /^(اسم المورد|اسم مورد|المورد|مورد)$/],
 ];
+
+// what a refusal calls the column, so the message names the heading the shop actually has to add
+const LABELS = {
+  barcode: "كود الصنف", name: "اسم الصنف", unit: "الوحدة", qty: "الرصيد",
+  price: "اخر سعر بيع", factor: "معامل التحويل",
+  supplierCode: "كود المورد", supplierName: "اسم المورد",
+};
 
 export const clean = (c) => String(c == null ? "" : c).trim().replace(/^﻿/, "");
 
-// null when the first row is data, not headings — one lucky word is not a header row
-export function headerMap(cells) {
+// every heading this row carries, by column index
+const scan = (cells) => {
   const map = {};
   (cells || []).forEach((c, i) => {
     const t = clean(c);
     for (const [key, re] of HEADERS) if (map[key] === undefined && re.test(t)) map[key] = i;
   });
-  return map.barcode !== undefined && map.name !== undefined ? map : null;
+  return map;
+};
+
+/* Two headings, not one: every file the shop exports has at least two, and one lucky word in a
+   data row must not turn the first row of products into a header and swallow it. This is what
+   tells «the file has no header, read it positionally» apart from «the file has a header and a
+   column is missing», which is refused by name instead. */
+export const looksLikeHeader = (cells) => Object.keys(scan(cells)).length >= 2;
+
+// null when the row is not the headings this importer needs — the caller then falls back
+export function headerMap(cells, need = ["barcode", "name"]) {
+  const map = scan(cells);
+  return need.every((k) => map[k] !== undefined) ? map : null;
+}
+
+// the headings the file is missing, already in Arabic, ready to put in front of the shop
+export const missingColumns = (cells, need) => {
+  const map = scan(cells);
+  return need.filter((k) => map[k] === undefined).map((k) => LABELS[k] || k);
+};
+
+export const columnNames = (need) => need.map((k) => LABELS[k] || k);
+
+/* A header row that is missing a column the import cannot do without stops the whole file, and
+   says which column. Falling through to the positional rules instead is what quietly writes the
+   wrong data under the right barcode — and nobody finds out until a shelf count disagrees. A file
+   with no headings at all is not an error: that is the old shape, and it still reads positionally,
+   which is why every sheet that used to import still does. */
+export function requireColumns(rows, need) {
+  const first = (rows || [])[0];
+  if (!looksLikeHeader(first)) return null;
+  const gone = missingColumns(first, need);
+  if (gone.length) throw new Error(
+    `الملف ناقصه عمود «${gone.join("» و«")}» — لازم يبقى فيه: ${columnNames(need).join("، ")}`);
+  return headerMap(first, need);
 }
 
 // the unit arrives as the code in the shop's system, not as a word
 export const UNIT_NAMES = { 1: "قطعة", 2: "كيلو", 3: "علبة", 4: "كرتونة", 5: "عرض" };
+
+/* The ERP's own number, kept beside the word so what it sent can be sent back unchanged. Only a
+   code the table knows comes back: a cell holding 9, or a word, has no code to keep, and storing
+   an unknown number would be storing something nothing can read. */
+export const unitCode = (v) => (UNIT_NAMES[clean(v)] ? Number(clean(v)) : null);
 
 /* "" = the sheet said nothing, null = it gave a code the table has never heard of. The two have
    to be told apart: a missing column leaves the unit alone, an unknown code is a bad row and the
@@ -121,6 +170,41 @@ async function xlsxRows(zip) {
   return first ? sheetCells(await entryText(zip[first]), shared) : [];
 }
 
+/* ---------- CSV ----------
+   Excel quotes any cell holding the separator, and «شيبسي، ٣٠ جم» is a real product name. Splitting
+   on the separator alone turns that one cell into two and shifts every column after it — which the
+   old positional readers survived only by swallowing the middle cells. Once the columns come from
+   the header row, a shifted row is a wrong import, so the fields are read properly. */
+
+// Excel writes ; on an Arabic Windows locale, , elsewhere, and the shop's own dumps use tabs
+const sepOf = (line) => [",", ";", "\t"]
+  .map((s) => [s, line.split(s).length])
+  .sort((a, b) => b[1] - a[1])[0][0];
+
+function csvRows(text) {
+  const sep = sepOf(text.split("\n", 1)[0] || "");
+  const rows = [[]];
+  let field = "", quoted = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (quoted) {
+      if (ch !== '"') { field += ch; continue; }
+      if (text[i + 1] === '"') { field += '"'; i++; continue; }   // "" inside quotes is one quote
+      quoted = false;
+      continue;
+    }
+    if (ch === '"' && !field) { quoted = true; continue; }
+    if (ch === sep) { rows[rows.length - 1].push(field); field = ""; continue; }
+    if (ch === "\n") { rows[rows.length - 1].push(field); field = ""; rows.push([]); continue; }
+    if (ch === "\r") continue;
+    field += ch;
+  }
+  rows[rows.length - 1].push(field);
+  // a file ending in a newline leaves one empty row behind
+  if (rows.length > 1 && rows[rows.length - 1].every((c) => !c)) rows.pop();
+  return rows;
+}
+
 /* Rows out of whatever the shop uploaded. Throws in Arabic when the file is not a spreadsheet at
    all — every caller used to get an empty list instead, which reads on screen as «0 صنف». */
 export async function sheetRows(file) {
@@ -137,5 +221,5 @@ export async function sheetRows(file) {
   let text = new TextDecoder("utf-8").decode(buf);
   // Excel on Arabic Windows exports windows-1256; a UTF-8 decode of that yields replacement chars
   if (text.includes("�")) text = new TextDecoder("windows-1256").decode(buf);
-  return text.split(/\r?\n/).map((l) => l.split(/[,;\t]/));
+  return csvRows(text);
 }

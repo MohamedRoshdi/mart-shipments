@@ -1676,8 +1676,9 @@ test("import: the shop's own column order, unit codes and last selling price", a
   });
   await expect(page.locator('#toast')).toContainText('تم استيراد 2 صنف');
   const products = await page.evaluate(() => JSON.parse(localStorage.getItem('test-products')));
-  expect(products['6223001234562']).toEqual({ name: 'زيت عافية', unit: 'كرتونة', price: 45.95, factor: 12 });
-  expect(products['111']).toEqual({ name: 'لحمة بلدي', unit: 'كيلو', price: 320 });
+  // the word is what the shop reads, the code is what the ERP sent and what it gets back
+  expect(products['6223001234562']).toEqual({ name: 'زيت عافية', unit: 'كرتونة', unitCode: 4, price: 45.95, factor: 12 });
+  expect(products['111']).toEqual({ name: 'لحمة بلدي', unit: 'كيلو', unitCode: 2, price: 320 });
 
   // their stock export puts الرصيد first; the header is what makes the order not matter
   await page.click('#btn-back');
@@ -1862,8 +1863,8 @@ test('import: a real .xlsx, with a numeric barcode and a shared-string one', asy
   await expect(page.locator('#toast')).toContainText('اترفض 1');     // unit code 9 is not a unit
   const rows = await page.evaluate(() => JSON.parse(localStorage.getItem('test-products')));
   // the barcode Excel stored as a number is the one that used to come back as junk
-  expect(rows['6221031492105']).toEqual({ name: 'لبن جهينة كامل الدسم', unit: 'كرتونة', price: 45.5, factor: 12 });
-  expect(rows['6221024150011']).toEqual({ name: 'جبنة بيضاء فيتا', unit: 'كيلو', price: 88 });
+  expect(rows['6221031492105']).toEqual({ name: 'لبن جهينة كامل الدسم', unit: 'كرتونة', unitCode: 4, price: 45.5, factor: 12 });
+  expect(rows['6221024150011']).toEqual({ name: 'جبنة بيضاء فيتا', unit: 'كيلو', unitCode: 2, price: 88 });
   expect(rows['6221999000019']).toBeUndefined();                     // the refused row is not saved
 
   // معامل التحويل rides to the item sheet, and a factor of 1 never shows up at all
@@ -1879,6 +1880,76 @@ test('import: a real .xlsx, with a numeric barcode and a shared-string one', asy
   await page.fill('#barcode-input', '6221024150011');
   await page.click('#btn-lookup');
   await expect(page.locator('#item-factor')).toBeHidden();
+});
+
+// The dangerous case: a header row that is REAL but incomplete used to fall through to the
+// positional rules and import the wrong column under the right barcode, silently.
+test('import: a header row missing a column stops the file and names the column', async ({ page }) => {
+  await openManagerPage(page);
+  await page.click('#btn-products');
+  await page.setInputFiles('#import-file', {
+    name: 'items.csv',
+    mimeType: 'text/csv',
+    buffer: Buffer.from('كود الصنف,الوحدة,معامل التحويل\n6223001234562,4,12\n', 'utf8'),
+  });
+  await expect(page.locator('#toast')).toContainText('ناقصه عمود «اسم الصنف»');
+  const products = await page.evaluate(() => JSON.parse(localStorage.getItem('test-products') || '{}'));
+  expect(products['6223001234562']).toBeUndefined();                 // nothing at all was written
+
+  // the stock sheet needs its quantity column by name, and says so
+  await page.click('#btn-back');
+  await page.click('#stock-branch button');
+  await page.setInputFiles('#stock-file', {
+    name: 'stock.csv',
+    mimeType: 'text/csv',
+    buffer: Buffer.from('كود الصنف,اسم الصنف\n111,لحمة بلدي\n', 'utf8'),
+  });
+  await expect(page.locator('#toast')).toContainText('ناقصه عمود «الرصيد»');
+});
+
+// A file with no header row at all is the OLD shape and must keep importing — this is what stops
+// the validation above from breaking every sheet the shop already has.
+test('import: a sheet with no header row still reads positionally', async ({ page }) => {
+  await openManagerPage(page);
+  await page.setInputFiles('#import-file', {
+    name: 'items.csv',
+    mimeType: 'text/csv',
+    buffer: Buffer.from('6223001234562,زيت عافية,كرتونة\n', 'utf8'),
+  });
+  await expect(page.locator('#toast')).toContainText('تم استيراد 1 صنف');
+  const products = await page.evaluate(() => JSON.parse(localStorage.getItem('test-products')));
+  expect(products['6223001234562']).toEqual({ name: 'زيت عافية', unit: 'كرتونة' });
+});
+
+// Excel quotes any cell holding the separator. Splitting on the separator alone shifted every
+// column after it — invisible while the readers swallowed the middle cells, wrong once they do not.
+test('import: a quoted field keeps its comma and its column', async ({ page }) => {
+  await openManagerPage(page);
+  await page.setInputFiles('#import-file', {
+    name: 'items.csv',
+    mimeType: 'text/csv',
+    buffer: Buffer.from(
+      'كود الصنف,الوحدة,اسم الصنف,اخر سعر بيع\n'
+      + '6223001234562,3,"شيبسي، ٣٠ جم",7.5\n', 'utf8'),
+  });
+  await expect(page.locator('#toast')).toContainText('تم استيراد 1 صنف');
+  const products = await page.evaluate(() => JSON.parse(localStorage.getItem('test-products')));
+  expect(products['6223001234562'])
+    .toEqual({ name: 'شيبسي، ٣٠ جم', unit: 'علبة', unitCode: 3, price: 7.5 });
+});
+
+test('suppliers: the file is read by its headings, in whatever order they come', async ({ page }) => {
+  await openAdmin(page);
+  // the ERP writes كود المورد first; this file writes it second, and both have to land the same
+  await page.setInputFiles('#suppliers-file', {
+    name: 'suppliers.csv',
+    mimeType: 'text/csv',
+    buffer: Buffer.from(
+      'اسم المورد,كود المورد\nجهينة,1042\n"المراعي، مصر",1043\nجهينة الجديدة,1042\n', 'utf8'),
+  });
+  await expect(page.locator('#toast')).toContainText('اتقرأ 2 مورد');   // 1042 twice is one supplier
+  const typed = await page.inputValue('#cfg-suppliers');
+  expect(typed).toBe('1042، جهينة الجديدة\n1043، المراعي، مصر');
 });
 
 test('تم تحميلها: the export marks it, and somebody else has to confirm a second load', async ({ page }) => {

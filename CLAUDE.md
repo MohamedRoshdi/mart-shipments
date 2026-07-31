@@ -25,7 +25,7 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 5. **`db.js` is the only file that knows where data lives.** `app.js` and
    `manager.js` never touch Firestore or localStorage keys directly.
 6. **Bump `CACHE` in `sw.js` on every deploy.** Serving is cache-first, so phones
-   keep the old bundle until the cache name changes. Currently `mart-v47`.
+   keep the old bundle until the cache name changes. Currently `mart-v48`.
    The bump only works because install fetches with `new Request(u, { cache: "reload" })` —
    a plain `addAll` reads the browser's HTTP cache and copies **stale** files into the new
    cache name (caught in Chrome 2026-07-31: `mart-v34` held a `style.css` 262 bytes behind
@@ -45,14 +45,14 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 | `label.js` | the whole of ليبل الرف that is not a screen: EAN-13 + Code 128 encoding, the barcode SVG, the label's HTML, and the settings guard. No db, no DOM, no session — that is what makes the price (or any other field) a one-line change later |
 | `db.js` | data layer; `?test=1` switches the whole app to localStorage |
 | `zip.js` | store-only ZIP writer, ~80 lines, no dependency; used by the folder export |
-| `sheet.js` | everything about reading a spreadsheet: `sheetRows` (**a real `.xlsx`** — zip walk + `DecompressionStream` — or CSV, and the only place that knows Excel writes Arabic as windows-1256), `headerMap` (columns by Arabic heading, so the shop's own export order works), `unitName` (unit **code** → word, `null` for a code the table does not know). Used by the catalog/stock import (manager) and the supplier import (admin) |
+| `sheet.js` | everything about reading a spreadsheet: `sheetRows` (**a real `.xlsx`** — zip walk + `DecompressionStream` — or CSV read field by field, quotes and all, and the only place that knows Excel writes Arabic as windows-1256), `headerMap` (columns by Arabic heading, so the shop's own export order works), **`requireColumns`** (the guard: no headings → positional, headings with a column missing → **throws in Arabic naming it**), `unitName` (unit **code** → word, `null` for a code the table does not know) and `unitCode` (the number itself, kept only when it is 1–5). Used by the catalog/stock import (manager) and the supplier import (admin) |
 | `style.css` | one stylesheet for all three pages |
 | `sw.js`, `manifest.json` | **one** installable PWA, on the main URL. `manager.html` and `admin.html` carry no manifest: the PIN routes people to their screen (`auth.landingPage`), and the home screen links to the other two. Dropped 2026-07-31 on the owner's call — a phone with three near-identical icons was the confusing part. |
 | `firebase-config.js` | Firebase keys **plus** `APP_CONFIG`: PINs (incl. `adminPin`), branches, shipment types, suppliers, label settings |
 | `firestore.rules` | shape validation; the only server-side guard that exists |
 | `SETUP.md` | Arabic guide for the shop owner |
-| `products-template.csv`, `stock-template.csv`, `suppliers-template.csv` | the three import shapes: barcode+name+**unit**, barcode+name+quantity, and **code+supplier name** |
-| `tests/app.spec.js` | 77 Playwright tests, all in localStorage mode |
+| `products-template.csv`, `stock-template.csv`, `suppliers-template.csv` | the three import shapes, **each one exactly what the ERP exports**: «كود الصنف، الوحدة، اسم الصنف، معامل التحويل»، «الرصيد، كود الصنف، الوحدة، اسم الصنف»، «كود المورد، اسم المورد» |
+| `tests/app.spec.js` | 81 Playwright tests, all in localStorage mode |
 | `scripts/*.mjs` | live checks and screenshot helpers (see below) |
 
 ## Data model
@@ -75,7 +75,9 @@ not a kind of shipment.
 with its last one — nothing to create, nothing to clean up, and no empty months piling up.
 Re-scanning the same barcode with the same date grows that row instead of adding a second.
 
-`products/{barcode}` — `{ name, unit?, price?, factor?, stock?: {branch: qty}, qty? }`. `factor` is
+`products/{barcode}` — `{ name, unit?, unitCode?, price?, factor?, stock?: {branch: qty}, qty? }`. `unitCode`
+is the ERP's own unit number kept beside the word (**1–5 only**, so an unknown code is never stored):
+nothing displays it, it exists so a future export can send back exactly what the ERP sent. `factor` is
 معامل التحويل from the catalog sheet: **shown on the item sheet and nowhere else, never multiplied
 by anything**, and only stored when it is greater than 1 (1 means no conversion, which is most of a
 10k catalog — not worth a key on every doc). `unit` is the unit
@@ -129,7 +131,8 @@ Rules in force (all live-tested):
   its own cleanup) once the write quota had reset, and `scripts/live-expiry-server.mjs` shows the
   server holding only the shop's own months.
 - `products`: create/update/delete open, `name` 1–100 chars, barcode ≤ 32, optional
-  `qty`, `price` and `factor` numbers ≥ 0, optional `stock` a map of ≤ 10 branches (rules cannot
+  `qty`, `price` and `factor` numbers ≥ 0, optional `unitCode` an int 1–5,
+  optional `stock` a map of ≤ 10 branches (rules cannot
   iterate a map, so the per-branch values are only guarded client-side).
 
 `createdAt` is `Date.now()` on purpose — `serverTimestamp()` reads back null in the
@@ -222,13 +225,30 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   does. The unit arrives as a **code**, not a word (`unitName`: 1 قطعة، 2 كيلو، 3 علبة، 4 كرتونة،
   5 عرض); a non-numeric cell is taken as the word it already is. `معامل التحويل` is ignored on
   purpose — nothing in the app multiplies units.
+  **Three cases, not two, and `requireColumns` is where they are told apart.** `looksLikeHeader`
+  needs **two** known headings before it calls a row a header — one lucky word must not swallow the
+  first row of products. No headings → positional, exactly as before. Headings **with a required
+  column missing** → the file is refused whole, naming the column («الملف ناقصه عمود «اسم الصنف»»),
+  because falling through to positions there writes the wrong column under the right barcode and
+  nobody finds out until a shelf count disagrees. Required: catalog = كود الصنف + اسم الصنف، stock
+  = الرصيد + كود الصنف + اسم الصنف، suppliers = كود المورد + اسم المورد.
+  **The supplier file is header-driven too** (`admin.js`), so the ERP's column order stops mattering
+  there as well; `parseSupplier` survives only for the textarea, where a person types «كود، اسم» by
+  hand. The same code twice in one file is one supplier, the later row winning.
   **The headings are matched in Arabic only, and the quantity one has to allow a suffix**: the
-  shipped `stock-template.csv` says «الكمية في النظام» and the catalog export writes «الكمية في
-  فرع قويسنا», so the pattern ends in `( في .+)?`. Measured 2026-07-31: without it `headerMap`
+  catalog export writes «الكمية في فرع قويسنا», so the pattern ends in `( في .+)?`. (The shipped
+  `stock-template.csv` said «الكمية في النظام» until the templates were re-cut to the ERP's own
+  shapes; the pattern still carries both.) Measured 2026-07-31: without it `headerMap`
   matched barcode + name, found no quantity column, and the shop's own template imported **zero
   rows** — the tests missed it because the fixtures use English headings and fall through to the
   positional path. `tests/fixtures/catalog.csv` deliberately keeps a comma inside a name, which
   only the positional path can carry, so adding English headings here would break it.
+- **CSV is read field by field, not split.** Excel quotes any cell holding the separator, and
+  «شيبسي، ٣٠ جم» is a real product name — `text.split(/[,;\t]/)` turned that one cell into two and
+  shifted every column after it. It was invisible while the positional readers swallowed the middle
+  cells; once the columns come from the header row it is a wrong import, so `csvRows` handles quoted
+  fields, `""` inside them, and separators or newlines inside quotes. The separator is sniffed from
+  the first line (`,` `;` `\t` — Excel on Arabic Windows writes `;`).
 - **An `.xlsx` is read here, without a dependency.** `sheetRows` sniffs `PK\x03\x04`, walks the zip
   central directory by hand and inflates each entry with `DecompressionStream("deflate-raw")` — the
   browser already owns the hard part. Only `xl/sharedStrings.xml` and the first `xl/worksheets/sheetN.xml`
@@ -401,7 +421,7 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
 ## Commands
 
 ```bash
-npx playwright test                 # 77 tests, localStorage mode, ~40s
+npx playwright test                 # 81 tests, localStorage mode, ~40s
 npx playwright test -g "catalog"    # one group
 python3 -m http.server 8080         # serve locally, then open /?test=1
 node scripts/make-icons.mjs         # regenerate the PWA icons

@@ -373,10 +373,13 @@ export async function deleteMany(collection, ids) {
 // merge, never replace: renaming a product must not drop the stocktake quantity next to it
 // The unit is only written when the sheet gave one. Renaming from the catalog screen must not
 // wipe a unit an import set, and writeProduct merges key by key.
-export async function saveProductName(barcode, name, unit, price, factor) {
+export async function saveProductName(barcode, name, extra = {}) {
+  const { unit, unitCode, price, factor } = extra;
   return writeProduct(barcode, {
     name,
     ...(unit ? { unit } : {}),
+    // the ERP's own unit number, kept beside the word so what it sent can be sent back
+    ...(Number.isFinite(unitCode) ? { unitCode } : {}),
     // the shop's own export carries the last selling price; a sheet without it must not wipe one
     ...(Number.isFinite(price) && price >= 0 ? { price } : {}),
     // معامل التحويل: shown next to the unit, never multiplied by anything. 1 means "no
@@ -385,11 +388,18 @@ export async function saveProductName(barcode, name, unit, price, factor) {
   });
 }
 
-// One branch's sheet: barcode, name, quantity. The write is a merge on the branch key, so
-// importing شبين الكوم never touches what قويسنا imported.
-export async function saveProductRow(barcode, name, qty, branch) {
-  if (!Number.isFinite(qty) || !branch) return writeProduct(barcode, { name });
-  return writeProduct(barcode, { name, stock: { [branch]: qty } });
+// One branch's sheet: barcode, name, quantity — and the unit when that sheet carried one, which
+// the ERP's stock export does. The write is a merge on the branch key, so importing شبين الكوم
+// never touches what قويسنا imported.
+export async function saveProductRow(barcode, name, qty, branch, extra = {}) {
+  const { unit, unitCode } = extra;
+  const patch = {
+    name,
+    ...(unit ? { unit } : {}),
+    ...(Number.isFinite(unitCode) ? { unitCode } : {}),
+  };
+  if (!Number.isFinite(qty) || !branch) return writeProduct(barcode, patch);
+  return writeProduct(barcode, { ...patch, stock: { [branch]: qty } });
 }
 
 async function writeProduct(barcode, patch) {

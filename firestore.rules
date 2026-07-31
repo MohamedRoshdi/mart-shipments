@@ -128,9 +128,14 @@ service cloud.firestore {
       // shop-wide import, still read as the fallback. unit is the third column of the catalog
       // sheet (كرتونة / كيلو / علبة) — shown next to the name, never counted.
       allow create, update: if barcode.size() <= 32
-        && request.resource.data.keys().hasOnly(['name', 'qty', 'stock', 'unit', 'price', 'factor'])
+        && request.resource.data.keys().hasOnly(['name', 'qty', 'stock', 'unit', 'unitCode', 'price', 'factor'])
         && (!('price' in request.resource.data)
             || (request.resource.data.price is number && request.resource.data.price >= 0))
+        // the ERP's own unit number, kept beside the word. Only a code the app knows is stored,
+        // so anything outside 1..5 is a file the import already refused.
+        && (!('unitCode' in request.resource.data)
+            || (request.resource.data.unitCode is int
+                && request.resource.data.unitCode >= 1 && request.resource.data.unitCode <= 5))
         // معامل التحويل: how many of the small unit are in the big one, carried for display only
         && (!('factor' in request.resource.data)
             || (request.resource.data.factor is number && request.resource.data.factor >= 0))
