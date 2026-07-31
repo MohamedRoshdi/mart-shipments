@@ -2080,7 +2080,8 @@ test('files: a bridge that fails to write still hands the person their file', as
       return f.saveText('اذن استلام', 'المراعي.txt', '111\t3');
     }),
   ]);
-  expect(r.how).toBe('download');                   // the toast stays honest about what happened
+  expect(r.how).toBe('download');
+  expect(r.fell).toBe(true);   // and the caller can warn that the folder is broken                   // the toast stays honest about what happened
   expect(download.suggestedFilename()).toBe('المراعي.txt');
 });
 

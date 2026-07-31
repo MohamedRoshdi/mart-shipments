@@ -103,6 +103,8 @@ export async function forgetFolder() {
    be downstream of it today, and that is not a property worth relying on. */
 export const safeSegment = (s) => {
   const t = String(s || "").replace(/[\\/:*?"<>|]/g, "-").trim().replace(/[. ]+$/, "");
+  // CON/NUL/COM1… are device names on Windows, and writing to one is not writing a file
+  if (/^(con|prn|aux|nul|com\d|lpt\d)(\..*)?$/i.test(t)) return "ملف";
   return !t || t === "." || t === ".." ? "ملف" : t;
 };
 
@@ -162,6 +164,7 @@ export async function readText(folder, name) {
    person needs to know which one happened. */
 export async function saveText(folder, name, text) {
   const safe = safeSegment(name);
+  let fell = false;   // a folder IS set and the write into it failed — the toast must not stay green
   if (bridge()) {
     try {
       await bridge().saveText(folder, safe, text);
@@ -172,9 +175,10 @@ export async function saveText(folder, name, text) {
          was unhandled — no toast, no file — on a shipment ALREADY marked «تم تحميلها», which
          is the one order of events the TXT flow cannot afford. */
       console.error(e);
+      fell = true;
     }
   }
-  const root = await usableRoot(false);
+  const root = fell ? null : await usableRoot(false);
   if (root) {
     try {
       const dir = await folderHandle(root, folder, true);
@@ -186,10 +190,11 @@ export async function saveText(folder, name, text) {
     } catch (e) {
       // a disk that is full or a folder that vanished must still hand the person their file
       console.error(e);
+      fell = true;
     }
   }
   downloadBlob(safe, new Blob([text], { type: "text/plain;charset=utf-8" }));
-  return { how: "download", path: safe };
+  return { how: "download", path: safe, fell };
 }
 
 /** The download that has always happened. Kept here so there is one copy of it. */

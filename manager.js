@@ -705,7 +705,10 @@ async function writeTxt(folder, row) {
   const taken = await listFolder(folder);
   const name = uniqueName(safeName(row.name), ".txt", taken, row.permitNo || stampOf(row.createdAt));
   const r = await saveText(folder, name, shipmentText(row));
-  toast(r.how === "disk" ? `اتحفظ في ${r.path}` : "تم تحميل ملف TXT", "ok");
+  // fell = a folder IS set and the write into it failed: the file became a download instead,
+  // and a green «تم التحميل» would hide that the folder is broken
+  if (r.fell) toast("مقدرناش نكتب في المجلد — الملف اتحمّل بدل ما يتحفظ فيه", "warn");
+  else toast(r.how === "disk" ? `اتحفظ في ${r.path}` : "تم تحميل ملف TXT", "ok");
 }
 
 const downloadShipmentTxt = (s) => writeTxt(txtFolder(s.type), s);
