@@ -534,6 +534,56 @@ input[type=range] { flex: 1; inline-size: 100%; accent-color: var(--amber); bloc
 #cam-list { display: grid; gap: 8px; }
 #cam-list button { text-align: start; }
 
+/* ---------- ليبل الرف ---------- */
+/* The label is sized in millimetres, on screen and on paper alike: the preview is the same
+   markup the printer gets, so what the shop sees is what comes out. Everything inside is in mm
+   too, so changing the size in the settings scales the whole thing instead of breaking it. */
+.lbl {
+  display: grid;
+  grid-template-rows: auto auto 1fr auto auto;
+  align-items: center;
+  justify-items: center;
+  gap: .5mm;
+  padding: 1.5mm 2mm;
+  background: #fff;
+  color: #000;
+  text-align: center;
+  overflow: hidden;
+  break-inside: avoid;
+}
+.lbl-logo { max-block-size: 7mm; max-inline-size: 70%; object-fit: contain; }
+.lbl-name { font-size: 3.4mm; font-weight: 700; line-height: 1.2; overflow: hidden; }
+.lbl-bars { inline-size: 100%; block-size: 100%; min-block-size: 7mm; display: flex; align-items: center; }
+.lbl-svg { inline-size: 100%; block-size: 100%; }
+.lbl-plain { font-family: var(--mono); font-size: 4mm; }   /* a code no symbology can carry */
+.lbl-code { font-family: var(--mono); font-size: 3.2mm; direction: ltr; }
+.lbl-price { font-size: 5.5mm; font-weight: 800; direction: ltr; }
+.label-preview { display: flex; justify-content: center; }
+.label-preview .lbl { box-shadow: var(--sh); border-radius: 2mm; }
+
+/* what the printer gets: hidden on screen, and the only thing on the page while printing */
+#print-area { display: none; }
+@media print {
+  body > *:not(#print-area) { display: none !important; }
+  #print-area { display: block; }
+  /* a roll printer: one label, one page. An A4 sheet: as many as fit, flowing across it. */
+  body:not(.print-a4) .lbl + .lbl { break-before: page; }
+  body.print-a4 #print-area { display: flex; flex-wrap: wrap; align-content: flex-start; }
+}
+
+/* the print link on a catalog row — an <a>, so it is not swept up by the button rules */
+a.lbl-link {
+  padding: 10px 12px;
+  border-radius: var(--r-sm);
+  background: #e6ebef;
+  color: var(--ink);
+  font-size: .88rem;
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.logo-preview img { max-block-size: 60px; max-inline-size: 60%; object-fit: contain; }
+
 /* ---------- toast ---------- */
 #toast {
   position: fixed;

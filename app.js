@@ -1,6 +1,7 @@
 import * as db from "./db.js";
 import * as auth from "./auth.js";
 import * as ex from "./expiry.js";
+import * as lbl from "./label.js";
 
 const $ = (id) => document.getElementById(id);
 const esc = (t) => { const d = document.createElement("div"); d.textContent = t; return d.innerHTML; };
@@ -24,11 +25,12 @@ const TITLES = {
   "screen-new": "شحنة جديدة",
   "screen-expiry": "الصلاحيات",
   "screen-month": "الصلاحيات",
+  "screen-label": "ليبل الرف",
   "screen-cam": "إعدادات الكاميرا",
 };
 
 // the one scanner block lives inside whichever of these screens is open
-const SLOTS = { "screen-new": "slot-new", "screen-expiry": "slot-expiry" };
+const SLOTS = { "screen-new": "slot-new", "screen-expiry": "slot-expiry", "screen-label": "slot-label" };
 
 const types = () => window.APP_CONFIG.shipmentTypes;
 
@@ -36,7 +38,8 @@ const state = {
   items: [], currentBarcode: null, currentName: "", currentSys: null, editingId: null,
   mine: [], myCounts: [],
   // "ship" = a delivery being received, "count" = a stocktake (جرد) against the system quantity,
-  // "expiry" = recording an expiry date (الصلاحيات), one saved row per product and date
+  // "expiry" = recording an expiry date (الصلاحيات), one saved row per product and date,
+  // "label" = printing a shelf label, which saves nothing at all
   mode: "ship",
   expRows: [], monthKey: "", expEdits: new Map(),
   branch: myBranch(), type: types()[0],
@@ -44,6 +47,7 @@ const state = {
 
 const counting = () => state.mode === "count";
 const expiring = () => state.mode === "expiry";
+const labeling = () => state.mode === "label";
 
 /* ---------- navigation: one screen at a time, phone back button works ---------- */
 
@@ -55,7 +59,7 @@ function render(id) {
   $("scan-block").hidden = !slot;
   $("screen-title").textContent = (id === "screen-new" && counting()) ? "جرد" : (TITLES[id] || "شحنات المحل");
   $("btn-back").hidden = id === "screen-home" || id === "screen-login" || (id === "screen-name" && !myName());
-  $("btn-cam").hidden = !(id === "screen-home" || id === "screen-new" || id === "screen-expiry");
+  $("btn-cam").hidden = !(id === "screen-home" || id === "screen-new" || id === "screen-expiry" || id === "screen-label");
   $("who").hidden = !myName() || id !== "screen-home";
   if (myName()) $("who").textContent = `${myName()} · ${myBranch()}`;
   if (id === "screen-home") renderHomeLinks();
@@ -84,6 +88,7 @@ async function goHome() {
       ${canDo("edit") ? `<button class="ghost" data-edit="${i}">تعديل</button>` : ""}
     </li>`).join("") || `<li class="empty">لسه مفيش شحنات — ابدأ بـ «شحنة جديدة»</li>`;
   if (canDo("count")) await renderMyCounts();
+  openDeepLabel();
 }
 
 // the difference a stocktake found: counted minus what the system says
@@ -117,6 +122,7 @@ function renderHomeLinks() {
   $("btn-new").hidden = !canDo("create");
   $("btn-count").hidden = !canDo("count");
   $("btn-expiry").hidden = !canDo("expiry");
+  $("btn-label").hidden = !canDo("label");
   $("counts-block").hidden = !canDo("count");
   $("who").disabled = !!s;                 // a signed-in user changes their name from the admin page
 }
@@ -375,6 +381,7 @@ const WARN = {
   ship: "الباركود ده مش موجود في ملف الأصناف، والصنف مش هيتسجّل في الشحنة.",
   count: "الباركود ده مش موجود في ملف الأصناف، والصنف مش هيتسجّل في الجرد.",
   expiry: "الباركود ده مش موجود في ملف الأصناف، والصنف مش هيتسجّل في الصلاحيات.",
+  label: "الباركود ده مش موجود في ملف الأصناف، ومفيش اسم نطبعه على الليبل.",
 };
 
 async function onBarcode(code) {
@@ -385,6 +392,8 @@ async function onBarcode(code) {
   state.currentSys = db.stockFor(p, state.branch);
   state.currentUnit = (p && p.unit) || "";     // information only: it is never counted or summed
   const known = state.currentName !== "";
+  // a label needs a name and nothing else: no quantity, no sheet, straight to the preview
+  if (labeling() && known) { clearFind(); showLabel(code, state.currentName); return; }
   $("item-barcode").textContent = code;
   $("item-name").textContent = known ? state.currentName : "صنف غير مسجّل في ملف الأصناف";
   $("item-name").classList.toggle("unknown", !known);
@@ -677,6 +686,81 @@ $("btn-save-month").onclick = async () => {
   }
   await loadExpiry();
   paintMonth();          // a row whose date moved is now in another month, and may empty this one
+};
+
+/* ---------- ليبل الرف: pick a product, print it. Nothing is saved. ---------- */
+
+// per phone, like the camera: one shop phone feeds the roll printer, another the A4 sheet
+const printCfg = () => ({ copies: 1, ...JSON.parse(localStorage.getItem("printSettings") || "{}") });
+const savePrint = (patch) => localStorage.setItem("printSettings", JSON.stringify({ ...printCfg(), ...patch }));
+
+let labelItem = null;
+
+function openLabel(barcode) {
+  state.mode = "label";
+  state.editingId = null;
+  state.items = [];
+  state.currentBarcode = null;
+  clearFind();
+  clearLabel();
+  navTo("screen-label");
+  if (barcode) onBarcode(barcode).catch(() => toast("حصلت مشكلة — جرّب تاني"));
+}
+
+$("btn-label").onclick = () => openLabel();
+
+// #label=<barcode> is the link the manager's catalog row points at. It is read from goHome, so
+// it works whether the app booted straight into the home screen or asked for a name first, and
+// it is consumed once: the hash goes before the screen opens, otherwise every later trip home
+// would jump back to the label.
+function openDeepLabel() {
+  const deep = location.hash.match(/^#label=(.+)$/);
+  if (!deep) return;
+  history.replaceState(history.state, "", location.pathname + location.search);
+  if (canDo("label")) openLabel(decodeURIComponent(deep[1]));
+}
+
+function clearLabel() {
+  labelItem = null;
+  $("label-box").hidden = true;
+  $("label-empty").hidden = false;
+}
+
+function showLabel(barcode, name) {
+  labelItem = { barcode, name };
+  $("label-empty").hidden = true;
+  $("label-box").hidden = false;
+  $("label-price").value = "";
+  $("label-copies").value = Math.max(1, printCfg().copies);
+  paintLabel();
+}
+
+// the preview IS the label: same HTML, same millimetres, so what the printer gets is on screen
+function paintLabel() {
+  if (!labelItem) return;
+  $("label-preview").innerHTML = lbl.labelHtml(
+    { ...labelItem, price: $("label-price").value.trim() }, window.APP_CONFIG);
+}
+
+$("label-price").oninput = paintLabel;
+$("btn-clear-label").onclick = () => { clearLabel(); $("find-input").focus(); };
+$("copies-plus").onclick = () => { $("label-copies").value = Math.min(200, +$("label-copies").value + 1); };
+$("copies-minus").onclick = () => { $("label-copies").value = Math.max(1, +$("label-copies").value - 1); };
+
+$("btn-print-label").onclick = () => {
+  if (!labelItem) return;
+  const copies = Math.min(200, Math.max(1, parseInt($("label-copies").value, 10) || 1));
+  savePrint({ copies });
+  const cfg = lbl.labelCfg(window.APP_CONFIG);
+  // a roll printer wants one label per page at the label's own size; an A4 sheet wants them
+  // tiled on one page, which is a different @page and a different flow
+  $("print-size").textContent = cfg.sheet === "a4"
+    ? "@page { size: A4; margin: 6mm; }"
+    : `@page { size: ${cfg.w}mm ${cfg.h}mm; margin: 0; }`;
+  document.body.classList.toggle("print-a4", cfg.sheet === "a4");
+  const item = { ...labelItem, price: $("label-price").value.trim() };
+  $("print-area").innerHTML = lbl.sheetHtml(Array.from({ length: copies }, () => item), window.APP_CONFIG);
+  print();
 };
 
 /* --- adding by name: the barcode field stays numeric, the search is its own box. It lives
@@ -983,13 +1067,14 @@ cfgReady = (async () => {
   }
   if ((s || !usersExist) && myName()) {
     history.replaceState({ screen: "screen-home" }, "");
-    goHome();
-  } else if (usersExist) {                      // users configured → the PIN decides who you are
+    await goHome();
+  } else if (usersExist) {                    // users configured → the PIN decides who you are
     history.replaceState({ screen: "screen-login" }, "");
     render("screen-login");
   } else {
     history.replaceState({ screen: "screen-name" }, "");
     render("screen-name");
+    openDeepLabel();     // printing a label needs no employee name — and nothing guards this path
   }
 })();
 

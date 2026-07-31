@@ -733,6 +733,11 @@ function stockLine(p) {
   return parts.length ? ` · في النظام: ${esc(parts.join(" · "))}` : "";
 }
 
+// the printing screen lives in the employee app; the link keeps ?test=1 and names the product,
+// and it only shows for someone who may open that screen at all
+const canLabel = () => canDo("label") && (!auth.session() || auth.session().perms.includes("emp"));
+const labelHref = (barcode) => `${auth.withQuery("index.html")}#label=${encodeURIComponent(barcode)}`;
+
 function renderProducts() {
   const found = products;
   const page = found.slice(0, PAGE);
@@ -745,6 +750,7 @@ function renderProducts() {
         <input class="product-name" type="text" maxlength="100" data-barcode="${escAttr(p.barcode)}" value="${escAttr(edits.get(p.barcode) ?? p.name)}">
         <div class="meta"><span class="code">${esc(p.barcode)}</span>${p.unit ? ` · ${esc(p.unit)}` : ""}${stockLine(p)}</div>
       </div>
+      ${canLabel() ? `<a class="lbl-link" href="${escAttr(labelHref(p.barcode))}">ليبل</a>` : ""}
       <button class="del" data-delproduct="${escAttr(p.barcode)}" aria-label="حذف الصنف">×</button>
     </li>`).join("") || `<li class="empty">${searching ? "مفيش نتيجة — جرّب أي جزء من الاسم أو الباركود" : "مفيش أصناف — استورد ملف الأصناف الأول"}</li>`;
   updateDirty();

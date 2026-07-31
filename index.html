@@ -7,6 +7,9 @@
   <title>شحنات المحل</title>
   <link rel="stylesheet" href="style.css">
   <link rel="manifest" href="manifest.json">
+  <!-- @page cannot be written from a style attribute, so the label size the shop typed
+       gets its own rule, filled in right before printing -->
+  <style id="print-size"></style>
 </head>
 <body>
   <header class="appbar">
@@ -46,6 +49,10 @@
         <button id="btn-expiry" class="action" hidden>
           <span class="action-title">الصلاحيات</span>
           <span class="action-sub">أصناف قرّبت تنتهي، مرتّبة بالشهر</span>
+        </button>
+        <button id="btn-label" class="action" hidden>
+          <span class="action-title">ليبل الرف</span>
+          <span class="action-sub">اطبع ليبل الصنف بالباركود</span>
         </button>
       </div>
       <div id="home-links" class="row-actions" hidden>
@@ -100,6 +107,24 @@
       <div class="bottombar">
         <span id="month-dirty" class="count"></span>
         <button id="btn-save-month" class="primary grow" disabled>حفظ التعديلات</button>
+      </div>
+    </section>
+
+    <section id="screen-label" hidden>
+      <div id="slot-label"></div>
+      <p id="label-empty" class="meta">امسح باركود الصنف، أو اكتبه، أو دوّر عليه بالاسم — والليبل هيتجهّز على طول.</p>
+      <div id="label-box" hidden>
+        <div id="label-preview" class="label-preview"></div>
+        <h2>السعر (اختياري)</h2>
+        <input id="label-price" type="text" inputmode="decimal" maxlength="12" dir="ltr" placeholder="مثلاً 45.95">
+        <h2>عدد النسخ</h2>
+        <div class="qty-row">
+          <button id="copies-minus" aria-label="نسخ أقل">−</button>
+          <input id="label-copies" type="number" value="1" min="1" max="200" dir="ltr" aria-label="عدد النسخ">
+          <button id="copies-plus" aria-label="نسخ أكتر">+</button>
+        </div>
+        <button id="btn-print-label" class="primary big">طباعة</button>
+        <button id="btn-clear-label" class="link">صنف تاني</button>
       </div>
     </section>
 
@@ -183,6 +208,8 @@
   </div>
 
   <div id="toast"></div>
+  <!-- what the printer gets, and the only thing on the page while printing -->
+  <div id="print-area"></div>
   <script src="firebase-config.js"></script>
   <script src="vendor/html5-qrcode.min.js"></script>
   <script type="module" src="app.js"></script>

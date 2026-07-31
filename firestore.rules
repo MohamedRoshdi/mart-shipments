@@ -80,7 +80,14 @@ service cloud.firestore {
     match /config/{doc} {
       allow read: if true;
       allow write: if doc == 'app'
-        && request.resource.data.keys().hasOnly(['managerPin', 'adminPin', 'branches', 'shipmentTypes', 'users', 'suppliers'])
+        && request.resource.data.keys().hasOnly(['managerPin', 'adminPin', 'branches', 'shipmentTypes', 'users', 'suppliers', 'label'])
+        // label = the shelf-label size, the paper and the shop logo as a data URL. The logo is
+        // capped because every page reads this doc at boot.
+        && (!('label' in request.resource.data)
+            || (request.resource.data.label is map
+                && request.resource.data.label.size() <= 6
+                && request.resource.data.label.get('logo', '') is string
+                && request.resource.data.label.get('logo', '').size() <= 200000))
         && (!('users' in request.resource.data)
             || (request.resource.data.users is list && request.resource.data.users.size() <= 40))
         // suppliers is the shop's list of vendor names, offered as the shipment name

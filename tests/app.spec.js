@@ -1435,3 +1435,185 @@ test('manager: the expiry tab groups by month, exports Excel and deletes a row',
   await page.click('#btn-back');
   await expect(page.locator('#all-months li').nth(0)).toContainText('1 صنف · 5 قطعة');
 });
+
+/* ---------- ليبل الرف ---------- */
+
+test('label: EAN-13 when the checksum adds up, Code 128 when it does not', async ({ page }) => {
+  await page.goto('/?test=1');
+  const out = await page.evaluate(async () => {
+    const lbl = await import('./label.js');
+    return {
+      check: lbl.eanCheck('622300123456'),
+      ean: lbl.encode('6223001234562'),
+      // same digits, wrong last one: a 13-digit code is not an EAN-13 unless it checks out
+      notEan: lbl.encode('6223001234567').kind,
+      short: lbl.encode('111').kind,
+      arabic: lbl.encode('لبن'),
+      empty: lbl.encode(''),
+    };
+  });
+  expect(out.check).toBe(2);
+  expect(out.ean.kind).toBe('EAN-13');
+  expect(out.ean.bits).toHaveLength(95);                 // the whole symbology is 95 modules
+  expect(out.ean.bits.startsWith('101')).toBe(true);
+  expect(out.ean.bits.slice(45, 50)).toBe('01010');      // the middle guard
+  expect(out.notEan).toBe('CODE128');
+  expect(out.short).toBe('CODE128');
+  expect(out.arabic).toBe(null);                         // no symbology here carries Arabic
+  expect(out.empty).toBe(null);
+});
+
+test('label: the printed barcode decodes back to the barcode it came from', async ({ page }) => {
+  await page.goto('/?test=1');
+  const out = await page.evaluate(async () => {
+    const lbl = await import('./label.js');
+    const box = document.createElement('div');
+    box.id = 'decode-box';
+    box.style.inlineSize = '400px';
+    document.body.append(box);
+    // draw the SVG onto a white canvas and hand it to the same decoder the scanner uses
+    const roundTrip = async (code) => {
+      const svg = lbl.barcodeSvg(code);
+      const img = await new Promise((ok, fail) => {
+        const i = new Image();
+        i.onload = () => ok(i);
+        i.onerror = fail;
+        i.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svg)));
+      });
+      const c = document.createElement('canvas');
+      c.width = 1000;
+      c.height = 400;
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, c.width, c.height);
+      ctx.drawImage(img, 60, 60, c.width - 120, 280);
+      const blob = await new Promise((ok) => c.toBlob(ok, 'image/png'));
+      const res = await new Html5Qrcode('decode-box')
+        .scanFileV2(new File([blob], 'b.png', { type: 'image/png' }), false);
+      return res.decodedText;
+    };
+    return { ean: await roundTrip('6223001234562'), code128: await roundTrip('AB-99') };
+  });
+  expect(out.ean).toBe('6223001234562');
+  expect(out.code128).toBe('AB-99');
+});
+
+test('label: pick a product, preview it, print the copies asked for', async ({ page }) => {
+  await page.goto('/?test=1');
+  await page.evaluate(() => {
+    localStorage.setItem('employeeName', 'أحمد');
+    localStorage.setItem('test-products', JSON.stringify({ '6223001234562': 'زيت عافية' }));
+  });
+  await page.reload();
+  await page.evaluate(() => { window.printed = 0; window.print = () => { window.printed++; }; });
+
+  await page.click('#btn-label');
+  await expect(page.locator('#label-empty')).toBeVisible();
+  await expect(page.locator('#scan-block')).toBeVisible();          // the one scanner moved here
+
+  await page.fill('#barcode-input', '999');                         // not in the catalog
+  await page.click('#btn-lookup');
+  await expect(page.locator('#item-warn')).toBeVisible();
+  await expect(page.locator('#item-warn-line')).toContainText('مفيش اسم نطبعه');
+  await page.click('#btn-cancel-item');
+
+  await page.fill('#barcode-input', '6223001234562');
+  await page.click('#btn-lookup');
+  await expect(page.locator('#item-form')).toBeHidden();             // a label needs no quantity
+  await expect(page.locator('#label-preview .lbl-name')).toHaveText('زيت عافية');
+  await expect(page.locator('#label-preview .lbl-code')).toHaveText('6223001234562');
+  await expect(page.locator('#label-preview svg')).toHaveCount(1);
+
+  await page.fill('#label-price', '45.95');                          // optional, never stored
+  await expect(page.locator('#label-preview .lbl-price')).toContainText('45.95');
+
+  await page.fill('#label-copies', '3');
+  await page.click('#btn-print-label');
+  await expect(page.locator('#print-area .lbl')).toHaveCount(3);
+  expect(await page.evaluate(() => window.printed)).toBe(1);
+  expect(await page.evaluate(() => document.getElementById('print-size').textContent)).toContain('66mm 35mm');
+
+  await page.reload();                                               // the count sticks per phone
+  await page.click('#btn-label');
+  await page.fill('#barcode-input', '6223001234562');
+  await page.click('#btn-lookup');
+  await expect(page.locator('#label-copies')).toHaveValue('3');
+});
+
+test('label: the admin sets the size, the paper and the logo, and the screen uses them', async ({ page }) => {
+  await openAdmin(page);
+  await page.fill('#cfg-label-w', '50');
+  await page.fill('#cfg-label-h', '25');
+  await page.click('#cfg-label-sheet button[data-sheet="a4"]');
+  // a 500 px wide logo, picked the way the admin picks one
+  await page.evaluate(async () => {
+    const c = document.createElement('canvas');
+    c.width = 500;
+    c.height = 200;
+    const x = c.getContext('2d');
+    x.fillStyle = '#f60';
+    x.fillRect(0, 0, c.width, c.height);
+    const blob = await new Promise((ok) => c.toBlob(ok, 'image/png'));
+    const dt = new DataTransfer();
+    dt.items.add(new File([blob], 'logo.png', { type: 'image/png' }));
+    const input = document.getElementById('cfg-label-logo');
+    input.files = dt.files;
+    input.dispatchEvent(new Event('change'));
+  });
+  await expect(page.locator('#label-logo-preview img')).toBeVisible();
+  await page.click('#btn-save-config');
+  await expect(page.locator('#toast')).toContainText('تم حفظ الإعدادات');
+  const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('test-config')));
+  expect(stored.label.w).toBe(50);
+  expect(stored.label.h).toBe(25);
+  expect(stored.label.sheet).toBe('a4');
+  expect(stored.branches).toHaveLength(2);                           // the other settings survive
+  // it is redrawn at printing width before it is stored: this doc is read by every phone at boot
+  const logoWidth = await page.evaluate((src) => new Promise((ok) => {
+    const i = new Image();
+    i.onload = () => ok(i.naturalWidth);
+    i.src = src;
+  }), stored.label.logo);
+  expect(logoWidth).toBe(360);
+
+  await page.goto('/?test=1');
+  await page.evaluate(() => {
+    localStorage.setItem('employeeName', 'أحمد');
+    localStorage.setItem('test-products', JSON.stringify({ '111': 'لبن' }));
+  });
+  await page.reload();
+  await page.evaluate(() => { window.print = () => {}; });
+  await page.click('#btn-label');
+  await page.fill('#barcode-input', '111');
+  await page.click('#btn-lookup');
+  await expect(page.locator('#label-preview .lbl')).toHaveAttribute('style', /50mm/);
+  await expect(page.locator('#label-preview img.lbl-logo')).toBeVisible();
+  await page.click('#btn-print-label');
+  expect(await page.evaluate(() => document.getElementById('print-size').textContent)).toContain('size: A4');
+});
+
+test('label: the catalog row links straight to the label of that barcode', async ({ page }) => {
+  await page.goto('/manager.html?test=1');
+  await page.evaluate(() => localStorage.setItem('test-products', JSON.stringify({ '111': 'لبن' })));
+  await page.fill('#pin-input', await page.evaluate(() => window.APP_CONFIG.managerPin));
+  await page.click('#btn-pin');
+  await page.click('#btn-products');
+  const href = await page.locator('#products-list a.lbl-link').first().getAttribute('href');
+  expect(href).toBe('index.html?test=1#label=111');                  // ?test=1 must survive the hop
+  await page.goto(href);
+  await expect(page.locator('#screen-label')).toBeVisible();
+  await expect(page.locator('#label-preview .lbl-name')).toHaveText('لبن');
+});
+
+test('label: a user without the permission never sees the screen', async ({ page }) => {
+  await page.goto('/?test=1');
+  await seedUsers(page, [EMP]);
+  await page.fill('#login-pin', EMP.pin);
+  await page.click('#btn-login');
+  await expect(page.locator('#screen-home')).toBeVisible();
+  await expect(page.locator('#btn-label')).toBeHidden();
+  await page.evaluate(() => localStorage.setItem('test-products', JSON.stringify({ '111': 'لبن' })));
+  await page.goto('/?test=1#label=111');
+  await expect(page.locator('#screen-home')).toBeVisible();          // the deep link is refused too
+  await expect(page.locator('#screen-label')).toBeHidden();
+});

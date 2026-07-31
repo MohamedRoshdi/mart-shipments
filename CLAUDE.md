@@ -2,7 +2,8 @@
 
 Shipment-intake PWA for a two-branch Egyptian supermarket. Employees scan barcodes into a
 shipment on their phones, count a shelf against the quantity the shop's system says (الجرد),
-or record what is about to expire (الصلاحيات); a manager page reviews, edits, exports and
+record what is about to expire (الصلاحيات), or print a shelf label for a product (ليبل الرف);
+a manager page reviews, edits, exports and
 manages the product catalog; an admin page owns the settings, the audit trail and the
 destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 
@@ -24,7 +25,7 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 5. **`db.js` is the only file that knows where data lives.** `app.js` and
    `manager.js` never touch Firestore or localStorage keys directly.
 6. **Bump `CACHE` in `sw.js` on every deploy.** Serving is cache-first, so phones
-   keep the old bundle until the cache name changes. Currently `mart-v36`.
+   keep the old bundle until the cache name changes. Currently `mart-v37`.
    The bump only works because install fetches with `new Request(u, { cache: "reload" })` —
    a plain `addAll` reads the browser's HTTP cache and copies **stale** files into the new
    cache name (caught in Chrome 2026-07-31: `mart-v34` held a `style.css` 262 bytes behind
@@ -36,20 +37,21 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 
 | File | Role |
 |---|---|
-| `index.html` / `app.js` | employee app: setup, home, new/edit shipment **or stocktake**, **الصلاحيات** (months + one month), camera, item sheet |
-| `manager.html` / `manager.js` | manager app: PIN, shipments tab, stocktake tab, **expiry tab**, one search box over the list, edit, catalog screen, import/export (Excel, TXT, ZIP by day/month) |
-| `admin.html` / `admin.js` | admin app: users + permissions + phone binding, settings (branches, types, **suppliers**, PINs), audit trail, bulk delete by kind/branch/type/day-range, catalog wipe |
+| `index.html` / `app.js` | employee app: setup, home, new/edit shipment **or stocktake**, **الصلاحيات** (months + one month), **ليبل الرف**, camera, item sheet |
+| `manager.html` / `manager.js` | manager app: PIN, shipments tab, stocktake tab, **expiry tab**, one search box over the list, edit, catalog screen (with a **ليبل** link per row), import/export (Excel, TXT, ZIP by day/month) |
+| `admin.html` / `admin.js` | admin app: users + permissions + phone binding, settings (branches, types, **suppliers**, **label size/paper/logo**, PINs), audit trail, bulk delete by kind/branch/type/day-range, catalog wipe |
 | `auth.js` | permission list, PIN → identity, the 12-hour session shared by all three pages |
 | `expiry.js` | the pure part of الصلاحيات: month grouping, sorting, counters, the four colour states |
+| `label.js` | the whole of ليبل الرف that is not a screen: EAN-13 + Code 128 encoding, the barcode SVG, the label's HTML, and the settings guard. No db, no DOM, no session — that is what makes the price (or any other field) a one-line change later |
 | `db.js` | data layer; `?test=1` switches the whole app to localStorage |
 | `zip.js` | store-only ZIP writer, ~80 lines, no dependency; used by the folder export |
 | `style.css` | one stylesheet for all three pages |
 | `sw.js`, `manifest.json` | **one** installable PWA, on the main URL. `manager.html` and `admin.html` carry no manifest: the PIN routes people to their screen (`auth.landingPage`), and the home screen links to the other two. Dropped 2026-07-31 on the owner's call — a phone with three near-identical icons was the confusing part. |
-| `firebase-config.js` | Firebase keys **plus** `APP_CONFIG`: PINs (incl. `adminPin`), branches, shipment types, suppliers |
+| `firebase-config.js` | Firebase keys **plus** `APP_CONFIG`: PINs (incl. `adminPin`), branches, shipment types, suppliers, label settings |
 | `firestore.rules` | shape validation; the only server-side guard that exists |
 | `SETUP.md` | Arabic guide for the shop owner |
 | `products-template.csv`, `stock-template.csv` | the two import shapes: barcode+name+**unit**, and barcode+name+quantity |
-| `tests/app.spec.js` | 59 Playwright tests, all in localStorage mode |
+| `tests/app.spec.js` | 65 Playwright tests, all in localStorage mode |
 | `scripts/*.mjs` | live checks and screenshot helpers (see below) |
 
 ## Data model
@@ -79,7 +81,11 @@ one place that order is decided. Every product write is a **merge** — Firestor
 fields key by key, so importing شبين الكوم never touches what قويسنا imported, and renaming
 from the catalog screen drops neither.
 
-`config/app` — `{ managerPin, adminPin, branches: [{name}], shipmentTypes: [], users: [], suppliers: [] }`.
+`config/app` — `{ managerPin, adminPin, branches: [{name}], shipmentTypes: [], users: [], suppliers: [],
+label: { w, h, sheet, logo } }`. `label` is the shelf label: millimetres (66 × 35 by default —
+the sheet the shop already buys), `sheet` is `"label"` (one label per page, thermal roll) or
+`"a4"` (tiled on a sheet), and `logo` is the shop logo as a data URL, redrawn to 360 px before
+it is stored because **every page reads this doc at boot**.
 `suppliers` is a plain list of vendor names, typed one per line in the admin page and offered as
 the shipment name — **a suggestion, never a constraint**: a name that is not on the list still saves.
 Each user is `{ name, pin, branches: [], perms: [], device? }`; `perms` holds ids from `auth.js` `PERMS`
@@ -93,8 +99,8 @@ shipped `firebase-config.js` is only a fallback. A missing doc changes nothing.
 mutations write a row, `update`/`delete` are denied by the rules.
 
 Rules in force (all live-tested):
-- `config`: only the doc id `app`, only those six keys, PINs ≤ 8 chars, lists ≤ 10, users ≤ 40,
-  suppliers ≤ 300.
+- `config`: only the doc id `app`, only those seven keys, PINs ≤ 8 chars, lists ≤ 10, users ≤ 40,
+  suppliers ≤ 300, `label` a map of ≤ 6 keys whose `logo` is a string ≤ 200,000 chars.
 - `logs`: create-only with the four keys; `update`/`delete` always denied.
 - create: key allow-list, types, sizes, `items` ≤ 200.
 - update: `name`, `items`, `type` may change; `createdBy`, `createdAt` and
@@ -128,7 +134,7 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
 - **There is one scanner in `index.html`, and it moves.** `#scan-block` (scan button, reader,
   live camera controls, manual barcode field, **and the name search `#find-input` /
   `#find-results`**) lives outside `main`; `render()` appends it into
-  `SLOTS[screen]` (`slot-new` / `slot-expiry`) and hides it everywhere else. A second reader
+  `SLOTS[screen]` (`slot-new` / `slot-expiry` / `slot-label`) and hides it everywhere else. A second reader
   would mean a second camera stream and a second copy of every camera control. `navTo` stops
   the camera for any screen that has no slot.
 - **The expiry writes are fire-and-forget, like the shipment and count adds.** `updateExpiry`
@@ -147,6 +153,32 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   `paintMonth()`'s `history.back()` — the month is gone, so there is nothing left to paint.
   The colour is a border down the card edge (`li.exp-<status>`), never colour alone: the row
   also says «فاضل ٣٥ يوم» / «فاتت بـ ٢٠ يوم».
+- **`label.js` knows nothing about the app, and it must stay that way.** No import of `db.js`,
+  no `document`, no session: it takes a product plus `window.APP_CONFIG` and returns HTML. That is
+  the owner's actual requirement («تكون ميزة الطباعة مستقلة») — the day the catalog carries a price,
+  `labelHtml` already prints `item.price` and nothing else changes.
+- **A 13-digit code is only an EAN-13 if the checksum adds up.** `label.js` computes it and falls
+  back to Code 128 when it does not, because a barcode that scans as a *different* product is
+  worse than one the till has to be taught. Code 128 uses subset C for an even-length run of
+  digits (half the width) and subset B otherwise. Both tables are proved by round trip, not by
+  eye: the test renders the SVG to a canvas and decodes it with the same html5-qrcode the scanner
+  uses (`tests/app.spec.js` — «the printed barcode decodes back»). Never edit those tables
+  without re-running it.
+- **The label is sized in millimetres everywhere, and `@page` is the only way to set the paper.**
+  A style attribute cannot carry `@page`, so `#print-size` (an empty `<style>` in `index.html`)
+  is filled in right before `print()`. Printing hides everything else through
+  `body > *:not(#print-area)`, and a thermal roll gets `.lbl + .lbl { break-before: page }` while
+  A4 flows them across one sheet. Verified on paper, not on screen: `scripts/shots-label.mjs`
+  prints to PDF with `preferCSSPageSize` and measures the `/MediaBox` (66.0 × 34.9 mm × 3 pages,
+  measured 2026-07-31).
+- **Nothing about a label is saved.** No collection, no draft, no audit row — the screen reads a
+  product and prints. Only the copy count is remembered, in `localStorage.printSettings`, per
+  phone (the same reasoning as the camera settings). The price is typed on the screen and dies
+  with it.
+- **`#label=<barcode>` is consumed once.** The manager's catalog row links to the employee app
+  with that hash; `openDeepLabel()` runs from `goHome()`, drops the hash with `replaceState`
+  before opening the screen, and re-checks the permission. Without dropping it, every later trip
+  home would jump back into the label screen.
 - **`sys` is read for free, and it is per branch.** The quantities live on the product doc, so
   a scan still costs the one `getProduct` read it always cost. `state.branch` (the branch the
   count is stamped with, not `myBranch()`) picks which number the employee sees. Never add a
@@ -302,6 +334,7 @@ OUT=/tmp/shots BASE=http://localhost:8080 node scripts/shots-expiry.mjs   # home
 OUT=/tmp/shots BASE=http://localhost:8080 node scripts/shots-all.mjs      # all 16 screens, the visual reference set
 OUT=/tmp/shots BASE=http://localhost:8080 node scripts/shots-search.mjs   # the name search on all three modes
 OUT=/tmp/shots BASE=http://localhost:8080 node scripts/shots-supplier.mjs # the supplier list, admin side and employee side
+OUT=/tmp/shots BASE=http://localhost:8080 node scripts/shots-label.mjs    # ليبل الرف + prints 3 copies to PDF and measures the page (exits 1 if the paper is wrong)
 ```
 
 Writing live scripts: pull real barcodes from the catalog first — invented ones are
@@ -374,6 +407,14 @@ debounce, or it reports false negatives.
 - A stocktake reports on what was **scanned**. A product in the sheet that nobody scanned does
   not appear as a shortage — listing every missing product would mean reading the whole
   catalog (10k reads) per count. Count by shelf and the sheet stays honest.
+- **Printing goes through the browser's print dialog, never straight to the printer.** A web page
+  cannot open a USB or Bluetooth thermal printer itself, so «طباعة» hands the pages to the OS:
+  on a PC that is the normal printer dialog (pick the XPrinter/Zebra/TSC/Brother driver, paper
+  size comes from `@page`), on Android it needs a print service installed. Any printer with a
+  driver works — the app never speaks ESC/POS or ZPL. Margins and scaling still belong to the
+  driver: «الحجم الفعلي / 100%» must be picked once, or the label prints shrunk to fit.
+- The label carries no price until the catalog has one. `labelHtml` prints `item.price` when it
+  is there, and the printing screen lets one be typed for that print only.
 - The sync chip reports connectivity (`navigator.onLine`), not real sync state.
 - Camera *decoding* can only be verified on a physical phone. `scripts/live-camera.mjs` proves
   the plumbing (camera list, chosen device, start/stop, release, ghost-camera fallback) with

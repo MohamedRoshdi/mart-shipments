@@ -1,5 +1,6 @@
 import * as db from "./db.js";
 import * as auth from "./auth.js";
+import * as lbl from "./label.js";
 
 const $ = (id) => document.getElementById(id);
 const esc = (t) => { const d = document.createElement("div"); d.textContent = t; return d.innerHTML; };
@@ -108,7 +109,86 @@ function renderAll() {
   // a shop with fifty suppliers should not tap «+ إضافة» fifty times: one line each, paste and go
   $("cfg-suppliers").value = cfg.suppliers.join("\n");
   paintSuppliers();
+  renderLabelCfg();
   renderBulk();
+}
+
+/* --- ليبل الرف: the size, the paper and the logo. Everything the printing screen reads. --- */
+
+const SHEETS = { label: "ليبل حراري", a4: "ورق A4" };
+const LOGO_PX = 360;          // a shelf label is 66 mm wide; more pixels than this print the same
+const LOGO_CAP = 150000;      // characters of data URL, well under the rules' ceiling
+
+function renderLabelCfg() {
+  $("cfg-label-w").value = cfg.label.w;
+  $("cfg-label-h").value = cfg.label.h;
+  $("cfg-label-sheet").innerHTML = Object.entries(SHEETS).map(([k, label]) =>
+    `<button type="button" data-sheet="${k}" aria-pressed="${k === cfg.label.sheet}">${esc(label)}</button>`).join("");
+  $("label-logo-preview").innerHTML = cfg.label.logo
+    ? `<img src="${escAttr(cfg.label.logo)}" alt="شعار المحل">`
+    : `<p class="meta">مفيش شعار — الليبل هيطلع بالاسم والباركود بس.</p>`;
+}
+
+$("cfg-label-sheet").onclick = (e) => {
+  const btn = e.target.closest("button[data-sheet]");
+  if (!btn) return;
+  readInputs();
+  cfg.label.sheet = btn.dataset.sheet;
+  renderLabelCfg();
+  markDirty();
+};
+
+$("btn-label-logo").onclick = () => $("cfg-label-logo").click();
+
+// The logo travels inside the settings doc, so it has to be small: it is redrawn at printing
+// width before it is stored, and a picture that is still too big is refused instead of silently
+// bloating a document every phone reads at boot.
+$("cfg-label-logo").onchange = async () => {
+  const file = $("cfg-label-logo").files[0];
+  if (!file) return;
+  let data = "";
+  try {
+    data = await shrinkImage(file);
+  } catch (err) {
+    console.error(err);
+    toast("مقدرناش نقرا الصورة — جرّب صورة تانية");
+    return;
+  }
+  if (data.length > LOGO_CAP) { toast("الصورة كبيرة — استخدم صورة أصغر أو أوضح"); return; }
+  readInputs();
+  cfg.label.logo = data;
+  $("cfg-label-logo").value = "";
+  renderLabelCfg();
+  markDirty();
+  toast("الشعار اتحمّل — اضغط «حفظ الإعدادات»");
+};
+
+$("btn-label-logo-clear").onclick = () => {
+  readInputs();
+  cfg.label.logo = "";
+  renderLabelCfg();
+  markDirty();
+};
+
+async function shrinkImage(file) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((ok, fail) => {
+      const i = new Image();
+      i.onload = () => ok(i);
+      i.onerror = fail;
+      i.src = url;
+    });
+    const scale = Math.min(1, LOGO_PX / (img.naturalWidth || 1));
+    const c = document.createElement("canvas");
+    c.width = Math.max(1, Math.round(img.naturalWidth * scale));
+    c.height = Math.max(1, Math.round(img.naturalHeight * scale));
+    c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+    const png = c.toDataURL("image/png");            // keeps a logo's transparent background
+    return png.length > LOGO_CAP ? c.toDataURL("image/jpeg", 0.85) : png;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
 }
 
 const suppliersTyped = () => $("cfg-suppliers").value.split("\n").map(s => s.trim()).filter(Boolean);
@@ -224,6 +304,8 @@ function readInputs() {
   cfg.managerPin = $("cfg-manager-pin").value.trim();
   cfg.adminPin = $("cfg-admin-pin").value.trim();
   cfg.suppliers = suppliersTyped();
+  // labelCfg clamps a typed size back into range, so a half-typed number never reaches the doc
+  cfg.label = lbl.labelCfg({ label: { ...cfg.label, w: $("cfg-label-w").value, h: $("cfg-label-h").value } });
 }
 
 $("screen-admin").oninput = (e) => {
@@ -294,6 +376,7 @@ $("btn-save-config").onclick = async () => {
     branches: cfg.branches.map(b => ({ name: b.name })),   // a branch is a name, not a password
     shipmentTypes: cfg.shipmentTypes.filter(Boolean),
     suppliers: cfg.suppliers,
+    label: cfg.label,                                      // size, paper and logo of the shelf label
     // device carries the phone this account is bound to — dropping it here would silently
     // unbind every user on any settings save
     users: cfg.users.map(u => ({
@@ -480,6 +563,7 @@ cfgReady = (async () => {
     branches: window.APP_CONFIG.branches.map(b => ({ ...b })),
     shipmentTypes: [...window.APP_CONFIG.shipmentTypes],
     suppliers: [...(window.APP_CONFIG.suppliers || [])],
+    label: lbl.labelCfg(window.APP_CONFIG),
     users: (window.APP_CONFIG.users || []).map(u => ({ ...u, branches: auth.branchesOf(u), perms: (u.perms || []).slice() })),
   };
   const s = auth.session();

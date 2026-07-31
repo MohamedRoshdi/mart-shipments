@@ -43,6 +43,21 @@
       <textarea id="cfg-suppliers" rows="6" placeholder="المراعي&#10;جهينة&#10;بيبسي"></textarea>
       <p id="suppliers-count" class="meta"></p>
 
+      <h2>ليبل الرف</h2>
+      <p class="meta">مقاس الليبل بالمليمتر وشكل الورق وشعار المحل. المقاس الافتراضي ٦٦ × ٣٥ مم —
+        نفس مقاس الليبل اللي بتشتريه. لو غيّرت المقاس، الطباعة كلها بتتظبط عليه من غير أي تعديل تاني.</p>
+      <div class="date-range">
+        <label>العرض (مم) <input id="cfg-label-w" type="number" min="20" max="210" dir="ltr"></label>
+        <label>الارتفاع (مم) <input id="cfg-label-h" type="number" min="10" max="297" dir="ltr"></label>
+      </div>
+      <div class="filter-row"><span class="filter-label">الورق</span><div id="cfg-label-sheet" class="seg"></div></div>
+      <div class="row-actions">
+        <button id="btn-label-logo" type="button" class="ghost">اختار صورة الشعار</button>
+        <button id="btn-label-logo-clear" type="button" class="ghost">شيل الشعار</button>
+      </div>
+      <input id="cfg-label-logo" type="file" accept="image/*" hidden>
+      <div id="label-logo-preview" class="logo-preview"></div>
+
       <h2>الأرقام السرية</h2>
       <ul>
         <li>
