@@ -25,7 +25,7 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 5. **`db.js` is the only file that knows where data lives.** `app.js` and
    `manager.js` never touch Firestore or localStorage keys directly.
 6. **Bump `CACHE` in `sw.js` on every deploy.** Serving is cache-first, so phones
-   keep the old bundle until the cache name changes. Currently `mart-v43`.
+   keep the old bundle until the cache name changes. Currently `mart-v44`.
    The bump only works because install fetches with `new Request(u, { cache: "reload" })` —
    a plain `addAll` reads the browser's HTTP cache and copies **stale** files into the new
    cache name (caught in Chrome 2026-07-31: `mart-v34` held a `style.css` 262 bytes behind
@@ -52,7 +52,7 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 | `firestore.rules` | shape validation; the only server-side guard that exists |
 | `SETUP.md` | Arabic guide for the shop owner |
 | `products-template.csv`, `stock-template.csv`, `suppliers-template.csv` | the three import shapes: barcode+name+**unit**, barcode+name+quantity, and **code+supplier name** |
-| `tests/app.spec.js` | 69 Playwright tests, all in localStorage mode |
+| `tests/app.spec.js` | 70 Playwright tests, all in localStorage mode |
 | `scripts/*.mjs` | live checks and screenshot helpers (see below) |
 
 ## Data model
@@ -85,10 +85,11 @@ fields key by key, so importing شبين الكوم never touches what قويس�
 from the catalog screen drops neither.
 
 `config/app` — `{ managerPin, adminPin, branches: [{name}], shipmentTypes: [], users: [], suppliers: [],
-label: { w, h, sheet, logo } }`. `label` is the shelf label: millimetres (66 × 35 by default —
+label: { w, h, sheet, logo, gap } }`. `label` is the shelf label: millimetres (66 × 35 by default —
 the sheet the shop already buys), `sheet` is `"label"` (one label per page, thermal roll) or
-`"a4"` (tiled on a sheet), and `logo` is the shop logo as a data URL, redrawn to 360 px before
-it is stored because **every page reads this doc at boot**.
+`"a4"` (tiled on a sheet), `logo` is the shop logo as a data URL, redrawn to 360 px before
+it is stored because **every page reads this doc at boot**, and `gap` is seconds between products
+on the roll (0 = one job for the lot).
 `suppliers` is a list of `{code, name}` (a plain string is an older row and still reads, through
 `db.supplierList`), typed one per line as «كود، اسم» in the admin page — or imported from a sheet —
 and offered as the shipment name — **a suggestion, never a constraint**: a name that is not on the
@@ -187,6 +188,12 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   `.lbl` carries a real 0.3 mm border: on A4 it is the cut line, on a roll it frames the label.
   It sits on the very edge of the page, so a printer with an unprintable margin will clip it —
   inset the label if that ever shows up on paper.
+- **A print job cannot pace its own pages** (the owner asked for 5–10 s between products on the
+  roll, 2026-07-31). The page hands the whole job to the OS and has no say in when a page leaves
+  the printer, and there is no silent printing on the web. So `label.gap > 0` means **one job per
+  product** — which costs one printer dialog each, and the settings screen says so in as many
+  words. Off by default; A4 ignores it, because a sheet is one piece of paper. The wait is checked
+  in 100 ms slices so «إيقاف الطباعة» does not have to sit through it.
 - **«طباعة» prints the queue plus whatever is still on the screen.** One label stays one tap;
   twenty items are one tap each plus one at the end. `sheetHtml` expands `copies` per row, so the
   page count is the sum, and `#label-count` in the bottom bar is what will actually come out —

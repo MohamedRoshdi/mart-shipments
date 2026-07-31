@@ -57,6 +57,12 @@
         <label>الارتفاع (مم) <input id="cfg-label-h" type="number" min="10" max="297" dir="ltr"></label>
       </div>
       <div class="filter-row"><span class="filter-label">الورق</span><div id="cfg-label-sheet" class="seg"></div></div>
+      <div id="cfg-gap-row" class="date-range">
+        <label>فاصل بين الأصناف (ثانية) <input id="cfg-label-gap" type="number" min="0" max="60" dir="ltr"></label>
+      </div>
+      <p id="cfg-gap-note" class="meta">للطابعة الحرارية بس. سيبه <strong>0</strong> والأصناف كلها بتتبعت مرة واحدة.
+        لو حطيت رقم، كل صنف بيتبعت لوحده وبينهم الثواني دي — ومعنى كده إن الجهاز هيسأل عن الطباعة
+        مرة لكل صنف، لأن المتصفح مش بيقدر يبطّأ جوه شغلانة طباعة واحدة.</p>
       <div class="row-actions">
         <button id="btn-label-logo" type="button" class="ghost">اختار صورة الشعار</button>
         <button id="btn-label-logo-clear" type="button" class="ghost">شيل الشعار</button>

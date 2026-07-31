@@ -810,7 +810,30 @@ $("label-queue").onclick = (e) => {
   renderQueue();
 };
 
+// A print job cannot pace its own pages, so a gap between products means a separate job per
+// product — one printer dialog each. Off by default (gap 0 = the whole lot in one job); the shop
+// turns it on from the settings when the roll printer needs a breath between labels.
+let printing = null;
+
+const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
+
+async function printByProduct(rows, gap) {
+  printing = { stop: false };
+  $("btn-print-label").textContent = "إيقاف الطباعة";
+  for (let i = 0; i < rows.length && !printing.stop; i++) {
+    $("print-area").innerHTML = lbl.sheetHtml([rows[i]], window.APP_CONFIG);
+    $("label-count").textContent = `بنطبع ${i + 1} من ${rows.length}`;
+    print();
+    // the wait is checked in slices so «إيقاف» does not have to sit through it
+    for (let left = gap * 10; left > 0 && !printing.stop; left--) await sleep(100);
+  }
+  printing = null;
+  $("btn-print-label").textContent = "طباعة";
+  renderQueue();
+}
+
 $("btn-print-label").onclick = () => {
+  if (printing) { printing.stop = true; toast("وقفنا الطباعة"); return; }
   const rows = toPrint();
   if (!rows.length) return;
   savePrint({ copies: rows[rows.length - 1].copies });
@@ -821,6 +844,8 @@ $("btn-print-label").onclick = () => {
     ? "@page { size: A4; margin: 6mm; }"
     : `@page { size: ${cfg.w}mm ${cfg.h}mm; margin: 0; }`;
   document.body.classList.toggle("print-a4", cfg.sheet === "a4");
+  // the gap is a roll thing: an A4 sheet is one piece of paper, there is nothing to pace
+  if (cfg.sheet !== "a4" && cfg.gap > 0 && rows.length > 1) { printByProduct(rows, cfg.gap); return; }
   $("print-area").innerHTML = lbl.sheetHtml(rows, window.APP_CONFIG);
   print();
 };

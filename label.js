@@ -7,7 +7,7 @@
 /* ---------- settings: the shop's label, in millimetres ---------- */
 
 // 66 × 35 mm is the sheet the shop already buys (A4 210 × 297, label 66.0 × 35.0)
-export const DEFAULTS = { w: 66, h: 35, sheet: "label", logo: "" };
+export const DEFAULTS = { w: 66, h: 35, sheet: "label", logo: "", gap: 0 };
 
 const num = (v, lo, hi, d) => (Number.isFinite(+v) && +v >= lo && +v <= hi ? +v : d);
 
@@ -19,6 +19,8 @@ export function labelCfg(cfg) {
     h: num(l.h, 10, 297, DEFAULTS.h),
     sheet: l.sheet === "a4" ? "a4" : "label",       // a roll of labels, or labels on an A4 sheet
     logo: typeof l.logo === "string" ? l.logo : "",
+    // seconds to wait between two products on the roll; 0 = send the whole lot at once
+    gap: num(l.gap, 0, 60, 0),
   };
 }
 

@@ -123,6 +123,10 @@ const LOGO_CAP = 150000;      // characters of data URL, well under the rules' c
 function renderLabelCfg() {
   $("cfg-label-w").value = cfg.label.w;
   $("cfg-label-h").value = cfg.label.h;
+  $("cfg-label-gap").value = cfg.label.gap;
+  const roll = cfg.label.sheet !== "a4";        // an A4 sheet is one piece of paper — nothing to pace
+  $("cfg-gap-row").hidden = !roll;
+  $("cfg-gap-note").hidden = !roll;
   $("cfg-label-sheet").innerHTML = Object.entries(SHEETS).map(([k, label]) =>
     `<button type="button" data-sheet="${k}" aria-pressed="${k === cfg.label.sheet}">${esc(label)}</button>`).join("");
   $("label-logo-preview").innerHTML = cfg.label.logo
@@ -348,7 +352,9 @@ function readInputs() {
   cfg.adminPin = $("cfg-admin-pin").value.trim();
   cfg.suppliers = suppliersTyped();
   // labelCfg clamps a typed size back into range, so a half-typed number never reaches the doc
-  cfg.label = lbl.labelCfg({ label: { ...cfg.label, w: $("cfg-label-w").value, h: $("cfg-label-h").value } });
+  cfg.label = lbl.labelCfg({ label: {
+    ...cfg.label, w: $("cfg-label-w").value, h: $("cfg-label-h").value, gap: $("cfg-label-gap").value,
+  } });
 }
 
 $("screen-admin").oninput = (e) => {

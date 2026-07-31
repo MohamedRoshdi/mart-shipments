@@ -1702,6 +1702,38 @@ test('label: several items queue up and print in one go', async ({ page }) => {
   await expect(page.locator('#label-count')).toHaveText('3 ليبل');
 });
 
+test('label: a gap between products prints one job each, and stops when told', async ({ page }) => {
+  await page.goto('/?test=1');
+  await page.evaluate(() => {
+    localStorage.setItem('employeeName', 'أحمد');
+    localStorage.setItem('test-products', JSON.stringify({ '111': 'لبن', '222': 'جبنة', '333': 'زيت' }));
+    const cfg = JSON.parse(localStorage.getItem('test-config') || '{}');
+    // one second, so the test is a test and not a nap
+    localStorage.setItem('test-config', JSON.stringify({ ...cfg, label: { w: 66, h: 35, sheet: 'label', logo: '', gap: 1 } }));
+  });
+  await page.reload();
+  await page.evaluate(() => { window.jobs = []; window.print = () => { window.jobs.push(document.querySelectorAll('#print-area .lbl').length); }; });
+  await page.click('#btn-label');
+
+  for (const code of ['111', '222']) {
+    await page.fill('#barcode-input', code);
+    await page.click('#btn-lookup');
+    await page.click('#btn-queue-label');
+  }
+  await page.fill('#barcode-input', '333');
+  await page.click('#btn-lookup');
+
+  await page.click('#btn-print-label');
+  await expect(page.locator('#btn-print-label')).toHaveText('إيقاف الطباعة');
+  await expect(page.locator('#label-count')).toHaveText('بنطبع 1 من 3');
+  await expect(page.locator('#label-count')).toHaveText('بنطبع 2 من 3');
+  await page.click('#btn-print-label');                       // stop before the third
+  await expect(page.locator('#btn-print-label')).toHaveText('طباعة');
+  await expect(page.locator('#toast')).toContainText('وقفنا الطباعة');
+  const jobs = await page.evaluate(() => window.jobs);
+  expect(jobs).toEqual([1, 1]);                               // one product per job, third never sent
+});
+
 test('label: the admin sets the size, the paper and the logo, and the screen uses them', async ({ page }) => {
   await openAdmin(page);
   await page.fill('#cfg-label-w', '50');
