@@ -2,7 +2,7 @@ import * as db from "./db.js";
 import * as auth from "./auth.js";
 import * as ex from "./expiry.js";
 import { zipBlob } from "./zip.js";
-import { sheetRows } from "./sheet.js";
+import { sheetRows, headerMap, unitName, clean as cell } from "./sheet.js";
 
 const $ = (id) => document.getElementById(id);
 const esc = (t) => { const d = document.createElement("div"); d.textContent = t; return d.innerHTML; };
@@ -860,8 +860,6 @@ $("btn-export-products").onclick = async () => {
 /* ---------- catalog import ---------- */
 
 
-const cell = (c) => String(c || "").trim().replace(/^﻿/, "");
-
 // The catalog sheet is باركود، اسم الصنف، الوحدة. The name still swallows the middle cells, so
 // a name with a comma survives the naive split; the unit is the last cell, and a numeric one is
 // ignored so a stocktake sheet imported by mistake cannot turn a quantity into a unit.
@@ -872,15 +870,29 @@ const unitOf = (c) => {
 };
 const nameOf = (c) => (unitOf(c) ? c.slice(1, -1) : c.slice(1)).map(cell).join(" ").trim();
 
+// A row, whichever shape the sheet came in: the header decides, and without one the old
+// positional rules (barcode first, unit last) still hold.
+const productRow = (c, map) => (map
+  ? {
+    barcode: cell(c[map.barcode]),
+    name: cell(c[map.name]),
+    unit: unitName(map.unit !== undefined ? c[map.unit] : ""),
+    price: map.price !== undefined ? Number(cell(c[map.price])) : NaN,
+  }
+  : { barcode: cell(c[0]), name: nameOf(c), unit: unitOf(c), price: NaN });
+
 $("btn-import").onclick = () => $("import-file").click();
 $("import-file").onchange = async (e) => {
   const file = e.target.files[0];
   if (!file) return;
-  const rows = (await sheetRows(file))
-    .filter(c => c.length >= 2 && /\d/.test(c[0]) && c[1].trim());
+  const all = await sheetRows(file);
+  const map = headerMap(all[0]);
+  const rows = (map ? all.slice(1) : all)
+    .map(c => productRow(c, map))
+    .filter(r => r.barcode && /\d/.test(r.barcode) && r.name);
   let n = 0;
   try {
-    for (const c of rows) { await db.saveProductName(c[0].trim().replace(/^﻿/, ""), nameOf(c), unitOf(c)); n++; }
+    for (const r of rows) { await db.saveProductName(r.barcode, r.name, r.unit, r.price); n++; }
     db.logAction(identity, "استيراد أصناف", `${n} صنف`);
     toast(`تم استيراد ${n} صنف`);
   } catch (err) {
@@ -896,9 +908,16 @@ $("btn-import-stock").onclick = () => $("stock-file").click();
 $("stock-file").onchange = async (e) => {
   const file = e.target.files[0];
   if (!file) return;
-  // the quantity is always the last column, so a name with a comma in it still lands whole
-  const rows = (await sheetRows(file))
-    .map(c => ({ barcode: cell(c[0]), name: c.slice(1, -1).map(cell).join(" ").trim(), qty: parseInt(cell(c[c.length - 1]), 10) }))
+  // With a header row the columns can be in any order (theirs is الرصيد first); without one the
+  // quantity is the last column, so a name with a comma in it still lands whole.
+  const all = await sheetRows(file);
+  const map = headerMap(all[0]);
+  const rows = (map ? all.slice(1) : all)
+    .map(c => (map
+      ? { barcode: cell(c[map.barcode]), name: cell(c[map.name]),
+          qty: parseInt(cell(map.qty !== undefined ? c[map.qty] : ""), 10) }
+      : { barcode: cell(c[0]), name: c.slice(1, -1).map(cell).join(" ").trim(),
+          qty: parseInt(cell(c[c.length - 1]), 10) }))
     .filter(r => r.barcode && /\d/.test(r.barcode) && r.name && Number.isFinite(r.qty) && r.qty >= 0);
   if (!rows.length) { toast("الملف مفيهوش صفوف صالحة — لازم: باركود، اسم، كمية"); e.target.value = ""; return; }
   if (!stockBranch) { toast("اختار الفرع الأول"); e.target.value = ""; return; }

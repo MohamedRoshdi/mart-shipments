@@ -83,6 +83,7 @@ const prodOf = (v) => (typeof v === 'string' ? { name: v } : (v || {}));
 const row = (barcode, v) => ({
   barcode, name: prodOf(v).name, qty: prodOf(v).qty, stock: prodOf(v).stock || {},
   unit: prodOf(v).unit || "",
+  price: prodOf(v).price,          // the shelf label fills itself in when the catalog has one
 });
 
 // what the system says this branch holds; null when neither sheet mentioned the product
@@ -335,8 +336,13 @@ export async function deleteMany(collection, ids) {
 // merge, never replace: renaming a product must not drop the stocktake quantity next to it
 // The unit is only written when the sheet gave one. Renaming from the catalog screen must not
 // wipe a unit an import set, and writeProduct merges key by key.
-export async function saveProductName(barcode, name, unit) {
-  return writeProduct(barcode, unit ? { name, unit } : { name });
+export async function saveProductName(barcode, name, unit, price) {
+  return writeProduct(barcode, {
+    name,
+    ...(unit ? { unit } : {}),
+    // the shop's own export carries the last selling price; a sheet without it must not wipe one
+    ...(Number.isFinite(price) && price >= 0 ? { price } : {}),
+  });
 }
 
 // One branch's sheet: barcode, name, quantity. The write is a merge on the branch key, so

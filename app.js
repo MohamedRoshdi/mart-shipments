@@ -394,7 +394,7 @@ async function onBarcode(code) {
   state.currentUnit = (p && p.unit) || "";     // information only: it is never counted or summed
   const known = state.currentName !== "";
   // a label needs a name and nothing else: no quantity, no sheet, straight to the preview
-  if (labeling() && known) { clearFind(); showLabel(code, state.currentName); return; }
+  if (labeling() && known) { clearFind(); showLabel(code, state.currentName, p && p.price); return; }
   $("item-barcode").textContent = code;
   $("item-name").textContent = known ? state.currentName : "صنف غير مسجّل في ملف الأصناف";
   $("item-name").classList.toggle("unknown", !known);
@@ -739,11 +739,12 @@ function clearLabel() {
   renderQueue();               // the bottom bar counts the queue even with nothing on screen
 }
 
-function showLabel(barcode, name) {
+function showLabel(barcode, name, price) {
   labelItem = { barcode, name };
   $("label-empty").hidden = true;
   $("label-box").hidden = false;
-  $("label-price").value = "";
+  // the catalog price when the sheet carried one; still editable for this print only
+  $("label-price").value = Number.isFinite(price) ? String(price) : "";
   $("label-copies").value = Math.max(1, printCfg().copies);
   paintLabel();
   renderQueue();

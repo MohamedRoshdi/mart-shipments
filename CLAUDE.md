@@ -25,7 +25,7 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 5. **`db.js` is the only file that knows where data lives.** `app.js` and
    `manager.js` never touch Firestore or localStorage keys directly.
 6. **Bump `CACHE` in `sw.js` on every deploy.** Serving is cache-first, so phones
-   keep the old bundle until the cache name changes. Currently `mart-v41`.
+   keep the old bundle until the cache name changes. Currently `mart-v42`.
    The bump only works because install fetches with `new Request(u, { cache: "reload" })` —
    a plain `addAll` reads the browser's HTTP cache and copies **stale** files into the new
    cache name (caught in Chrome 2026-07-31: `mart-v34` held a `style.css` 262 bytes behind
@@ -52,7 +52,7 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 | `firestore.rules` | shape validation; the only server-side guard that exists |
 | `SETUP.md` | Arabic guide for the shop owner |
 | `products-template.csv`, `stock-template.csv`, `suppliers-template.csv` | the three import shapes: barcode+name+**unit**, barcode+name+quantity, and **code+supplier name** |
-| `tests/app.spec.js` | 68 Playwright tests, all in localStorage mode |
+| `tests/app.spec.js` | 69 Playwright tests, all in localStorage mode |
 | `scripts/*.mjs` | live checks and screenshot helpers (see below) |
 
 ## Data model
@@ -73,9 +73,10 @@ not a kind of shipment.
 with its last one — nothing to create, nothing to clean up, and no empty months piling up.
 Re-scanning the same barcode with the same date grows that row instead of adding a second.
 
-`products/{barcode}` — `{ name, unit?, stock?: {branch: qty}, qty? }`. `unit` is the third column
-of the catalog sheet (كرتونة / كيلو / علبة): shown next to the name and copied onto the item as
-`item.unit`, **never counted, never summed, and never written into a TXT file**. The barcode **is** the document
+`products/{barcode}` — `{ name, unit?, price?, stock?: {branch: qty}, qty? }`. `unit` is the unit
+column of the catalog sheet (كرتونة / كيلو / علبة): shown next to the name and copied onto the item
+as `item.unit`, **never counted, never summed, and never written into a TXT file**. `price` is the
+shop's last selling price, and the only thing that reads it is the shelf label — it fills itself in. The barcode **is** the document
 id. **Each branch has its own sheet**, so the system quantity is a map keyed by branch name;
 `qty` is the older shop-wide import (9,501 products carried it on 2026-07-30) and stays as the
 fallback for any barcode a branch sheet has not covered. `db.stockFor(product, branch)` is the
@@ -119,7 +120,7 @@ Rules in force (all live-tested):
   run's writes only ever reached the local cache. Re-run `scripts/live-expiry.mjs` after a quota
   reset and confirm with `scripts/live-expiry-server.mjs` (fresh context = server reads).
 - `products`: create/update/delete open, `name` 1–100 chars, barcode ≤ 32, optional
-  `qty` a number ≥ 0, optional `stock` a map of ≤ 10 branches (rules cannot iterate a map,
+  `qty` and `price` numbers ≥ 0, optional `stock` a map of ≤ 10 branches (rules cannot iterate a map,
   so the per-branch values are only guarded client-side).
 
 `createdAt` is `Date.now()` on purpose — `serverTimestamp()` reads back null in the
@@ -198,6 +199,17 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   a scan still costs the one `getProduct` read it always cost. `state.branch` (the branch the
   count is stamped with, not `myBranch()`) picks which number the employee sees. Never add a
   second collection for it.
+- **The header row decides the columns, and only then does position matter.** The shop's own
+  system exports the catalog as «كود الصنف | الوحدة | اسم الصنف | معامل التحويل | اخر سعر بيع» and
+  the stock sheet as «الرصيد | كود الصنف | الوحدة | اسم الصنف» — the quantity first. `sheet.js
+  headerMap()` reads the first row and returns column indexes, or null when that row is data; both
+  importers fall back to the old positional rules then, so every sheet that used to work still
+  does. The unit arrives as a **code**, not a word (`unitName`: 1 قطعة، 2 كيلو، 3 علبة، 4 كرتونة،
+  5 عرض); a non-numeric cell is taken as the word it already is. `معامل التحويل` is ignored on
+  purpose — nothing in the app multiplies units.
+- **A stock sheet must never wipe the price, and a catalog sheet must never wipe the stock.**
+  `saveProductName` only writes the keys it was given and `writeProduct` merges, so an import that
+  has no price column leaves the price alone.
 - **One chip drives both directions.** `stockBranch` in `manager.js` feeds the import *and* the
   catalog export, so the file that comes out (`الباركود، الاسم، الكمية في <الفرع>`) is exactly
   the file that goes back in. The import reads the **last** column as the quantity — which is

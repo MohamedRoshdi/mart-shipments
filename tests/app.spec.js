@@ -1619,6 +1619,49 @@ test('label: pick a product, preview it, print the copies asked for', async ({ p
   await expect(page.locator('#label-copies')).toHaveValue('3');
 });
 
+test("import: the shop's own column order, unit codes and last selling price", async ({ page }) => {
+  await page.goto('/manager.html?test=1');
+  await page.fill('#pin-input', await page.evaluate(() => window.APP_CONFIG.managerPin));
+  await page.click('#btn-pin');
+  await page.click('#btn-products');
+  // their catalog export: كود الصنف | الوحدة | اسم الصنف | معامل التحويل | اخر سعر بيع
+  await page.setInputFiles('#import-file', {
+    name: 'items.csv',
+    mimeType: 'text/csv',
+    buffer: Buffer.from(
+      'كود الصنف,الوحدة,اسم الصنف,معامل التحويل,اخر سعر بيع\n'
+      + '6223001234562,4,زيت عافية,12,45.95\n'
+      + '111,2,لحمة بلدي,1,320\n', 'utf8'),
+  });
+  await expect(page.locator('#toast')).toContainText('تم استيراد 2 صنف');
+  const products = await page.evaluate(() => JSON.parse(localStorage.getItem('test-products')));
+  expect(products['6223001234562']).toEqual({ name: 'زيت عافية', unit: 'كرتونة', price: 45.95 });
+  expect(products['111']).toEqual({ name: 'لحمة بلدي', unit: 'كيلو', price: 320 });
+
+  // their stock export puts الرصيد first; the header is what makes the order not matter
+  await page.click('#btn-back');
+  await page.click('#stock-branch button');
+  await page.setInputFiles('#stock-file', {
+    name: 'stock.csv',
+    mimeType: 'text/csv',
+    buffer: Buffer.from('الرصيد,كود الصنف,الوحدة,اسم الصنف\n7,111,2,لحمة بلدي\n', 'utf8'),
+  });
+  await expect(page.locator('#toast')).toContainText('تم استيراد كميات 1 صنف');
+  const after = await page.evaluate(() => JSON.parse(localStorage.getItem('test-products'))['111']);
+  expect(after.price).toBe(320);                     // the stock sheet must not wipe the price
+  expect(after.stock[await page.evaluate(() => window.APP_CONFIG.branches[0].name)]).toBe(7);
+
+  // and the label fills its own price in
+  await page.goto('/?test=1');
+  await page.evaluate(() => localStorage.setItem('employeeName', 'أحمد'));
+  await page.reload();
+  await page.click('#btn-label');
+  await page.fill('#barcode-input', '111');
+  await page.click('#btn-lookup');
+  await expect(page.locator('#label-price')).toHaveValue('320');
+  await expect(page.locator('#label-preview .lbl-price')).toContainText('320');
+});
+
 test('label: several items queue up and print in one go', async ({ page }) => {
   await page.goto('/?test=1');
   await page.evaluate(() => {
