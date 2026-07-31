@@ -447,7 +447,9 @@ node scripts/live-expiry-cleanup.mjs             # janitor for a live-expiry run
 node scripts/live-expiry-server.mjs              # fresh context: what the SERVER holds, no local cache
 node scripts/live-junk-sweep.mjs                 # every product AND shipment a dead live run left in the real data (DELETE=1 removes them); costs one full catalog read
 node scripts/live-users-probe.mjs                # read-only users list; TIME=1 also times one save ack
-# price, factor, supplierCode and «تم تحميلها» — writes, re-reads in a FRESH context, deletes.
+# price, unitCode, factor, supplierCode and «تم تحميلها» — writes, re-reads in a FRESH context,
+# deletes. It tells a rules rejection from an exhausted quota: the first means the key is wrong,
+# the second means the run proved NOTHING and prints INCONCLUSIVE rather than FAIL.
 # BASE matters: the default is the DEPLOYED site, so a key added this session has to be checked
 # against a local server (BASE=http://localhost:8080) until the push lands.
 STAMP=$RANDOM BASE=http://localhost:8080 node scripts/live-newfields.mjs
