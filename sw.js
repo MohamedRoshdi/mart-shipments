@@ -1,12 +1,17 @@
 // bump CACHE version on every deploy - cache-first serving keeps old assets until the name changes
-const CACHE = "mart-v34";
+const CACHE = "mart-v35";
 const ASSETS = ["./", "index.html", "style.css", "app.js", "db.js", "auth.js", "expiry.js", "firebase-config.js",
   "manager.html", "manager.js", "products-template.csv", "stock-template.csv",
   "admin.html", "admin.js", "zip.js",
   "manifest.json", "vendor/html5-qrcode.min.js", "icon-192.png", "icon-512.png"];
 
 self.addEventListener("install", (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)));
+  // cache: "reload" is what makes bumping CACHE actually mean something. addAll() fetches through
+  // the browser's HTTP cache, and GitHub Pages serves these files with a max-age, so a plain
+  // addAll copies the file the browser already has into the new cache under the new name.
+  // Measured 2026-07-31 in Chrome: cache mart-v34 held a style.css 262 bytes shorter than the
+  // one on the server, and the phone showed the previous design with the new cache name.
+  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS.map((u) => new Request(u, { cache: "reload" })))));
   self.skipWaiting();
 });
 
