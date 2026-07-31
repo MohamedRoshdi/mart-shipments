@@ -3,12 +3,17 @@ service cloud.firestore {
   match /databases/{database}/documents {
     match /shipments/{id} {
       allow read: if true;
-      allow create: if request.resource.data.keys().hasOnly(['name', 'createdBy', 'createdAt', 'items', 'branch', 'type', 'supplierCode', 'loadedBy', 'loadedAt'])
+      allow create: if request.resource.data.keys().hasOnly(['name', 'createdBy', 'createdAt', 'items', 'branch', 'type', 'supplierCode', 'loadedBy', 'loadedAt', 'erpAt', 'erpFile'])
         // «تم تحميلها»: both keys arrive together, and a re-load overwrites them
         && (!('loadedBy' in request.resource.data)
             || (request.resource.data.loadedBy is string && request.resource.data.loadedBy.size() <= 50))
         && (!('loadedAt' in request.resource.data)
             || (request.resource.data.loadedAt is number))
+        // «تم الاستيراد»: when the shop's own system took the file in, and which file proved it
+        && (!('erpAt' in request.resource.data)
+            || (request.resource.data.erpAt is number))
+        && (!('erpFile' in request.resource.data)
+            || (request.resource.data.erpFile is string && request.resource.data.erpFile.size() <= 200))
         && (!('supplierCode' in request.resource.data)
             || (request.resource.data.supplierCode is string && request.resource.data.supplierCode.size() <= 20))
         && (!('branch' in request.resource.data)
@@ -21,12 +26,17 @@ service cloud.firestore {
         && request.resource.data.createdAt is number
         && request.resource.data.items is list && request.resource.data.items.size() <= 200;
       // edit changes only name + items; createdBy/createdAt stay as first written
-      allow update: if request.resource.data.keys().hasOnly(['name', 'createdBy', 'createdAt', 'items', 'branch', 'type', 'supplierCode', 'loadedBy', 'loadedAt'])
+      allow update: if request.resource.data.keys().hasOnly(['name', 'createdBy', 'createdAt', 'items', 'branch', 'type', 'supplierCode', 'loadedBy', 'loadedAt', 'erpAt', 'erpFile'])
         // «تم تحميلها»: both keys arrive together, and a re-load overwrites them
         && (!('loadedBy' in request.resource.data)
             || (request.resource.data.loadedBy is string && request.resource.data.loadedBy.size() <= 50))
         && (!('loadedAt' in request.resource.data)
             || (request.resource.data.loadedAt is number))
+        // «تم الاستيراد»: when the shop's own system took the file in, and which file proved it
+        && (!('erpAt' in request.resource.data)
+            || (request.resource.data.erpAt is number))
+        && (!('erpFile' in request.resource.data)
+            || (request.resource.data.erpFile is string && request.resource.data.erpFile.size() <= 200))
         && (!('supplierCode' in request.resource.data)
             || (request.resource.data.supplierCode is string && request.resource.data.supplierCode.size() <= 20))
         && request.resource.data.createdBy == resource.data.createdBy

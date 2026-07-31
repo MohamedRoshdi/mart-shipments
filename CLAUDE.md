@@ -68,6 +68,9 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 `createdAt` (epoch ms), `branch`, `type`, `items: [{barcode, name, qty, unit?}]`, and the
 «تم تحميلها» pair `loadedBy?` / `loadedAt?` — **absent means nobody has taken this shipment into
 the shop's own system yet**. There is no boolean: the two fields are the state and the receipt.
+`erpAt?` / `erpFile?` are the stage after it: when the shop's own system actually took the file in,
+and which file proved it. **Nothing writes them yet** (see the ERP-state invariant), but both are
+released in `firestore.rules` so the first write is not a 403; `erpState()` reads them today.
 
 `counts/{auto}` — a stocktake (جرد): `name` (a shelf, never a supplier), `createdBy`,
 `createdAt`, `branch`, `items: [{barcode, name, qty, sys, unit?}]`. `qty` is what the employee counted on the shelf,
@@ -123,8 +126,10 @@ Rules in force (all live-tested):
   ≤ 6 keys whose `logo` is a string ≤ 200,000 chars.
 - `logs`: create-only with the four keys; `update`/`delete` always denied.
 - create: key allow-list, types, sizes, `items` ≤ 200, optional `supplierCode` a string ≤ 20,
-  optional `loadedBy` a string ≤ 50 and `loadedAt` a number.
-- update: `name`, `items`, `type`, `supplierCode`, `loadedBy` and `loadedAt` may change;
+  optional `loadedBy` a string ≤ 50 and `loadedAt` a number, optional `erpAt` a number and
+  `erpFile` a string ≤ 200.
+- update: `name`, `items`, `type`, `supplierCode`, `loadedBy`, `loadedAt`, `erpAt` and `erpFile`
+  may change;
   `createdBy`, `createdAt` and **`branch` are immutable** (403 on any attempt). A re-load is an
   ordinary overwrite of the two loaded keys — the audit trail, not the doc, is what keeps the history.
 - delete: allowed on both collections (the owner asked for it).
