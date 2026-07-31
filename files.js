@@ -163,8 +163,16 @@ export async function readText(folder, name) {
 export async function saveText(folder, name, text) {
   const safe = safeSegment(name);
   if (bridge()) {
-    await bridge().saveText(folder, safe, text);
-    return { how: "disk", path: `${folder}\\${safe}` };
+    try {
+      await bridge().saveText(folder, safe, text);
+      return { how: "disk", path: `${folder}\\${safe}` };
+    } catch (e) {
+      /* Same promise the File System Access branch below makes: a full disk, an unplugged D:\
+         or a refused path must still hand the person their file. Without this, the rejection
+         was unhandled — no toast, no file — on a shipment ALREADY marked «تم تحميلها», which
+         is the one order of events the TXT flow cannot afford. */
+      console.error(e);
+    }
   }
   const root = await usableRoot(false);
   if (root) {

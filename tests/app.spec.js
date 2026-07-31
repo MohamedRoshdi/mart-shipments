@@ -2061,6 +2061,29 @@ test('files: a desktop bridge wins over the picker and the download', async ({ p
   expect(r.chosen).toBe('D:\\import');
 });
 
+/* Found by review 2026-08-01: the bridge branch had no catch, so an unplugged D:\ or a full disk
+   left the write as an unhandled rejection — no toast, no file — on a shipment the caller had
+   ALREADY marked «تم تحميلها». A failing bridge must degrade exactly like a failing folder
+   handle: the person still gets their file, as a download. */
+test('files: a bridge that fails to write still hands the person their file', async ({ page }) => {
+  await page.goto('/?test=1');
+  const [download, r] = await Promise.all([
+    page.waitForEvent('download'),
+    page.evaluate(async () => {
+      window.mart = {
+        root: async () => 'D:\\import',
+        saveText: async () => { throw new Error('disk unplugged'); },
+        readText: async () => null,
+        listFolder: async () => [],
+      };
+      const f = await import('./files.js');
+      return f.saveText('اذن استلام', 'المراعي.txt', '111\t3');
+    }),
+  ]);
+  expect(r.how).toBe('download');                   // the toast stays honest about what happened
+  expect(download.suggestedFilename()).toBe('المراعي.txt');
+});
+
 test('admin: the folder section says what this browser can do', async ({ page }) => {
   await openAdmin(page);
   const supported = await page.evaluate(async () => (await import('./files.js')).supported());
