@@ -244,6 +244,18 @@ li.exp-expired .card-title { color: var(--bad); }
 .filter-bar { display: flex; gap: 8px; align-items: center; }
 .filter-bar input { flex: 1; min-inline-size: 0; }
 .filter-bar button { flex: 0 0 auto; white-space: nowrap; }
+/* the month is what the page actually reads from the server, so it sits first in the bar */
+.filter-bar select {
+  flex: 0 0 auto;
+  max-inline-size: 42%;
+  padding: 10px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  font-weight: 600;
+}
 #btn-filters.on { background: var(--ink); color: #fff; border-color: var(--ink); }
 #filters { display: grid; gap: 10px; }
 
@@ -380,6 +392,31 @@ button.card-open {
 }
 /* the one destructive control on a card screen: soft, full width, and below the exports */
 .row-actions button[data-expdel] { flex: 0 0 auto; min-inline-size: 0; padding-inline: 14px; }
+/* «تم تحميلها»: a state, so it is said in words on the card and repeated on the screen it opens */
+.tag-loaded {
+  display: inline-block;
+  margin-inline-start: 6px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: #e3f3ea;
+  color: var(--good);
+  font-size: .74rem;
+  font-weight: 700;
+  vertical-align: middle;
+}
+.loaded-line {
+  margin-block: 8px 0;
+  padding: 8px 10px;
+  border-radius: var(--r-sm);
+  /* flat on the start edge, or the rounded corners bend the 3 mm bar into a stray bracket */
+  border-start-start-radius: 0;
+  border-end-start-radius: 0;
+  border-inline-start: 3px solid var(--good);
+  background: #e3f3ea;
+  color: var(--good);
+  font-size: .84rem;
+  font-weight: 600;
+}
 /* a chip row inside a card is a full-width control, not a neighbour of the text */
 li > .seg { inline-size: 100%; }
 

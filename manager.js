@@ -9,6 +9,9 @@ const esc = (t) => { const d = document.createElement("div"); d.textContent = t;
 // attribute context needs the quotes escaped too — catalog text is publicly writable
 const escAttr = (t) => esc(t).replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 const fmtDate = (ts) => new Date(ts).toLocaleDateString("ar-EG");
+// «تم تحميلها» has to say the hour too: two people loading the same shipment do it the same day
+const fmtWhen = (ts) => `${fmtDate(ts)} ${new Date(ts).toLocaleTimeString("ar-EG",
+  { hour: "2-digit", minute: "2-digit" })}`;
 const ALL = "الكل";
 
 function toast(msg) {
@@ -185,15 +188,60 @@ $("type-filter").onclick = (e) => {
   renderList();
 };
 
+/* ---------- one month at a time ----------
+   The page used to read every shipment and every stocktake ever saved, on every visit. It now
+   reads the month that is picked, which is the current one to start with; «كل الشهور» is still
+   there for the times somebody is looking for something old. */
+
+const MONTH_ALL = "";
+const monthOf = (ts) => {
+  const d = new Date(ts);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+};
+let month = monthOf(Date.now());
+
+function renderMonthPick() {
+  const now = new Date();
+  const opts = Array.from({ length: 12 }, (_, i) => {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const k = monthOf(d.getTime());
+    return `<option value="${k}"${k === month ? " selected" : ""}>${
+      d.toLocaleDateString("ar-EG", { month: "long", year: "numeric" })}</option>`;
+  });
+  opts.push(`<option value=""${month === MONTH_ALL ? " selected" : ""}>كل الشهور</option>`);
+  $("month-pick").innerHTML = opts.join("");
+}
+
+async function loadMonth() {
+  all = await db.listShipments(month).catch(() => []);
+  counts = canDo("count") ? await db.listCounts(month).catch(() => []) : [];
+  // never hold a branch this user may not see: the filter runs before anything is painted
+  if (scopes.length) {
+    all = all.filter(s => scopes.includes(s.branch));
+    counts = counts.filter(c => scopes.includes(c.branch));
+  }
+}
+
+$("month-pick").onchange = async () => {
+  month = $("month-pick").value;
+  await loadMonth();
+  renderList();
+};
+
 async function openManager() {
   render("screen-manager");
   if (scopes.length === 1) $("screen-title").textContent = shortBranch(scopes[0]);
-  all = await db.listShipments().catch(() => []);
-  if (scopes.length) all = all.filter(s => scopes.includes(s.branch));   // never load another branch
-  counts = canDo("count") ? await db.listCounts().catch(() => []) : [];
-  if (scopes.length) counts = counts.filter(c => scopes.includes(c.branch));
+  await loadMonth();
+  // an empty current month on the first of the month would look like an empty app; ask for
+  // everything once in that case, and let the picker say so
+  if (!all.length && !counts.length && month !== MONTH_ALL) {
+    month = MONTH_ALL;
+    await loadMonth();
+  }
+  // الصلاحيات is filed by the expiry date, not by the day it was typed, so its own tab groups it
   expRows = canDo("expiry") ? await db.listExpiry().catch(() => []) : [];
   if (scopes.length) expRows = expRows.filter(e => !e.branch || scopes.includes(e.branch));
+  renderMonthPick();
   renderFilter();
   renderTypeFilter();
   renderStockBranch();
@@ -205,6 +253,7 @@ function renderTabs() {
   [...$("list-tabs").children].forEach(b =>
     b.setAttribute("aria-pressed", String(b.dataset.tab === tab)));
   $("type-filter-row").hidden = tab !== "ship";   // a stocktake has no shipment type
+  $("month-pick").hidden = tab === "expiry";      // a صلاحيات month is an expiry date, not a filter
   $("ships-block").hidden = tab !== "ship";
   $("counts-block").hidden = tab !== "count";
   $("expiry-block").hidden = tab !== "expiry";
@@ -267,8 +316,8 @@ function renderList() {
   // which is the same two taps they took before.
   $("all-shipments").innerHTML = shown.map((s, i) => `<li>
       <button class="card-open" data-act="view" data-i="${i}">
-        <span class="card-title">${esc(s.name)}</span>
-        <span class="meta">${esc(s.type || "بدون نوع")} · ${esc(s.branch || "بدون فرع")} · ${esc(s.createdBy)} · ${fmtDate(s.createdAt)} · ${s.items.length} صنف</span>
+        <span class="card-title">${esc(s.name)}${s.loadedAt ? ` <span class="tag-loaded">تم تحميلها</span>` : ""}</span>
+        <span class="meta">${esc(s.type || "بدون نوع")} · ${esc(s.branch || "بدون فرع")} · ${esc(s.createdBy)} · ${fmtDate(s.createdAt)} · ${s.items.length} صنف${s.loadedAt ? ` · حمّلها ${esc(s.loadedBy || "؟")} ${fmtWhen(s.loadedAt)}` : ""}</span>
       </button>
     </li>`).join("") || `<li class="empty">${filter === ALL ? "مفيش شحنات لسه" : "مفيش شحنات في الفرع ده"}</li>`;
 }
@@ -615,6 +664,8 @@ function openDetail(s, kind = "ship") {
   $("detail-meta").textContent = [s.branch || "بدون فرع", s.createdBy, fmtDate(s.createdAt),
     ...(s.supplierCode ? [`كود المورد ${s.supplierCode}`] : [])].join(" · ");
   $("btn-download-txt").hidden = isCount;                 // a TXT of a count says nothing about it
+  $("detail-load").hidden = isCount || !canDo("download");   // a stocktake is never «تم تحميلها»
+  paintLoaded();
   $("btn-delete-detail").textContent = isCount ? "حذف الجرد" : "حذف الشحنة";
   renderDetailType();
   renderDetailItems();
@@ -667,12 +718,59 @@ $("detail-items").onclick = (e) => {
   renderDetailItems();
 };
 
-$("btn-copy").onclick = () => copyShipment(current);
+/* ---------- «تم تحميلها»: who took this shipment into the shop's system, and when ---------- */
+
+const loadedNote = (s) => (s.loadedAt
+  ? `تم تحميلها — ${s.loadedBy || "؟"} · ${fmtWhen(s.loadedAt)}` : "");
+
+function paintLoaded() {
+  const done = !!current.loadedAt;
+  $("detail-loaded").hidden = current.kind === "count" || !done;
+  $("detail-loaded").textContent = loadedNote(current);
+  $("btn-loaded").textContent = done ? "تحميل تاني" : "تم التحميل";
+  $("btn-loaded").classList.toggle("primary", !done);
+}
+
+/* The one place a shipment becomes loaded. Downloading the file IS taking the shipment into the
+   shop's system, so the exports mark it too; the button covers the times no file was needed.
+   Returns false only when the person backed out of a second load — the caller then does nothing. */
+async function markLoaded(force) {
+  if (current.kind === "count") return true;
+  // the same person taking Excel and then TXT is one loading, two files — only somebody else
+  // (or an explicit tap on «تحميل تاني») is a second load worth warning about and logging
+  if (current.loadedAt && current.loadedBy === identity && !force) return true;
+  const again = !!current.loadedAt;
+  if (again && !confirm(`«${current.name}» ${loadedNote(current)}.\nتحمّلها تاني؟`)) return false;
+  const at = Date.now();
+  try {
+    await db.markLoaded(current._id, identity, at);
+  } catch (err) {
+    console.error(err);
+    toast("ما اتسجلش إن الشحنة اتحمّلت");
+    return true;                       // the file itself is not worth blocking over
+  }
+  current.loadedBy = identity;
+  current.loadedAt = at;
+  const row = all.find(s => s._id === current._id);
+  if (row) { row.loadedBy = identity; row.loadedAt = at; }   // the list is the same objects
+  db.logAction(identity, again ? "إعادة تحميل شحنة" : "تحميل شحنة",
+    `${current.name} · ${current.branch || ""}`);
+  paintLoaded();
+  if (again) toast("اتسجل تحميل تاني للشحنة");
+  return true;
+}
+
+$("btn-loaded").onclick = () => markLoaded(true);   // the button always means "load it now"
+
+$("btn-copy").onclick = async () => { if (await markLoaded()) copyShipment(current); };
 const detailShipment = () => ({ ...current, name: $("detail-name").value.trim() || current.name });
-$("btn-download").onclick = () => (current.kind === "count"
-  ? downloadCount(detailShipment())
-  : downloadShipment(detailShipment()));
-$("btn-download-txt").onclick = () => downloadShipmentTxt(detailShipment());
+$("btn-download").onclick = async () => {
+  if (current.kind === "count") return downloadCount(detailShipment());
+  if (await markLoaded()) downloadShipment(detailShipment());
+};
+$("btn-download-txt").onclick = async () => {
+  if (await markLoaded()) downloadShipmentTxt(detailShipment());
+};
 
 // deleting from the card screen, not from the list: the row you are about to lose is on screen
 $("btn-delete-detail").onclick = async () => {
@@ -878,23 +976,30 @@ const productRow = (c, map) => (map
     name: cell(c[map.name]),
     unit: unitName(map.unit !== undefined ? c[map.unit] : ""),
     price: map.price !== undefined ? Number(cell(c[map.price])) : NaN,
+    factor: map.factor !== undefined ? Number(cell(c[map.factor])) : NaN,
   }
-  : { barcode: cell(c[0]), name: nameOf(c), unit: unitOf(c), price: NaN });
+  : { barcode: cell(c[0]), name: nameOf(c), unit: unitOf(c), price: NaN, factor: NaN });
 
 $("btn-import").onclick = () => $("import-file").click();
 $("import-file").onchange = async (e) => {
   const file = e.target.files[0];
   if (!file) return;
-  const all = await sheetRows(file);
+  let all;
+  try { all = await sheetRows(file); } catch (err) { toast(err.message); e.target.value = ""; return; }
   const map = headerMap(all[0]);
-  const rows = (map ? all.slice(1) : all)
+  const usable = (map ? all.slice(1) : all)
     .map(c => productRow(c, map))
     .filter(r => r.barcode && /\d/.test(r.barcode) && r.name);
+  // a unit code the table does not know is a bad row: it is refused, and the person is told which
+  const bad = usable.filter(r => r.unit === null);
+  const rows = usable.filter(r => r.unit !== null);
   let n = 0;
   try {
-    for (const r of rows) { await db.saveProductName(r.barcode, r.name, r.unit, r.price); n++; }
-    db.logAction(identity, "استيراد أصناف", `${n} صنف`);
-    toast(`تم استيراد ${n} صنف`);
+    for (const r of rows) { await db.saveProductName(r.barcode, r.name, r.unit, r.price, r.factor); n++; }
+    db.logAction(identity, "استيراد أصناف", `${n} صنف${bad.length ? ` · ${bad.length} مرفوض` : ""}`);
+    toast(bad.length
+      ? `تم استيراد ${n} صنف · اترفض ${bad.length} لكود وحدة مش معروف (${bad.slice(0, 3).map(r => r.barcode).join("، ")})`
+      : `تم استيراد ${n} صنف`);
   } catch (err) {
     console.error(err);
     toast(`اتسجل ${n} صنف وبعدين حصلت مشكلة — جرّب تاني`);
@@ -910,7 +1015,8 @@ $("stock-file").onchange = async (e) => {
   if (!file) return;
   // With a header row the columns can be in any order (theirs is الرصيد first); without one the
   // quantity is the last column, so a name with a comma in it still lands whole.
-  const all = await sheetRows(file);
+  let all;
+  try { all = await sheetRows(file); } catch (err) { toast(err.message); e.target.value = ""; return; }
   const map = headerMap(all[0]);
   const rows = (map ? all.slice(1) : all)
     .map(c => (map

@@ -31,6 +31,7 @@
         <button type="button" data-tab="expiry" aria-pressed="false">الصلاحيات</button>
       </div>
       <div class="filter-bar">
+        <select id="month-pick" aria-label="الشهر"></select>
         <input id="list-search" type="text" maxlength="60" placeholder="ابحث باسم المورد أو الموظف">
         <button id="btn-filters" type="button" class="ghost" aria-expanded="false">فلترة</button>
       </div>
@@ -76,7 +77,7 @@
             <button id="btn-import">استيراد ملف</button>
             <a id="btn-template" href="products-template.csv" download>تحميل النموذج</a>
           </div>
-          <input id="import-file" type="file" accept=".csv,text/csv" hidden>
+          <input id="import-file" type="file" accept=".xlsx,.csv,text/csv" hidden>
         </li>
         <li id="tool-stock">
           <div class="card-main">
@@ -88,7 +89,7 @@
             <button id="btn-import-stock">استيراد الكميات</button>
             <a id="btn-stock-template" href="stock-template.csv" download>تحميل النموذج</a>
           </div>
-          <input id="stock-file" type="file" accept=".csv,text/csv" hidden>
+          <input id="stock-file" type="file" accept=".xlsx,.csv,text/csv" hidden>
         </li>
         <li id="tool-export">
           <div class="card-main">
@@ -159,6 +160,10 @@
         <div id="detail-type" class="seg"></div>
       </div>
       <p id="detail-meta" class="meta"></p>
+      <p id="detail-loaded" class="loaded-line" hidden></p>
+      <div id="detail-load" class="row-actions">
+        <button id="btn-loaded" class="primary">تم التحميل</button>
+      </div>
       <h2>الأصناف</h2>
       <table><tbody id="detail-items"></tbody></table>
       <div id="detail-exports" class="row-actions">

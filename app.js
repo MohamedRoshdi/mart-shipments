@@ -400,6 +400,10 @@ async function onBarcode(code) {
   $("item-name").classList.toggle("unknown", !known);
   $("item-unit").hidden = !(known && state.currentUnit);
   $("item-unit-name").textContent = state.currentUnit;
+  // معامل التحويل is shown beside the unit and nothing else — no quantity is ever multiplied by it
+  const factor = p && Number.isFinite(p.factor) && p.factor > 1 ? p.factor : null;
+  $("item-factor").hidden = !(known && factor);
+  $("item-factor-val").textContent = factor || "";
   $("item-warn").hidden = known;                 // full explanation instead of a silent add
   $("item-warn-line").textContent = WARN[state.mode];
   // the whole point of a stocktake: the employee sees what the system claims before he types

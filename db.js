@@ -37,17 +37,36 @@ export async function saveShipment(shipment) {
   fs.addDoc(fs.collection(dbRef, 'shipments'), shipment).catch((e) => dispatchEvent(new CustomEvent('db-error', { detail: e })));
 }
 
-export async function listShipments() {
-  if (TEST_MODE) {
-    return lsArr('test-shipments')
-      .map((s) => ({ ...s, _id: String(s.createdAt) }))
-      .sort((a, b) => b.createdAt - a.createdAt);
-  }
+/* One month at a time. The manager page used to pull every shipment ever saved on every visit —
+   fine at a few hundred, not at a few years. `month` is "YYYY-MM"; null still means everything,
+   which is what the «الكل» option and the tests use. A range on the field the query is already
+   ordered by needs no composite index. */
+export function monthRange(month) {
+  if (!month) return null;
+  const [y, m] = month.split('-').map(Number);
+  return [new Date(y, m - 1, 1).getTime(), new Date(y, m, 1).getTime()];
+}
+
+const monthly = async (name, month) => {
   await live();
-  const snap = await fs.getDocs(
-    fs.query(fs.collection(dbRef, 'shipments'), fs.orderBy('createdAt', 'desc'))
-  );
+  const span = monthRange(month);
+  const snap = await fs.getDocs(fs.query(fs.collection(dbRef, name),
+    ...(span ? [fs.where('createdAt', '>=', span[0]), fs.where('createdAt', '<', span[1])] : []),
+    fs.orderBy('createdAt', 'desc')));
   return snap.docs.map((d) => ({ ...d.data(), _id: d.id }));
+};
+
+const lsMonth = (key, month) => {
+  const span = monthRange(month);
+  return lsArr(key)
+    .filter((s) => !span || (s.createdAt >= span[0] && s.createdAt < span[1]))
+    .map((s) => ({ ...s, _id: String(s.createdAt) }))
+    .sort((a, b) => b.createdAt - a.createdAt);
+};
+
+export async function listShipments(month) {
+  if (TEST_MODE) return lsMonth('test-shipments', month);
+  return monthly('shipments', month);
 }
 
 export async function updateShipment(id, data) {
@@ -63,6 +82,23 @@ export async function updateShipment(id, data) {
   await fs.updateDoc(fs.doc(dbRef, 'shipments', id), {
     name: data.name, items: data.items, type: data.type, supplierCode: data.supplierCode || '',
   });
+}
+
+/* A shipment is «تم تحميلها» once someone has taken it into the shop's own system. Two people
+   doing that twice is a double stock entry, so who and when are written down and shown before a
+   second one is allowed. Absent = nobody has loaded it yet. */
+export async function markLoaded(id, who, at) {
+  if (TEST_MODE) {
+    const all = lsArr('test-shipments')
+      .map((s) => (String(s.createdAt) === id ? { ...s, loadedBy: who, loadedAt: at } : s));
+    localStorage.setItem('test-shipments', JSON.stringify(all));
+    return;
+  }
+  await live();
+  // no await on the network, for the same reason as saveShipment: this runs while the person is
+  // waiting for a file to download, and awaiting the ack would hold that up — for ever offline
+  fs.updateDoc(fs.doc(dbRef, 'shipments', id), { loadedBy: who, loadedAt: at })
+    .catch((e) => dispatchEvent(new CustomEvent('db-error', { detail: e })));
 }
 
 export async function deleteShipment(id) {
@@ -84,6 +120,7 @@ const row = (barcode, v) => ({
   barcode, name: prodOf(v).name, qty: prodOf(v).qty, stock: prodOf(v).stock || {},
   unit: prodOf(v).unit || "",
   price: prodOf(v).price,          // the shelf label fills itself in when the catalog has one
+  factor: prodOf(v).factor,        // معامل التحويل, shown on the item sheet only
 });
 
 // what the system says this branch holds; null when neither sheet mentioned the product
@@ -336,12 +373,15 @@ export async function deleteMany(collection, ids) {
 // merge, never replace: renaming a product must not drop the stocktake quantity next to it
 // The unit is only written when the sheet gave one. Renaming from the catalog screen must not
 // wipe a unit an import set, and writeProduct merges key by key.
-export async function saveProductName(barcode, name, unit, price) {
+export async function saveProductName(barcode, name, unit, price, factor) {
   return writeProduct(barcode, {
     name,
     ...(unit ? { unit } : {}),
     // the shop's own export carries the last selling price; a sheet without it must not wipe one
     ...(Number.isFinite(price) && price >= 0 ? { price } : {}),
+    // معامل التحويل: shown next to the unit, never multiplied by anything. 1 means "no
+    // conversion", which is most of a 10k catalog — not worth a key on every doc.
+    ...(Number.isFinite(factor) && factor > 1 ? { factor } : {}),
   });
 }
 
@@ -382,15 +422,9 @@ export async function saveCount(count) {
   fs.addDoc(fs.collection(dbRef, 'counts'), count).catch((e) => dispatchEvent(new CustomEvent('db-error', { detail: e })));
 }
 
-export async function listCounts() {
-  if (TEST_MODE) {
-    return lsArr('test-counts')
-      .map((c) => ({ ...c, _id: String(c.createdAt) }))
-      .sort((a, b) => b.createdAt - a.createdAt);
-  }
-  await live();
-  const snap = await fs.getDocs(fs.query(fs.collection(dbRef, 'counts'), fs.orderBy('createdAt', 'desc')));
-  return snap.docs.map((d) => ({ ...d.data(), _id: d.id }));
+export async function listCounts(month) {
+  if (TEST_MODE) return lsMonth('test-counts', month);
+  return monthly('counts', month);
 }
 
 export async function updateCount(id, data) {

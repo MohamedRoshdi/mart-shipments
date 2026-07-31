@@ -233,7 +233,7 @@ $("suppliers-file").onchange = async () => {
     rows = await sheetRows(file);
   } catch (err) {
     console.error(err);
-    toast("مقدرناش نقرا الملف — تأكد إنه CSV");
+    toast(err.message || "مقدرناش نقرا الملف — تأكد إنه Excel أو CSV");
     return;
   }
   const list = rows

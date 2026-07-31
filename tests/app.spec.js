@@ -1676,7 +1676,7 @@ test("import: the shop's own column order, unit codes and last selling price", a
   });
   await expect(page.locator('#toast')).toContainText('تم استيراد 2 صنف');
   const products = await page.evaluate(() => JSON.parse(localStorage.getItem('test-products')));
-  expect(products['6223001234562']).toEqual({ name: 'زيت عافية', unit: 'كرتونة', price: 45.95 });
+  expect(products['6223001234562']).toEqual({ name: 'زيت عافية', unit: 'كرتونة', price: 45.95, factor: 12 });
   expect(products['111']).toEqual({ name: 'لحمة بلدي', unit: 'كيلو', price: 320 });
 
   // their stock export puts الرصيد first; the header is what makes the order not matter
@@ -1852,3 +1852,114 @@ test('label: a user without the permission never sees the screen', async ({ page
   await expect(page.locator('#screen-home')).toBeVisible();          // the deep link is refused too
   await expect(page.locator('#screen-label')).toBeHidden();
 });
+
+// tests/fixtures/catalog.xlsx is a real deflate-compressed workbook (scripts/make-xlsx-fixture.mjs),
+// so this is the only test that proves the zip walk and the inflate actually run in a browser.
+test('import: a real .xlsx, with a numeric barcode and a shared-string one', async ({ page }) => {
+  await openManagerPage(page);
+  await page.setInputFiles('#import-file', 'tests/fixtures/catalog.xlsx');
+  await expect(page.locator('#toast')).toContainText('تم استيراد 2 صنف');
+  await expect(page.locator('#toast')).toContainText('اترفض 1');     // unit code 9 is not a unit
+  const rows = await page.evaluate(() => JSON.parse(localStorage.getItem('test-products')));
+  // the barcode Excel stored as a number is the one that used to come back as junk
+  expect(rows['6221031492105']).toEqual({ name: 'لبن جهينة كامل الدسم', unit: 'كرتونة', price: 45.5, factor: 12 });
+  expect(rows['6221024150011']).toEqual({ name: 'جبنة بيضاء فيتا', unit: 'كيلو', price: 88 });
+  expect(rows['6221999000019']).toBeUndefined();                     // the refused row is not saved
+
+  // معامل التحويل rides to the item sheet, and a factor of 1 never shows up at all
+  await page.goto('/?test=1');
+  await page.evaluate(() => localStorage.setItem('employeeName', 'أحمد'));
+  await page.reload();
+  await page.click('#btn-new');
+  await page.fill('#barcode-input', '6221031492105');
+  await page.click('#btn-lookup');
+  await expect(page.locator('#item-unit-name')).toHaveText('كرتونة');
+  await expect(page.locator('#item-factor-val')).toHaveText('12');
+  await page.click('#btn-cancel-item');
+  await page.fill('#barcode-input', '6221024150011');
+  await page.click('#btn-lookup');
+  await expect(page.locator('#item-factor')).toBeHidden();
+});
+
+test('تم تحميلها: the export marks it, and somebody else has to confirm a second load', async ({ page }) => {
+  await openManagerPage(page);
+  await page.click('button[data-act="view"]');
+  await expect(page.locator('#detail-loaded')).toBeHidden();          // nobody has loaded it yet
+  await expect(page.locator('#btn-loaded')).toHaveText('تم التحميل');
+
+  // downloading the file IS taking the shipment into the shop's system
+  await Promise.all([page.waitForEvent('download'), page.click('#btn-download-txt')]);
+  await expect(page.locator('#detail-loaded')).toContainText('تم تحميلها');
+  await expect(page.locator('#btn-loaded')).toHaveText('تحميل تاني');
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('test-shipments'))[0]);
+  expect(saved.loadedBy).toBeTruthy();
+  expect(saved.loadedAt).toBeGreaterThan(0);
+  expect(await page.evaluate(() =>
+    JSON.parse(localStorage.getItem('test-logs')).some(l => l.action === 'تحميل شحنة'))).toBe(true);
+
+  // the same person taking a second file is not a second loading: no dialog, no second log row
+  await Promise.all([page.waitForEvent('download'), page.click('#btn-download')]);
+  expect(await page.evaluate(() =>
+    JSON.parse(localStorage.getItem('test-logs')).filter(l => l.action === 'تحميل شحنة').length)).toBe(1);
+
+  await page.click('#btn-back');
+  await expect(page.locator('#all-shipments .tag-loaded')).toHaveText('تم تحميلها');
+  await expect(page.locator('#all-shipments li')).toContainText('حمّلها');
+
+  // somebody else opens it: the warning names who loaded it, and cancelling loads nothing
+  await page.evaluate(() => {
+    const s = JSON.parse(localStorage.getItem('test-shipments'));
+    s[0].loadedBy = 'محمد يحيى';
+    localStorage.setItem('test-shipments', JSON.stringify(s));
+  });
+  await page.reload();                                 // the session survives, so no PIN screen
+  await page.click('button[data-act="view"]');
+  let asked = '';
+  page.once('dialog', d => { asked = d.message(); d.dismiss(); });
+  await page.click('#btn-loaded');
+  expect(asked).toContain('محمد يحيى');
+  expect(await page.evaluate(() =>
+    JSON.parse(localStorage.getItem('test-shipments'))[0].loadedBy)).toBe('محمد يحيى');
+
+  page.once('dialog', d => d.accept());
+  await page.click('#btn-loaded');
+  await expect(page.locator('#toast')).toContainText('تحميل تاني');
+  expect(await page.evaluate(() =>
+    JSON.parse(localStorage.getItem('test-logs')).some(l => l.action === 'إعادة تحميل شحنة'))).toBe(true);
+});
+
+test('the list reads one month, and the picker reaches the older ones', async ({ page }) => {
+  await signOut(page);
+  await page.goto('/manager.html?test=1');
+  await page.evaluate(() => {
+    const item = [{ barcode: '111', name: 'لبن', qty: 1 }];
+    localStorage.setItem('test-shipments', JSON.stringify([
+      { name: 'شحنة الشهر ده', createdBy: 'أحمد', createdAt: Date.now(), items: item },
+      // 100 days back is always a different month, whatever today is
+      { name: 'شحنة قديمة', createdBy: 'أحمد', createdAt: Date.now() - 100 * 864e5, items: item },
+    ]));
+  });
+  await page.fill('#pin-input', await page.evaluate(() => window.APP_CONFIG.managerPin));
+  await page.click('#btn-pin');
+  await expect(page.locator('#all-shipments li')).toHaveCount(1);
+  await expect(page.locator('#all-shipments li')).toContainText('شحنة الشهر ده');
+
+  await page.selectOption('#month-pick', '');                      // كل الشهور
+  await expect(page.locator('#all-shipments li')).toHaveCount(2);
+
+  await page.click('#list-tabs button[data-tab="expiry"]');
+  await expect(page.locator('#month-pick')).toBeHidden();          // an expiry month is a date
+});
+
+test('import: an old .xls says so instead of importing nothing', async ({ page }) => {
+  await openManagerPage(page);
+  await page.setInputFiles('#import-file', {
+    name: 'items.xls',
+    mimeType: 'application/vnd.ms-excel',
+    // the compound-file magic every real .xls starts with
+    buffer: Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1, 0, 0, 0, 0]),
+  });
+  await expect(page.locator('#toast')).toContainText('xls القديمة مش مدعومة');
+  expect(await page.evaluate(() => localStorage.getItem('test-products'))).toBeNull();
+});
+

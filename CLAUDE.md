@@ -25,7 +25,7 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 5. **`db.js` is the only file that knows where data lives.** `app.js` and
    `manager.js` never touch Firestore or localStorage keys directly.
 6. **Bump `CACHE` in `sw.js` on every deploy.** Serving is cache-first, so phones
-   keep the old bundle until the cache name changes. Currently `mart-v46`.
+   keep the old bundle until the cache name changes. Currently `mart-v47`.
    The bump only works because install fetches with `new Request(u, { cache: "reload" })` —
    a plain `addAll` reads the browser's HTTP cache and copies **stale** files into the new
    cache name (caught in Chrome 2026-07-31: `mart-v34` held a `style.css` 262 bytes behind
@@ -38,28 +38,30 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 | File | Role |
 |---|---|
 | `index.html` / `app.js` | employee app: setup, home, new/edit shipment **or stocktake**, **الصلاحيات** (months + one month), **ليبل الرف**, camera, item sheet |
-| `manager.html` / `manager.js` | manager app: PIN, shipments tab, stocktake tab, **expiry tab**, one search box over the list, filters behind `#btn-filters`, cards that open (no row buttons), edit, catalog screen (with a **ليبل** link per row), import/export (Excel, TXT, **ZIP by day**) |
+| `manager.html` / `manager.js` | manager app: PIN, shipments tab, stocktake tab, **expiry tab**, a **month picker** that decides what is read, one search box over the list, filters behind `#btn-filters`, cards that open (no row buttons, but a **«تم تحميلها»** tag), edit, **«تم التحميل»** on the card screen, catalog screen (with a **ليبل** link per row), import/export (Excel, TXT, **ZIP by day**) |
 | `admin.html` / `admin.js` | admin app: users + permissions + phone binding, settings (branches, types, **suppliers**, **label size/paper/logo**, PINs), audit trail, bulk delete by kind/branch/type/day-range, catalog wipe |
 | `auth.js` | permission list, PIN → identity, the 12-hour session shared by all three pages |
 | `expiry.js` | the pure part of الصلاحيات: month grouping, sorting, counters, the four colour states |
 | `label.js` | the whole of ليبل الرف that is not a screen: EAN-13 + Code 128 encoding, the barcode SVG, the label's HTML, and the settings guard. No db, no DOM, no session — that is what makes the price (or any other field) a one-line change later |
 | `db.js` | data layer; `?test=1` switches the whole app to localStorage |
 | `zip.js` | store-only ZIP writer, ~80 lines, no dependency; used by the folder export |
-| `sheet.js` | everything about reading a spreadsheet: `sheetRows` (the only place that knows Excel writes Arabic as windows-1256), `headerMap` (columns by Arabic heading, so the shop's own export order works), `unitName` (unit **code** → word). Used by the catalog/stock import (manager) and the supplier import (admin) |
+| `sheet.js` | everything about reading a spreadsheet: `sheetRows` (**a real `.xlsx`** — zip walk + `DecompressionStream` — or CSV, and the only place that knows Excel writes Arabic as windows-1256), `headerMap` (columns by Arabic heading, so the shop's own export order works), `unitName` (unit **code** → word, `null` for a code the table does not know). Used by the catalog/stock import (manager) and the supplier import (admin) |
 | `style.css` | one stylesheet for all three pages |
 | `sw.js`, `manifest.json` | **one** installable PWA, on the main URL. `manager.html` and `admin.html` carry no manifest: the PIN routes people to their screen (`auth.landingPage`), and the home screen links to the other two. Dropped 2026-07-31 on the owner's call — a phone with three near-identical icons was the confusing part. |
 | `firebase-config.js` | Firebase keys **plus** `APP_CONFIG`: PINs (incl. `adminPin`), branches, shipment types, suppliers, label settings |
 | `firestore.rules` | shape validation; the only server-side guard that exists |
 | `SETUP.md` | Arabic guide for the shop owner |
 | `products-template.csv`, `stock-template.csv`, `suppliers-template.csv` | the three import shapes: barcode+name+**unit**, barcode+name+quantity, and **code+supplier name** |
-| `tests/app.spec.js` | 73 Playwright tests, all in localStorage mode |
+| `tests/app.spec.js` | 77 Playwright tests, all in localStorage mode |
 | `scripts/*.mjs` | live checks and screenshot helpers (see below) |
 
 ## Data model
 
 `shipments/{auto}` — `name` (**the supplier**), `supplierCode?` (the code in the shop's own system,
 **looked up from the name at save time, never typed** — `db.supplierCodeOf`), `createdBy`,
-`createdAt` (epoch ms), `branch`, `type`, `items: [{barcode, name, qty, unit?}]`.
+`createdAt` (epoch ms), `branch`, `type`, `items: [{barcode, name, qty, unit?}]`, and the
+«تم تحميلها» pair `loadedBy?` / `loadedAt?` — **absent means nobody has taken this shipment into
+the shop's own system yet**. There is no boolean: the two fields are the state and the receipt.
 
 `counts/{auto}` — a stocktake (جرد): `name` (a shelf, never a supplier), `createdBy`,
 `createdAt`, `branch`, `items: [{barcode, name, qty, sys, unit?}]`. `qty` is what the employee counted on the shelf,
@@ -73,7 +75,10 @@ not a kind of shipment.
 with its last one — nothing to create, nothing to clean up, and no empty months piling up.
 Re-scanning the same barcode with the same date grows that row instead of adding a second.
 
-`products/{barcode}` — `{ name, unit?, price?, stock?: {branch: qty}, qty? }`. `unit` is the unit
+`products/{barcode}` — `{ name, unit?, price?, factor?, stock?: {branch: qty}, qty? }`. `factor` is
+معامل التحويل from the catalog sheet: **shown on the item sheet and nowhere else, never multiplied
+by anything**, and only stored when it is greater than 1 (1 means no conversion, which is most of a
+10k catalog — not worth a key on every doc). `unit` is the unit
 column of the catalog sheet (كرتونة / كيلو / علبة): shown next to the name and copied onto the item
 as `item.unit`, **never counted, never summed, and never written into a TXT file**. `price` is the
 shop's last selling price, and the only thing that reads it is the shelf label — it fills itself in. The barcode **is** the document
@@ -109,9 +114,11 @@ Rules in force (all live-tested):
   suppliers ≤ 1000 (the shop's real list is 425 — 300 was refusing their save), `label` a map of
   ≤ 6 keys whose `logo` is a string ≤ 200,000 chars.
 - `logs`: create-only with the four keys; `update`/`delete` always denied.
-- create: key allow-list, types, sizes, `items` ≤ 200, optional `supplierCode` a string ≤ 20.
-- update: `name`, `items`, `type`, `supplierCode` may change; `createdBy`, `createdAt` and
-  **`branch` are immutable** (403 on any attempt).
+- create: key allow-list, types, sizes, `items` ≤ 200, optional `supplierCode` a string ≤ 20,
+  optional `loadedBy` a string ≤ 50 and `loadedAt` a number.
+- update: `name`, `items`, `type`, `supplierCode`, `loadedBy` and `loadedAt` may change;
+  `createdBy`, `createdAt` and **`branch` are immutable** (403 on any attempt). A re-load is an
+  ordinary overwrite of the two loaded keys — the audit trail, not the doc, is what keeps the history.
 - delete: allowed on both collections (the owner asked for it).
 - `counts`: the same shape as `shipments` minus `type`, `items` ≤ 500; `createdBy`,
   `createdAt` and `branch` immutable on update; delete allowed.
@@ -122,8 +129,8 @@ Rules in force (all live-tested):
   its own cleanup) once the write quota had reset, and `scripts/live-expiry-server.mjs` shows the
   server holding only the shop's own months.
 - `products`: create/update/delete open, `name` 1–100 chars, barcode ≤ 32, optional
-  `qty` and `price` numbers ≥ 0, optional `stock` a map of ≤ 10 branches (rules cannot iterate a map,
-  so the per-branch values are only guarded client-side).
+  `qty`, `price` and `factor` numbers ≥ 0, optional `stock` a map of ≤ 10 branches (rules cannot
+  iterate a map, so the per-branch values are only guarded client-side).
 
 `createdAt` is `Date.now()` on purpose — `serverTimestamp()` reads back null in the
 local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
@@ -222,6 +229,20 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   rows** — the tests missed it because the fixtures use English headings and fall through to the
   positional path. `tests/fixtures/catalog.csv` deliberately keeps a comma inside a name, which
   only the positional path can carry, so adding English headings here would break it.
+- **An `.xlsx` is read here, without a dependency.** `sheetRows` sniffs `PK\x03\x04`, walks the zip
+  central directory by hand and inflates each entry with `DecompressionStream("deflate-raw")` — the
+  browser already owns the hard part. Only `xl/sharedStrings.xml` and the first `xl/worksheets/sheetN.xml`
+  are parsed, which is all a shop export has. **A barcode Excel stored as a number is the risky
+  case** (`<c>` with no `t` attribute), so `tests/fixtures/catalog.xlsx` deliberately holds one of
+  each; regenerate it with `node scripts/make-xlsx-fixture.mjs`, never by hand. A file that is not a
+  spreadsheet now **throws in Arabic** instead of returning an empty list — every importer used to
+  answer «تم استيراد 0 صنف» for a file it simply could not read, which is what the shop saw when
+  they uploaded a real `.xlsx`. The old binary `.xls` is refused by its `D0CF11E0` magic with the
+  Save-As instruction, because there is no way to read it without a real dependency.
+- **An unknown unit code is a refused row, not a silent one.** `unitName` returns `""` when the
+  sheet said nothing and **`null`** when it gave a code outside 1–5; the catalog import drops the
+  `null` rows, says how many and names the first three barcodes. Telling the two apart is the whole
+  point: a missing column must leave the unit alone.
 - **A stock sheet must never wipe the price, and a catalog sheet must never wipe the stock.**
   `saveProductName` only writes the keys it was given and `writeProduct` merges, so an import that
   has no price column leaves the price alone.
@@ -232,6 +253,20 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   back. The catalog sheet is the other file (`الباركود، الاسم، الوحدة`), and there `unitOf()`
   takes the last cell **unless it is numeric**, so a stocktake sheet imported into the wrong
   box cannot turn a quantity into a unit.
+- **«تم تحميلها» is written by the export, and only somebody else has to confirm.** `markLoaded()`
+  in `manager.js` is the one place `loadedBy`/`loadedAt` are set, and نسخ / Excel / TXT all go
+  through it — downloading the file *is* taking the shipment into the shop's system. The same
+  person taking Excel and then TXT is **one** loading: it returns early, so there is no dialog and
+  no second audit row. A different `identity` gets the confirm naming who loaded it and when, and
+  writes `إعادة تحميل شحنة`. «تم التحميل» on the card screen passes `force` so the button always
+  means "load it now". A stocktake is never loaded — `#detail-load` is hidden for a count.
+- **The manager page reads one month.** `db.listShipments(month)` / `listCounts(month)` take a
+  `"YYYY-MM"`; `monthRange()` turns it into a `createdAt` range on the field the query is already
+  ordered by, so no composite index is needed, and `null` still means everything (the «كل الشهور»
+  option, `app.js`, and the admin bulk delete all rely on that). The picker defaults to the current
+  month — **and `openManager()` falls back to «كل الشهور» once when that month is empty**, or the
+  shop would open the app on the first of the month and see nothing. الصلاحيات is not month-scoped
+  here: its rows are filed by the expiry date, not by the day they were typed.
 - **The supplier code is derived, never entered.** `db.supplierCodeOf(cfg, name)` resolves it from
   the saved name at save time, in `app.js` and in the manager's edit screen alike, so a shipment can
   never carry another supplier's code and renaming one moves the code with it. Old shipments keep
@@ -366,10 +401,11 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
 ## Commands
 
 ```bash
-npx playwright test                 # 59 tests, localStorage mode, ~30s
+npx playwright test                 # 77 tests, localStorage mode, ~40s
 npx playwright test -g "catalog"    # one group
 python3 -m http.server 8080         # serve locally, then open /?test=1
 node scripts/make-icons.mjs         # regenerate the PWA icons
+node scripts/make-xlsx-fixture.mjs  # rebuild tests/fixtures/catalog.xlsx (deflate, Excel-openable)
 ```
 
 Live checks against **production Firestore** (each cleans up after itself):
@@ -384,9 +420,12 @@ STAMP=$RANDOM node scripts/live-count.mjs        # الجرد: stock sheet, coun
 STAMP=$RANDOM node scripts/live-expiry.mjs       # الصلاحيات: record a date, merge, move month, Excel, delete
 node scripts/live-expiry-cleanup.mjs             # janitor for a live-expiry run that died mid-way
 node scripts/live-expiry-server.mjs              # fresh context: what the SERVER holds, no local cache
-node scripts/live-junk-sweep.mjs                 # every product a dead live run left in the real catalog (DELETE=1 removes them); costs one full read
+node scripts/live-junk-sweep.mjs                 # every product AND shipment a dead live run left in the real data (DELETE=1 removes them); costs one full catalog read
 node scripts/live-users-probe.mjs                # read-only users list; TIME=1 also times one save ack
-STAMP=$RANDOM node scripts/live-newfields.mjs    # do the SERVER's rules accept products.price and shipments.supplierCode? writes, re-reads in a FRESH context, deletes
+# price, factor, supplierCode and «تم تحميلها» — writes, re-reads in a FRESH context, deletes.
+# BASE matters: the default is the DEPLOYED site, so a key added this session has to be checked
+# against a local server (BASE=http://localhost:8080) until the push lands.
+STAMP=$RANDOM BASE=http://localhost:8080 node scripts/live-newfields.mjs
 node scripts/live-mobile-known.mjs               # read-only: Pixel 5 on the live site, a real catalog barcode
 OUT=/tmp/shots node scripts/shot-refused.mjs     # read-only: the refusal sheet, settled, on the live site
 OUT=/tmp/shots node scripts/shot-live-manager.mjs # read-only: one shot of the live manager screen
@@ -398,6 +437,7 @@ OUT=/tmp/shots BASE=http://localhost:8080 node scripts/shots-search.mjs   # the 
 OUT=/tmp/shots BASE=http://localhost:8080 node scripts/shots-supplier.mjs # the supplier list, admin side and employee side
 OUT=/tmp/shots BASE=http://localhost:8080 node scripts/shots-label.mjs    # ليبل الرف + prints 3 copies to PDF and measures the page (exits 1 if the paper is wrong)
 OUT=/tmp/shots BASE=http://localhost:8080 node scripts/shots-manager-list.mjs # the manager list, a card screen, the stocktake tab
+OUT=/tmp/shots BASE=http://localhost:8080 node scripts/shots-loaded.mjs   # the month bar, a «تم تحميلها» card and its screen, معامل التحويل on the item sheet
 ```
 
 Writing live scripts: pull real barcodes from the catalog first — invented ones are
@@ -411,6 +451,10 @@ debounce, or it reports false negatives.
   `test-counts` / `test-expiry` in localStorage. An `expiry` seed carries its own `_id`
   (`saveExpiry` writes `createdAt-barcode`, because two rows can land in the same millisecond). Seed `test-products` in any test that adds items, or the add
   is refused (`setUp()` seeds `111`/`222` by default).
+- **A seeded `createdAt` decides which month a test can see.** The list defaults to the current
+  month, so a fixture stamped in the past only shows up through the empty-month fallback (that is
+  why `openManagerPage()`'s 2025 timestamp still works — nothing else is seeded). A test about the
+  month bar must seed one row in the current month, or it is testing the fallback instead.
 - A `test-products` value may be a plain string **or** `{name, qty?, unit?, stock?}` — the string
   form is kept so older seeds still work, `qty`/`stock` is what a stocktake compares against, and
   `unit` is what the item sheet shows.
@@ -468,10 +512,22 @@ debounce, or it reports false negatives.
   has none of it**: `scripts/live-expiry-server.mjs` opens a fresh context and asks the server
   directly. Use it before believing any live "it worked". (The quota had reset by 2026-07-31 —
   writes land again, measured with `live-newfields.mjs` and a full `live-expiry.mjs` run.)
+  **Exhausted again 2026-07-31 18:03 UTC**: `live-newfields.mjs` wrote a product and re-read
+  `{"price":null,"unit":null,"factor":null}` from a fresh context, with `resource-exhausted` in the
+  console — so `products.factor` and the `loadedBy`/`loadedAt` pair are **released but not yet
+  proven server-side**. Re-run that script after the reset before believing they work in the shop.
+  The first symptom was a live script hanging for twelve minutes on a write it awaited: a backed-off
+  write does not fail, it waits.
+- **Every write in the app is fire-and-forget except `saveConfig`, and that is load-bearing.**
+  `markLoaded` awaited its `updateDoc` when it was first written, which put the file the manager is
+  waiting for behind a server ack — twelve minutes of it while the quota was exhausted, and for
+  ever offline. If a new write ever needs an ack, it needs a reason.
 - **A live script that dies half way leaves its row in the real catalog.** `live-junk-sweep.mjs`
   finds them by name and, with `DELETE=1`, removes them — it reads the whole catalog because the
   catalog screen stops at 50 rows and the search index is per phone. Measured 2026-07-31 after a
-  crashed run: 10,612 products, **0** left behind. Do not trust a screen count for this: the
+  crashed run: 10,612 products and 5 shipments, **0** left behind of either. It sweeps `shipments`
+  too, because a fake delivery sitting in the shop's own list is worse than a spare catalog row.
+  Do not trust a screen count for this: the
   version of `live-expiry-server.mjs` that typed into the catalog search reported «50» — the first
   page, not the matches — on a catalog that had none.
 - A stocktake reports on what was **scanned**. A product in the sheet that nobody scanned does

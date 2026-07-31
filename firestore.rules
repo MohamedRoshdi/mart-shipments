@@ -3,7 +3,12 @@ service cloud.firestore {
   match /databases/{database}/documents {
     match /shipments/{id} {
       allow read: if true;
-      allow create: if request.resource.data.keys().hasOnly(['name', 'createdBy', 'createdAt', 'items', 'branch', 'type', 'supplierCode'])
+      allow create: if request.resource.data.keys().hasOnly(['name', 'createdBy', 'createdAt', 'items', 'branch', 'type', 'supplierCode', 'loadedBy', 'loadedAt'])
+        // «تم تحميلها»: both keys arrive together, and a re-load overwrites them
+        && (!('loadedBy' in request.resource.data)
+            || (request.resource.data.loadedBy is string && request.resource.data.loadedBy.size() <= 50))
+        && (!('loadedAt' in request.resource.data)
+            || (request.resource.data.loadedAt is number))
         && (!('supplierCode' in request.resource.data)
             || (request.resource.data.supplierCode is string && request.resource.data.supplierCode.size() <= 20))
         && (!('branch' in request.resource.data)
@@ -16,7 +21,12 @@ service cloud.firestore {
         && request.resource.data.createdAt is number
         && request.resource.data.items is list && request.resource.data.items.size() <= 200;
       // edit changes only name + items; createdBy/createdAt stay as first written
-      allow update: if request.resource.data.keys().hasOnly(['name', 'createdBy', 'createdAt', 'items', 'branch', 'type', 'supplierCode'])
+      allow update: if request.resource.data.keys().hasOnly(['name', 'createdBy', 'createdAt', 'items', 'branch', 'type', 'supplierCode', 'loadedBy', 'loadedAt'])
+        // «تم تحميلها»: both keys arrive together, and a re-load overwrites them
+        && (!('loadedBy' in request.resource.data)
+            || (request.resource.data.loadedBy is string && request.resource.data.loadedBy.size() <= 50))
+        && (!('loadedAt' in request.resource.data)
+            || (request.resource.data.loadedAt is number))
         && (!('supplierCode' in request.resource.data)
             || (request.resource.data.supplierCode is string && request.resource.data.supplierCode.size() <= 20))
         && request.resource.data.createdBy == resource.data.createdBy
@@ -118,9 +128,12 @@ service cloud.firestore {
       // shop-wide import, still read as the fallback. unit is the third column of the catalog
       // sheet (كرتونة / كيلو / علبة) — shown next to the name, never counted.
       allow create, update: if barcode.size() <= 32
-        && request.resource.data.keys().hasOnly(['name', 'qty', 'stock', 'unit', 'price'])
+        && request.resource.data.keys().hasOnly(['name', 'qty', 'stock', 'unit', 'price', 'factor'])
         && (!('price' in request.resource.data)
             || (request.resource.data.price is number && request.resource.data.price >= 0))
+        // معامل التحويل: how many of the small unit are in the big one, carried for display only
+        && (!('factor' in request.resource.data)
+            || (request.resource.data.factor is number && request.resource.data.factor >= 0))
         && (!('unit' in request.resource.data)
             || (request.resource.data.unit is string && request.resource.data.unit.size() <= 30))
         && request.resource.data.name is string && request.resource.data.name.size() > 0
