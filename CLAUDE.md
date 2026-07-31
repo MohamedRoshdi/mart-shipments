@@ -485,9 +485,14 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   a security check has to be run against the bug before it is worth anything.
   With a bridge present the admin page hides the folder picker entirely — a button that cannot
   change anything is a button that looks broken.
-- **UNVERIFIED in `desktop/`**: `npm run dist` has never been run (electron is a ~200 MB download
-  and nothing here installs it), so the `.exe` is written but unbuilt. The logic is covered without
-  it — that is the point of stubbing electron out of the require cache in `desktop-check.cjs`.
+- **The `.exe` is a spare, not a requirement** (the owner, 2026-08-01: «the desktop means the
+  laptop on the big screens the website, not application .exe»). The shop runs the WEBSITE on the
+  laptop; the silent `D:\import` save there is the File System Access folder picked once from the
+  admin page. Do not spend time on the installer unless that changes. The shell itself is proven:
+  electron 32 is installed under `desktop/` (565 MB, lockfile committed) and
+  `scratchpad/smoke-electron.mjs` opened the real window on Linux 2026-08-01, rendered the app,
+  and round-tripped `window.mart.saveText`/`readText` through the path guard to a real file on
+  disk. `npm run dist` has still never been run — the `.exe` is written but unbuilt.
 - **A browser cannot write to `D:\` — but it can be handed a folder once.** `files.js` prefers a
   `window.mart` desktop bridge (nothing provides one yet; the preference exists so an Electron
   shell can be added without touching app code), then a File System Access directory handle the
