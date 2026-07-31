@@ -91,17 +91,21 @@ await openManager();
 await page.click('#list-tabs button[data-tab="expiry"]');
 const mrow = page.locator('#all-months li:has-text("نوفمبر 2026")');
 log("9. the month reached the manager:", await waitFor(mrow));
+// the month's Excel lives inside the month now, not on its card (2026-07-31)
+await mrow.locator('button[data-month="2026-11"]').click();
+await page.waitForSelector("#screen-expiry-month:not([hidden])");
 const dl = (await Promise.all([
   page.waitForEvent("download"),
-  mrow.locator('button[data-monthcsv="2026-11"]').click(),
+  page.click("#btn-export-month"),
 ]))[0];
 const csv = readFileSync(await dl.path(), "utf8");
 log("10. excel file:", dl.suggestedFilename());
 log("11. excel header:", csv.split("\r\n")[0]);
 log("12. our row is in it:", csv.includes(`"${CODE}"`) && csv.includes('"2026-11-20"'));
 
-// 6. cleanup: the expiry row, then the temporary product
-await mrow.locator('button[data-month="2026-11"]').click();
+// 6. cleanup: the expiry row, then the temporary product. The export left us inside the month
+// already, so there is no card to click any more.
+await page.waitForSelector("#screen-expiry-month:not([hidden])");
 await page.waitForTimeout(1500);
 const del = page.locator(`#m-items li:has-text("${NAME}") button[data-delexp]`);
 await del.first().click();

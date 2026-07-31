@@ -117,10 +117,10 @@ Rules in force (all live-tested):
   `createdAt` and `branch` immutable on update; delete allowed.
 - `expiry`: create/delete open; `qty > 0`, `day` 1–31, `month` 1–12, `year` 2000–2100;
   update may change name/qty/date only — `barcode`, `branch`, `createdBy`, `createdAt` are
-  immutable, so a row moves month but never changes product or branch. **Deployed and compiled,
-  but not yet server-accepted:** the daily write quota was exhausted on 2026-07-30, so the live
-  run's writes only ever reached the local cache. Re-run `scripts/live-expiry.mjs` after a quota
-  reset and confirm with `scripts/live-expiry-server.mjs` (fresh context = server reads).
+  immutable, so a row moves month but never changes product or branch. **Server-accepted, measured
+  2026-07-31**: `scripts/live-expiry.mjs` ran end to end against production (14 steps, including
+  its own cleanup) once the write quota had reset, and `scripts/live-expiry-server.mjs` shows the
+  server holding only the shop's own months.
 - `products`: create/update/delete open, `name` 1–100 chars, barcode ≤ 32, optional
   `qty` and `price` numbers ≥ 0, optional `stock` a map of ≤ 10 branches (rules cannot iterate a map,
   so the per-branch values are only guarded client-side).
@@ -384,6 +384,7 @@ STAMP=$RANDOM node scripts/live-count.mjs        # الجرد: stock sheet, coun
 STAMP=$RANDOM node scripts/live-expiry.mjs       # الصلاحيات: record a date, merge, move month, Excel, delete
 node scripts/live-expiry-cleanup.mjs             # janitor for a live-expiry run that died mid-way
 node scripts/live-expiry-server.mjs              # fresh context: what the SERVER holds, no local cache
+node scripts/live-junk-sweep.mjs                 # every product a dead live run left in the real catalog (DELETE=1 removes them); costs one full read
 node scripts/live-users-probe.mjs                # read-only users list; TIME=1 also times one save ack
 STAMP=$RANDOM node scripts/live-newfields.mjs    # do the SERVER's rules accept products.price and shipments.supplierCode? writes, re-reads in a FRESH context, deletes
 node scripts/live-mobile-known.mjs               # read-only: Pixel 5 on the live site, a real catalog barcode
@@ -465,7 +466,14 @@ debounce, or it reports false negatives.
   temp user, and `saveConfig` is the one write in the app that waits for the server on purpose.
   Everything else is fire-and-forget, so a live run **passes on the local cache while the server
   has none of it**: `scripts/live-expiry-server.mjs` opens a fresh context and asks the server
-  directly. Use it before believing any live "it worked".
+  directly. Use it before believing any live "it worked". (The quota had reset by 2026-07-31 —
+  writes land again, measured with `live-newfields.mjs` and a full `live-expiry.mjs` run.)
+- **A live script that dies half way leaves its row in the real catalog.** `live-junk-sweep.mjs`
+  finds them by name and, with `DELETE=1`, removes them — it reads the whole catalog because the
+  catalog screen stops at 50 rows and the search index is per phone. Measured 2026-07-31 after a
+  crashed run: 10,612 products, **0** left behind. Do not trust a screen count for this: the
+  version of `live-expiry-server.mjs` that typed into the catalog search reported «50» — the first
+  page, not the matches — on a catalog that had none.
 - A stocktake reports on what was **scanned**. A product in the sheet that nobody scanned does
   not appear as a shortage — listing every missing product would mean reading the whole
   catalog (10k reads) per count. Count by shelf and the sheet stays honest.

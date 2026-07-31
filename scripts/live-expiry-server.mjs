@@ -21,12 +21,11 @@ await page.waitForTimeout(2000);
 const months = await page.locator("#all-months li:not(.empty)").count();
 log("months the server knows about:", months);
 if (months) log("rows:", (await page.locator("#all-months li:not(.empty)").allInnerTexts()).map(t => t.replace(/\s+/g, " ").trim()));
-log("catalog rows named صنف صلاحية آلي:", await (async () => {
-  await page.click("#btn-products");
-  await page.waitForTimeout(3000);
-  await page.fill("#product-search", "صنف صلاحية آلي");
-  await page.waitForTimeout(4000);
-  return page.locator("button[data-delproduct]").count();
-})());
+// The catalog side is NOT asked here any more. This used to type into the catalog search and count
+// the rows on screen — but the search is debounced and, in a fresh context, has to pull the whole
+// catalog into a local index first, so the count it read was the first PAGE of the catalog (50) on
+// a catalog that had none of them. `scripts/live-junk-sweep.mjs` answers that question properly,
+// by reading every product once.
+log("for leftover products, run: node scripts/live-junk-sweep.mjs");
 
 await browser.close();
