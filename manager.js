@@ -699,7 +699,7 @@ function renderProducts() {
         <div class="code">${esc(p.barcode)}${stockLine(p)}</div>
       </div>
       <button class="del" data-delproduct="${escAttr(p.barcode)}" aria-label="حذف الصنف">×</button>
-    </li>`).join("") || `<li class="empty">${searching ? "مفيش نتيجة — دوّر بأول الاسم أو بالباركود" : "مفيش أصناف — استورد ملف الأصناف الأول"}</li>`;
+    </li>`).join("") || `<li class="empty">${searching ? "مفيش نتيجة — جرّب أي جزء من الاسم أو الباركود" : "مفيش أصناف — استورد ملف الأصناف الأول"}</li>`;
   updateDirty();
 }
 

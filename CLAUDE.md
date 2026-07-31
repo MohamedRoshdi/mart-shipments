@@ -22,7 +22,7 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 5. **`db.js` is the only file that knows where data lives.** `app.js` and
    `manager.js` never touch Firestore or localStorage keys directly.
 6. **Bump `CACHE` in `sw.js` on every deploy.** Serving is cache-first, so phones
-   keep the old bundle until the cache name changes. Currently `mart-v28`.
+   keep the old bundle until the cache name changes. Currently `mart-v29`.
 7. **Deploy = push to master.** GitHub Pages serves the repo root. Firestore rules
    deploy separately: `npx firebase deploy --only firestore:rules --project shipments-alaela-mart`.
 
@@ -43,7 +43,7 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 | `firestore.rules` | shape validation; the only server-side guard that exists |
 | `SETUP.md` | Arabic guide for the shop owner |
 | `products-template.csv`, `stock-template.csv` | the two import shapes: barcode+name, and barcode+name+quantity |
-| `tests/app.spec.js` | 52 Playwright tests, all in localStorage mode |
+| `tests/app.spec.js` | 53 Playwright tests, all in localStorage mode |
 | `scripts/*.mjs` | live checks and screenshot helpers (see below) |
 
 ## Data model
@@ -115,7 +115,8 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   `#item-stock`. The same rule holds as for shipments: an unlisted barcode is refused. A count
   never touches `localStorage.draft` — only shipments have a draft.
 - **There is one scanner in `index.html`, and it moves.** `#scan-block` (scan button, reader,
-  live camera controls, manual barcode field) lives outside `main`; `render()` appends it into
+  live camera controls, manual barcode field, **and the name search `#find-input` /
+  `#find-results`**) lives outside `main`; `render()` appends it into
   `SLOTS[screen]` (`slot-new` / `slot-expiry`) and hides it everywhere else. A second reader
   would mean a second camera stream and a second copy of every camera control. `navTo` stops
   the camera for any screen that has no slot.
@@ -215,14 +216,22 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   one between branches (the rules forbid it).
 - **Manager scope filters before render**, never after: `openManager()` drops other branches
   out of `all`, so a scoped user's page never holds data they may not see.
-- Catalog screen loads `PRODUCT_CAP = 300` rows; search is **server-side prefix**
-  on name and on document id (50 hits each). Prefix, not substring. `countProducts()`
-  gives the honest total. Export uses `listAllProducts()` — one deliberate full read.
+- Catalog screen loads `PRODUCT_CAP = 300` rows; `countProducts()` gives the honest total.
+  Export uses `listAllProducts()` — one deliberate full read.
+- **Search matches the middle of a name, and that is why the catalog is cached.** Firestore
+  answers prefix queries only, so `db.catalogIndex()` pulls the whole catalog once per phone
+  into `localStorage.catalogIndex` (7-day TTL, memoised in `indexRows`) and `searchProducts`
+  matches over it: name-prefix and barcode-prefix hits first, then anything containing the
+  term, `HITS = 50`. `norm()` folds أ/إ/آ→ا, ة→ه, ى→ي and strips tatweel/harakat, so a phone
+  keyboard reaches every row. The server prefix query stays as the fallback for a term the
+  local copy has never seen. **The price is one full read (10,043 docs measured 2026-07-30)
+  per phone per week** against a 50k/day quota — that is why `writeProduct`/`deleteProduct`
+  call `dropCatalogIndex()` instead of anything refreshing on a timer.
 
 ## Commands
 
 ```bash
-npx playwright test                 # 52 tests, localStorage mode, ~25s
+npx playwright test                 # 53 tests, localStorage mode, ~25s
 npx playwright test -g "catalog"    # one group
 python3 -m http.server 8080         # serve locally, then open /?test=1
 node scripts/make-icons.mjs         # regenerate the PWA icons

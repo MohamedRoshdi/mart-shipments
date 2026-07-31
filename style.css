@@ -183,6 +183,8 @@ button.scan::after {
 #reader { border-radius: var(--r); overflow: hidden; background: #000; }
 .manual { display: flex; gap: 8px; }
 .manual input { flex: 1; }
+/* the block moves between screens, so it spaces itself instead of leaning on `section > * + *` */
+#scan-block > * + * { margin-block-start: 12px; }
 
 /* ---------- cards ---------- */
 ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }

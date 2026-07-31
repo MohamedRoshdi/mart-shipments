@@ -40,6 +40,40 @@ test('db test mode roundtrip', async ({ page }) => {
   expect(result).toEqual({ name: 'لبن', count: 1, first: 'ش١' });
 });
 
+test('search by name: the middle of the name counts, and so does a loose hamza', async ({ page }) => {
+  await page.goto('/?test=1');
+  await page.evaluate(() => {
+    localStorage.setItem('employeeName', 'أحمد');
+    localStorage.setItem('test-products', JSON.stringify({
+      '111': 'جهينة لبن كامل الدسم', '222': 'سكر أبيض ناعم', '333': 'شاي العروسة',
+    }));
+  });
+  await page.reload();
+  await page.click('#btn-new');                                    // the box travels with the scanner
+  await expect(page.locator('#find-input')).toBeVisible();
+
+  await page.fill('#find-input', 'لبن');                           // mid-name, not a prefix
+  await expect(page.locator('#find-results li')).toHaveCount(1);
+  await expect(page.locator('#find-results')).toContainText('جهينة لبن كامل الدسم');
+
+  await page.fill('#find-input', 'ابيض');                          // typed without the hamza
+  await expect(page.locator('#find-results')).toContainText('سكر أبيض ناعم');
+  await page.click('#find-results button[data-pick="222"]');
+  await expect(page.locator('#item-name')).toHaveText('سكر أبيض ناعم');
+  await expect(page.locator('#find-input')).toHaveValue('');       // picked: the list is done
+  await page.click('#btn-add-item');
+  await expect(page.locator('#items-list li:not(.empty)')).toHaveCount(1);
+
+  await page.fill('#find-input', 'مفيش');
+  await expect(page.locator('#find-results li.empty')).toBeVisible();
+
+  await page.click('#btn-back');                                   // and the same box on الصلاحيات
+  await page.click('#btn-expiry');
+  await expect(page.locator('#screen-expiry')).toBeVisible();
+  await page.fill('#find-input', 'العروسة');
+  await expect(page.locator('#find-results')).toContainText('شاي العروسة');
+});
+
 test('create shipment: name shown from catalog as a label, duplicate merge', async ({ page }) => {
   await page.goto('/?test=1');
   await page.evaluate(() => {

@@ -282,7 +282,7 @@ $("btn-new").onclick = () => {
   state.type = (draft && draft.type) || types()[0];
   renderTypePicker();
   $("shipment-name").value = (draft && draft.name) || "";
-  $("barcode-input").value = "";
+  clearFind();
   paintMode();
   renderItems();
   navTo("screen-new");
@@ -296,7 +296,7 @@ $("btn-count").onclick = () => {
   state.currentBarcode = null;
   renderNewBranch();
   $("shipment-name").value = "";
-  $("barcode-input").value = "";
+  clearFind();
   paintMode();
   renderItems();
   navTo("screen-new");
@@ -320,7 +320,7 @@ function openShipment(s) {
   state.type = s.type || types()[0];
   renderTypePicker();
   $("shipment-name").value = s.name;
-  $("barcode-input").value = "";
+  clearFind();
   paintMode();
   renderItems();
   navTo("screen-new");
@@ -333,7 +333,7 @@ function openCount(c) {
   state.currentBarcode = null;
   renderNewBranch();
   $("shipment-name").value = c.name;
-  $("barcode-input").value = "";
+  clearFind();
   paintMode();
   renderItems();
   navTo("screen-new");
@@ -381,6 +381,7 @@ async function onBarcode(code) {
   $("btn-add-item").disabled = !known;
   $("btn-add-item").textContent = counting() ? "تسجيل الكمية" : (expiring() ? "تسجيل الصلاحية" : "إضافة الصنف");
   $("item-qty").value = 1;
+  clearFind();                                   // the item is picked; the results list is done
   showSheet(true);
 }
 
@@ -492,9 +493,7 @@ $("btn-expiry").onclick = async () => {
   state.items = [];
   state.currentBarcode = null;
   renderNewBranch();
-  $("exp-search").value = "";
-  $("exp-results").hidden = true;
-  $("barcode-input").value = "";
+  clearFind();
   navTo("screen-expiry");
   await loadExpiry();
 };
@@ -651,31 +650,38 @@ $("btn-save-month").onclick = async () => {
   paintMonth();          // a row whose date moved is now in another month, and may empty this one
 };
 
-/* --- adding by name: the barcode field stays numeric, the search is its own box --- */
+/* --- adding by name: the barcode field stays numeric, the search is its own box. It lives
+   inside #scan-block, so the same box serves a shipment, a stocktake and الصلاحيات. --- */
 
-let expSearchTimer = null;
+let findTimer = null;
 
-$("exp-search").oninput = () => {
-  clearTimeout(expSearchTimer);
-  expSearchTimer = setTimeout(runExpSearch, 250);   // one query per pause, not per keystroke
+function clearFind() {
+  $("find-input").value = "";
+  $("find-results").hidden = true;
+  $("barcode-input").value = "";
+}
+
+$("find-input").oninput = () => {
+  clearTimeout(findTimer);
+  findTimer = setTimeout(runFind, 250);             // one search per pause, not per keystroke
 };
 
-async function runExpSearch() {
-  const q = $("exp-search").value.trim();
-  if (q.length < 2) { $("exp-results").hidden = true; return; }
+async function runFind() {
+  const q = $("find-input").value.trim();
+  if (q.length < 2) { $("find-results").hidden = true; return; }
   const hits = (await db.searchProducts(q).catch(() => [])).slice(0, 8);
-  if ($("exp-search").value.trim() !== q) return;   // a newer search already ran
-  $("exp-results").hidden = false;
-  $("exp-results").innerHTML = hits.map(p => `<li>
+  if ($("find-input").value.trim() !== q) return;   // a newer search already ran
+  $("find-results").hidden = false;
+  $("find-results").innerHTML = hits.map(p => `<li>
       <div class="card-main">
         <div class="card-title">${esc(p.name)}</div>
         <div class="code">${esc(p.barcode)}</div>
       </div>
       <button class="ghost" data-pick="${escAttr(p.barcode)}">اختار</button>
-    </li>`).join("") || `<li class="empty">مفيش نتيجة — دوّر بأول الاسم</li>`;
+    </li>`).join("") || `<li class="empty">مفيش نتيجة — جرّب أي جزء من الاسم أو الباركود</li>`;
 }
 
-$("exp-results").onclick = (e) => {
+$("find-results").onclick = (e) => {
   const btn = e.target.closest("button[data-pick]");
   if (btn) onBarcode(btn.dataset.pick).catch(() => toast("حصلت مشكلة — جرّب تاني"));
 };

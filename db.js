@@ -122,14 +122,68 @@ export async function listAllProducts() {
   return snap.docs.map((d) => row(d.id, d.data()));
 }
 
-// Searches the WHOLE catalog, not just the loaded page: name-prefix and barcode-prefix
-// queries, HITS each. Prefix, not substring — a mid-word match needs a search service.
-export async function searchProducts(q) {
-  if (TEST_MODE) {
-    const all = await listProducts();
-    const s = q.toLowerCase();
-    return all.filter((p) => p.name.toLowerCase().includes(s) || p.barcode.includes(q));
+/* ---------- catalog index: what makes a mid-word search possible ---------- */
+
+const INDEX_KEY = 'catalogIndex';
+const INDEX_TTL = 7 * 24 * 60 * 60 * 1000;   // a week; a product write on this phone drops it too
+let indexRows = null;                        // parsed once per page, not once per keystroke
+
+// Firestore only answers prefix queries, so «لبن» would never find «جهينة لبن». The whole
+// catalog is pulled once per phone instead (one full read, then nothing for a week) and searched
+// here. Kept in localStorage so a reload is free; a phone that cannot store it keeps the copy in
+// memory for the session.
+export async function catalogIndex() {
+  if (TEST_MODE) return listProducts();
+  if (indexRows) return indexRows;
+  try {
+    const cached = JSON.parse(localStorage.getItem(INDEX_KEY) || 'null');
+    if (cached && Array.isArray(cached.rows) && Date.now() - cached.at < INDEX_TTL) {
+      indexRows = cached.rows;
+      return indexRows;
+    }
+  } catch (e) { console.error(e); }
+  indexRows = await listAllProducts();
+  try {
+    localStorage.setItem(INDEX_KEY, JSON.stringify({ at: Date.now(), rows: indexRows }));
+  } catch (e) { console.error(e); }          // over the storage quota: the memory copy still serves
+  return indexRows;
+}
+
+export function dropCatalogIndex() {
+  indexRows = null;
+  try { localStorage.removeItem(INDEX_KEY); } catch (e) { console.error(e); }
+}
+
+// Arabic is typed loosely: أ/إ/آ for ا, ه for ة, ى for ي, plus tatweel and harakat. Search has to
+// ignore all of that, otherwise half the catalog is unreachable from a phone keyboard.
+const norm = (s) => String(s || '').toLowerCase()
+  .replace(/[ـً-ْ]/g, '')
+  .replace(/[أإآ]/g, 'ا')
+  .replace(/ى/g, 'ي')
+  .replace(/ة/g, 'ه')
+  .trim();
+
+// start of the name first, then anywhere inside it — same for the barcode
+function matchRows(rows, s) {
+  const starts = [];
+  const mids = [];
+  for (const p of rows) {
+    const n = norm(p.name);
+    if (n.startsWith(s) || p.barcode.startsWith(s)) starts.push(p);
+    else if (n.includes(s) || p.barcode.includes(s)) mids.push(p);
+    if (starts.length >= HITS) break;
   }
+  return [...starts, ...mids].slice(0, HITS);
+}
+
+// Searches the WHOLE catalog, start or middle of the name. Falls back to the server's prefix
+// query when the local copy has nothing — a product added after this phone took its copy.
+export async function searchProducts(q) {
+  const s = norm(q);
+  if (!s) return [];
+  let hits = [];
+  try { hits = matchRows(await catalogIndex(), s); } catch (e) { console.error(e); }
+  if (hits.length || TEST_MODE) return hits;
   await live();
   const found = new Map();
   const collect = (snap) => snap.docs.forEach((d) => found.set(d.id, row(d.id, d.data())));
@@ -150,6 +204,7 @@ export async function countProducts() {
 }
 
 export async function deleteProduct(barcode) {
+  dropCatalogIndex();
   if (TEST_MODE) {
     const map = lsObj('test-products');
     delete map[barcode];
@@ -269,6 +324,7 @@ export async function saveProductRow(barcode, name, qty, branch) {
 }
 
 async function writeProduct(barcode, patch) {
+  dropCatalogIndex();               // this phone's search copy is now behind the catalog
   if (TEST_MODE) {
     const map = lsObj('test-products');
     const old = prodOf(map[barcode]);
