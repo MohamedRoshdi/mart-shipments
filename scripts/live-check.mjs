@@ -43,7 +43,6 @@ await page.goto(BASE + "/", { waitUntil: "load" });
 const branch = await page.evaluate(() => window.APP_CONFIG.branches[0]);
 await page.fill("#employee-name", "فحص آلي");
 await page.click(`button[data-branch="${branch.name}"]`);
-await page.fill("#branch-pin", branch.pin);
 await page.click("#save-name");
 await page.waitForSelector("#screen-home:not([hidden])");
 await page.click("#btn-new");

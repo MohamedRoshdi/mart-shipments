@@ -171,14 +171,6 @@ $("btn-login").onclick = async () => {
   const who = auth.authenticate(pin, cfg, CODE_ADMIN_PIN);
   if (!who) { toast("الرقم السري غلط"); return; }
   if (who.blocked) { toast("الرقم ده مربوط بموبايل تاني — كلّم الأدمن يفكّه الأول"); return; }
-  if (who.branchPin) {                       // a branch PIN is still the old employee setup
-    state.branch = who.branches[0];
-    renderBranchPicker();
-    $("login-pin").value = "";
-    navTo("screen-name");
-    toast("اكتب اسمك عشان نكمّل");
-    return;
-  }
   if (!who.perms.length) { toast("المستخدم ده مالوش صلاحيات — كلّم الأدمن"); return; }
   if (who.claim) db.claimDevice(pin, who.claim);
   auth.startSession(who.name, who.branches, who.perms, who.user);
@@ -198,10 +190,9 @@ $("save-name").onclick = () => {
   const n = $("employee-name").value.trim();
   if (!n) { toast("اكتب اسمك الأول"); return; }
   const branch = branchByName(state.branch);
-  if (!branch || $("branch-pin").value !== branch.pin) { toast("الرقم السري للفرع غلط"); return; }
+  if (!branch) { toast("اختار الفرع الأول"); return; }
   localStorage.setItem("employeeName", n);
   localStorage.setItem("employeeBranch", branch.name);
-  $("branch-pin").value = "";
   history.replaceState({ screen: "screen-home" }, "");
   goHome();
 };
@@ -900,7 +891,6 @@ function beep() {
 const ENTER = {
   "login-pin": "btn-login",
   "employee-name": "save-name",
-  "branch-pin": "save-name",
   "barcode-input": "btn-lookup",
   "item-qty": "btn-add-item",
   "item-date": "btn-add-item",

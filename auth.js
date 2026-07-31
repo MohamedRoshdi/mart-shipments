@@ -62,8 +62,8 @@ export function can(perm) {
   return !!s && s.perms.includes(perm);
 }
 
-// PIN → identity. Users the admin created win; the PINs shipped in the code and the branch
-// PINs keep working, so a wrong users list can never lock the shop out of its own data.
+// PIN → identity. Users the admin created win; the manager and admin PINs shipped in the code
+// keep working, so a wrong users list can never lock the shop out of its own data.
 export function authenticate(pin, cfg, codeAdminPin) {
   const user = (cfg.users || []).find((u) => u.pin === pin);
   if (user) {
@@ -81,11 +81,7 @@ export function authenticate(pin, cfg, codeAdminPin) {
   if (pin && pin === cfg.managerPin) {
     return { name: "المدير العام", branches: [], perms: ALL_PERMS.filter((p) => p !== "adm") };
   }
-  const branch = (cfg.branches || []).find((b) => b.pin === pin);
-  if (branch) {
-    return { name: `مدير ${branch.name}`, branches: [branch.name], perms: ALL_PERMS.filter((p) => p !== "adm"), branchPin: true };
-  }
-  return null;
+  return null;   // branch PINs are gone: a branch is a property of an account, not a password
 }
 
 // keep the query string across pages, otherwise ?test=1 (and anything after it) is lost

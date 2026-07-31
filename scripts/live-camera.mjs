@@ -31,10 +31,8 @@ if (await page.locator("#screen-login:not([hidden])").count()) {
   await page.fill("#login-pin", "1994");         // users exist on production: one PIN box for everyone
   await page.click("#btn-login");
 } else if (await page.locator("#screen-name:not([hidden])").count()) {
-  const branch = await page.evaluate(() => window.APP_CONFIG.branches[0]);
   await page.fill("#employee-name", "فحص كاميرا");
-  await page.fill("#branch-pin", branch.pin);
-  await page.press("#branch-pin", "Enter");
+  await page.press("#employee-name", "Enter");
 }
 await page.waitForSelector("#screen-home:not([hidden])", { timeout: 20000 });
 

@@ -190,9 +190,7 @@ function renderBranches() {
   $("branches-list").innerHTML = cfg.branches.map((b, i) => `<li>
       <div class="card-main">
         <input type="text" maxlength="40" data-bname="${i}" value="${escAttr(b.name)}">
-        <div class="meta">الرقم السري للفرع</div>
       </div>
-      <input type="text" inputmode="numeric" maxlength="8" dir="ltr" data-bpin="${i}" value="${escAttr(b.pin)}">
       <button class="del" data-delbranch="${i}" aria-label="حذف الفرع">×</button>
     </li>`).join("") || `<li class="empty">مفيش فروع — ضيف فرع الأول</li>`;
 }
@@ -210,7 +208,6 @@ function readInputs() {
   document.querySelectorAll("input[data-uname]").forEach(inp => cfg.users[+inp.dataset.uname].name = inp.value.trim());
   document.querySelectorAll("input[data-upin]").forEach(inp => cfg.users[+inp.dataset.upin].pin = inp.value.trim());
   document.querySelectorAll("input[data-bname]").forEach(inp => cfg.branches[+inp.dataset.bname].name = inp.value.trim());
-  document.querySelectorAll("input[data-bpin]").forEach(inp => cfg.branches[+inp.dataset.bpin].pin = inp.value.trim());
   document.querySelectorAll("input[data-tname]").forEach(inp => cfg.shipmentTypes[+inp.dataset.tname] = inp.value.trim());
   cfg.managerPin = $("cfg-manager-pin").value.trim();
   cfg.adminPin = $("cfg-admin-pin").value.trim();
@@ -243,7 +240,7 @@ $("types-list").onclick = (e) => {
 
 $("btn-add-branch").onclick = () => {
   readInputs();
-  cfg.branches.push({ name: "فرع جديد", pin: "" });
+  cfg.branches.push({ name: "فرع جديد" });
   renderBranches();
   markDirty();
 };
@@ -262,7 +259,6 @@ $("btn-save-config").onclick = async () => {
   if (!cfg.branches.length) { toast("لازم فرع واحد على الأقل"); return; }
   if (!cfg.shipmentTypes.filter(Boolean).length) { toast("لازم نوع شحنة واحد على الأقل"); return; }
   if (cfg.branches.some(b => !b.name)) { toast("في فرع من غير اسم"); return; }
-  if (cfg.branches.some(b => !isPin(b.pin))) { toast("رقم الفرع لازم يكون من 4 لـ 8 أرقام"); return; }
   if (!isPin(cfg.managerPin) || !isPin(cfg.adminPin)) { toast("رقم المدير ورقم الأدمن لازم من 4 لـ 8 أرقام"); return; }
   const names = cfg.branches.map(b => b.name);
   if (new Set(names).size !== names.length) { toast("في اسم فرع متكرر"); return; }
@@ -274,13 +270,13 @@ $("btn-save-config").onclick = async () => {
     toast("كل مستخدم لازم يفتح شاشة واحدة على الأقل");
     return;
   }
-  const pins = [...cfg.users.map(u => u.pin), ...cfg.branches.map(b => b.pin), cfg.managerPin, cfg.adminPin];
+  const pins = [...cfg.users.map(u => u.pin), cfg.managerPin, cfg.adminPin];
   if (new Set(pins).size !== pins.length) { toast("في رقم سري متكرر — كل واحد لازم يكون لوحده"); return; }
 
   const payload = {
     managerPin: cfg.managerPin,
     adminPin: cfg.adminPin,
-    branches: cfg.branches.map(b => ({ name: b.name, pin: b.pin })),
+    branches: cfg.branches.map(b => ({ name: b.name })),   // a branch is a name, not a password
     shipmentTypes: cfg.shipmentTypes.filter(Boolean),
     // device carries the phone this account is bound to — dropping it here would silently
     // unbind every user on any settings save

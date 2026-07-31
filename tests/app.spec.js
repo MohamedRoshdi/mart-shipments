@@ -1,6 +1,6 @@
 const { test, expect } = require('@playwright/test');
 
-// setup now needs the branch PIN; helper keeps every test honest about that
+// with no users configured the first screen is name + branch — no branch PIN any more
 async function setUp(page, name = 'أحمد', branchIndex = 0) {
   const b = (await page.evaluate(() => window.APP_CONFIG.branches))[branchIndex];
   // only catalog barcodes can be added now, so every flow needs a catalog
@@ -8,19 +8,17 @@ async function setUp(page, name = 'أحمد', branchIndex = 0) {
     || localStorage.setItem('test-products', JSON.stringify({ '111': 'لبن', '222': 'جبنة' })));
   await page.fill('#employee-name', name);
   await page.click(`button[data-branch="${b.name}"]`);
-  await page.fill('#branch-pin', b.pin);
   await page.click('#save-name');
   return b;
 }
 
-test('first open asks name, branch and branch PIN', async ({ page }) => {
+test('first open asks name and branch, and nothing else', async ({ page }) => {
   await page.goto('/?test=1');
   await expect(page.locator('#screen-name')).toBeVisible();
-  await page.fill('#employee-name', 'أحمد');
-  await page.fill('#branch-pin', '0000');           // wrong branch PIN
-  await page.click('#save-name');
+  await expect(page.locator('#branch-pin')).toHaveCount(0);   // the branch PIN is gone
+  await page.click('#save-name');                             // no name yet
   await expect(page.locator('#screen-name')).toBeVisible();
-  await expect(page.locator('#toast')).toContainText('الرقم السري للفرع غلط');
+  await expect(page.locator('#toast')).toContainText('اكتب اسمك الأول');
   await setUp(page);
   await expect(page.locator('#screen-home')).toBeVisible();
   await page.reload();
@@ -257,11 +255,9 @@ test('Enter key submits: manager PIN, employee setup, barcode lookup', async ({ 
   await expect(page.locator('#screen-manager')).toBeVisible();
 
   await page.goto('/?test=1');
-  const b = (await page.evaluate(() => window.APP_CONFIG.branches))[0];
   await page.evaluate(() => localStorage.setItem('test-products', JSON.stringify({ '111': 'لبن' })));
   await page.fill('#employee-name', 'أحمد');
-  await page.fill('#branch-pin', b.pin);
-  await page.press('#branch-pin', 'Enter');
+  await page.press('#employee-name', 'Enter');
   await expect(page.locator('#screen-home')).toBeVisible();
 
   await page.click('#btn-new');
@@ -315,7 +311,7 @@ test('shipment type: picked under the branch, saved, filtered and editable', asy
   expect(csv).toContain(`"${t3}"`);
 });
 
-test('branch PIN on the manager page shows only that branch', async ({ page }) => {
+test('a manager scoped to one branch sees only that branch', async ({ page }) => {
   await page.goto('/manager.html?test=1');
   const cfg = await page.evaluate(() => window.APP_CONFIG.branches);
   await page.evaluate((names) => {
@@ -325,8 +321,14 @@ test('branch PIN on the manager page shows only that branch', async ({ page }) =
       { name: 'شحنة شبين', createdBy: 'سيد', branch: names[1], createdAt: 1753600000000,
         items: [{ barcode: '222', name: 'جبنة', qty: 2 }] },
     ]));
+    const stored = JSON.parse(localStorage.getItem('test-config') || '{}');
+    localStorage.setItem('test-config', JSON.stringify({
+      ...window.APP_CONFIG, ...stored,
+      users: [{ name: 'مدير شبين', pin: '8811', branches: [names[1]], perms: ['mgr', 'download'] }],
+    }));
   }, cfg.map(b => b.name));
-  await page.fill('#pin-input', cfg[1].pin);                  // شبين الكوم manager
+  await page.reload();                                        // APP_CONFIG merges the config at boot
+  await page.fill('#pin-input', '8811');                      // شبين الكوم manager, by account
   await page.click('#btn-pin');
   await expect(page.locator('#all-shipments li')).toHaveCount(1);
   await expect(page.locator('#all-shipments li')).toContainText('شحنة شبين');
@@ -535,17 +537,15 @@ test('admin: a saved branch and type reach the employee app and the manager', as
   await openAdmin(page);
   await page.click('#btn-add-branch');
   await page.fill('input[data-bname="2"]', 'فرع بنها');
-  await page.fill('input[data-bpin="2"]', '3030');
   await page.click('#btn-add-type');
   await page.fill('input[data-tname="3"]', 'إذن تحويل مخزن');
   await page.click('#btn-save-config');
   await expect(page.locator('#toast')).toContainText('تم حفظ الإعدادات');
 
-  await page.goto('/?test=1');                                  // employee: new branch, its own PIN
+  await page.goto('/?test=1');                                  // employee: the new branch is offered
   await expect(page.locator('button[data-branch="فرع بنها"]')).toBeVisible();
   await page.fill('#employee-name', 'سيد');
   await page.click('button[data-branch="فرع بنها"]');
-  await page.fill('#branch-pin', '3030');
   await page.click('#save-name');
   await expect(page.locator('#who')).toContainText('فرع بنها');
   await page.click('#btn-new');
@@ -814,7 +814,7 @@ test('admin: a repeated PIN is refused before it can hand over someone else\'s a
   await openAdmin(page);
   await page.click('#btn-add-user');
   await page.fill('input[data-uname="0"]', 'حسن');
-  await page.fill('input[data-upin="0"]', await page.evaluate(() => window.APP_CONFIG.branches[0].pin));
+  await page.fill('input[data-upin="0"]', await page.evaluate(() => window.APP_CONFIG.managerPin));
   await page.click('#btn-save-config');
   await expect(page.locator('#toast')).toContainText('رقم سري متكرر');
   expect(await page.evaluate(() => localStorage.getItem('test-config'))).toBeNull();

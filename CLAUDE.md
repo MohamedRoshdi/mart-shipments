@@ -22,7 +22,7 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 5. **`db.js` is the only file that knows where data lives.** `app.js` and
    `manager.js` never touch Firestore or localStorage keys directly.
 6. **Bump `CACHE` in `sw.js` on every deploy.** Serving is cache-first, so phones
-   keep the old bundle until the cache name changes. Currently `mart-v30`.
+   keep the old bundle until the cache name changes. Currently `mart-v31`.
 7. **Deploy = push to master.** GitHub Pages serves the repo root. Firestore rules
    deploy separately: `npx firebase deploy --only firestore:rules --project shipments-alaela-mart`.
 
@@ -71,7 +71,7 @@ one place that order is decided. Every product write is a **merge** — Firestor
 fields key by key, so importing شبين الكوم never touches what قويسنا imported, and renaming
 from the catalog screen drops neither.
 
-`config/app` — `{ managerPin, adminPin, branches: [{name, pin}], shipmentTypes: [], users: [] }`.
+`config/app` — `{ managerPin, adminPin, branches: [{name}], shipmentTypes: [], users: [] }`.
 Each user is `{ name, pin, branches: [], perms: [], device? }`; `perms` holds ids from `auth.js` `PERMS`
 (`emp`/`mgr`/`adm` are screens, the rest are actions). **`branches: []` means every branch**, one
 name means locked to it, several means the user works across them. `auth.branchesOf()` also reads
@@ -147,9 +147,11 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   `manager.js` sums `qty - (sys || 0)`; an item with no `sys` counts as pure surplus, which
   is what an unlisted product on the shelf actually is.
 - **`auth.js` owns identity for all three pages.** `authenticate(pin, cfg, codeAdminPin)` tries
-  the admin's users first, then the legacy PINs (admin → every permission, manager → all but
-  `adm`, branch PIN → that branch, flagged `branchPin` so the employee page still runs the old
-  name+branch setup). The result goes into `localStorage.session` for 12 hours and every page
+  the admin's users first, then the two legacy PINs (admin → every permission, manager → all
+  but `adm`). **Branch PINs are gone** (dropped 2026-07-31 on the owner's call): a branch is a
+  field on an account, not a password, and `config/app.branches` is now `[{name}]`. Anything
+  that still carries a `pin` key on a branch is old data and is ignored — the next settings
+  save strips it. The result goes into `localStorage.session` for 12 hours and every page
   reads it, so signing in once covers all three. **`canDo(perm)` returns true when there is no
   session at all** — that is what keeps the pre-users behaviour intact for a shop that never
   creates a user.
@@ -219,11 +221,12 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   `.row-actions button.primary` when a row button must be amber.
 - **The item sheet owns the screen while open** (scrim + `body.sheet-open` hides
   the bottom bar). Anything behind it is unclickable — dismiss with `#btn-cancel-item`.
-- **Two ways in, both still live.** With users configured, the PIN alone identifies the
-  person and the branch comes from their account. With no users (or a legacy branch PIN),
-  the old flow stands: the branch is chosen once per phone against the branch PIN, and the
-  employee types their name. Shipments always carry a branch and the manager can never move
-  one between branches (the rules forbid it).
+- **Two ways in, both still live.** With users configured, the PIN alone identifies the person
+  and the branch comes from their account. With **no users at all**, `#screen-name` still asks
+  for a name and a branch and nothing else — no password guards that path any more, which is
+  accepted because the app has no auth to begin with (the URL is the protection). Shipments
+  always carry a branch and the manager can never move one between branches (the rules forbid
+  it).
 - **Manager scope filters before render**, never after: `openManager()` drops other branches
   out of `all`, so a scoped user's page never holds data they may not see.
 - Catalog screen loads `PRODUCT_CAP = 300` rows; `countProducts()` gives the honest total.

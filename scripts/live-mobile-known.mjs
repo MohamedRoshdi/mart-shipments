@@ -13,10 +13,8 @@ page.on("pageerror", (e) => console.log("[pageerror]", e.message));
 
 // employee side: does the label show the catalog name for a real barcode?
 await page.goto(BASE + "/", { waitUntil: "load" });
-const branch = await page.evaluate(() => window.APP_CONFIG.branches[0]);
 await page.fill("#employee-name", "فحص موبايل");
-await page.fill("#branch-pin", branch.pin);
-await page.press("#branch-pin", "Enter");
+await page.press("#employee-name", "Enter");
 await page.waitForSelector("#screen-home:not([hidden])");
 await page.tap("#btn-new");
 await page.fill("#barcode-input", CODE);

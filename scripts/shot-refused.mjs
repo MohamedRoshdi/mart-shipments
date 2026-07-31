@@ -7,12 +7,10 @@ const ctx = await browser.newContext({ ...devices["Pixel 5"], locale: "ar-EG" })
 const page = await ctx.newPage();
 
 await page.goto(BASE + "/", { waitUntil: "load" });
-const b = await page.evaluate(() => window.APP_CONFIG.branches[0]);
 await page.waitForSelector("#screen-name:not([hidden]), #screen-home:not([hidden])");  // wait for boot
 if (await page.locator("#screen-name").isVisible()) {
   await page.fill("#employee-name", "فحص موبايل");
-  await page.fill("#branch-pin", b.pin);
-  await page.press("#branch-pin", "Enter");
+  await page.press("#employee-name", "Enter");
 }
 await page.waitForSelector("#screen-home:not([hidden])");
 await page.tap("#btn-new");
