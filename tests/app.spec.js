@@ -393,7 +393,7 @@ test('catalog screen: list, search, rename, delete, export', async ({ page }) =>
   await expect(page.locator('#products-list li')).toHaveCount(1);
   await expect(page.locator('input[data-barcode="333"]')).toHaveValue('أرز الضحى');
   await page.fill('#product-search', 'لا يوجد كده');           // no hit → guidance, not a dead end
-  await expect(page.locator('#products-list li.empty')).toContainText('دوّر بأول الاسم أو بالباركود');
+  await expect(page.locator('#products-list li.empty')).toContainText('جرّب أي جزء من الاسم أو الباركود');
   await page.fill('#product-search', '');
   await expect(page.locator('#products-list li')).toHaveCount(3);
 
@@ -593,10 +593,47 @@ test('admin: bulk delete by type, and it is logged', async ({ page }) => {
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem('test-shipments')).map(s => s.name)))
     .toEqual(['استلام 1']);
   await page.click('#btn-logs');
-  await expect(page.locator('#logs-list li').first()).toContainText('حذف شحنات بالجملة');
+  await expect(page.locator('#logs-list li').first()).toContainText('حذف بالجملة');
 });
 
-test('manager: ZIP export puts each shipment in a folder named after its type', async ({ page }) => {
+test('admin: bulk delete can take one day, a range of days, or a stocktake', async ({ page }) => {
+  await page.goto('/admin.html?test=1');
+  await page.evaluate(() => {
+    const day = (iso) => new Date(`${iso}T09:00:00`).getTime();     // local noon-ish, same day everywhere
+    localStorage.setItem('test-shipments', JSON.stringify([
+      { name: 'شحنة الاتنين', createdBy: 'أحمد', branch: 'فرع قويسنا', type: 'إذن استلام', createdAt: day('2026-07-20'), items: [] },
+      { name: 'شحنة التلات', createdBy: 'أحمد', branch: 'فرع قويسنا', type: 'إذن استلام', createdAt: day('2026-07-21'), items: [] },
+      { name: 'شحنة الأربع', createdBy: 'أحمد', branch: 'فرع قويسنا', type: 'إذن استلام', createdAt: day('2026-07-22'), items: [] },
+    ]));
+    localStorage.setItem('test-counts', JSON.stringify([
+      { name: 'جرد الرف', createdBy: 'أحمد', branch: 'فرع قويسنا', createdAt: day('2026-07-21'), items: [] },
+    ]));
+  });
+  await page.fill('#pin-input', await page.evaluate(() => window.APP_CONFIG.adminPin));
+  await page.click('#btn-pin');
+  await expect(page.locator('#btn-bulk-delete')).toHaveText('حذف المطابق (3)');
+
+  await page.fill('#bulk-from', '2026-07-21');                     // one day: both ends the same
+  await page.fill('#bulk-to', '2026-07-21');
+  await expect(page.locator('#btn-bulk-delete')).toHaveText('حذف المطابق (1)');
+  await page.fill('#bulk-to', '2026-07-22');                       // a range
+  await expect(page.locator('#btn-bulk-delete')).toHaveText('حذف المطابق (2)');
+
+  page.on('dialog', (d) => d.accept());
+  await page.click('#btn-bulk-delete');
+  await expect(page.locator('#toast')).toContainText('تم حذف 2 شحنة');
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('test-shipments')).map(s => s.name)))
+    .toEqual(['شحنة الاتنين']);
+
+  await page.click('#bulk-kind button[data-bulkkind="counts"]');   // الجرد, same tool
+  await expect(page.locator('#bulk-type')).toBeHidden();
+  await expect(page.locator('#btn-bulk-delete')).toHaveText('حذف المطابق (1)');
+  await page.click('#btn-bulk-delete');
+  await expect(page.locator('#toast')).toContainText('تم حذف 1 جرد');
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('test-counts')))).toEqual([]);
+});
+
+test('manager: ZIP export puts each shipment in a day folder, then its type', async ({ page }) => {
   await page.goto('/manager.html?test=1');
   await page.evaluate(() => localStorage.setItem('test-shipments', JSON.stringify([
     { name: 'شحنة اللحمة', createdBy: 'أحمد', branch: 'فرع قويسنا', type: 'إذن استلام',
@@ -614,10 +651,44 @@ test('manager: ZIP export puts each shipment in a folder named after its type', 
   const buf = require('fs').readFileSync(await dl.path());
   expect([...buf.slice(0, 4)]).toEqual([0x50, 0x4b, 0x03, 0x04]);   // local file header signature
   const raw = buf.toString('utf8');           // stored, not compressed: names and rows are literal
-  expect(raw).toContain('إذن استلام/شحنة اللحمة.csv');
-  expect(raw).toContain('إذن استلام/شحنة اللحمة.txt');
-  expect(raw).toContain('إذن مرتجع/مرتجع الألبان.csv');
+  const [day1, day2] = await page.evaluate(() =>
+    [1753700000000, 1753600000000].map(ms => new Date(ms).toLocaleDateString('en-CA')));
+  expect(raw).toContain(`${day1}/إذن استلام/شحنة اللحمة.csv`);
+  expect(raw).toContain(`${day1}/إذن استلام/شحنة اللحمة.txt`);
+  expect(raw).toContain(`${day2}/إذن مرتجع/مرتجع الألبان.csv`);
   expect(raw).toContain('111\t3');
+});
+
+test('manager: الجرد zips into a folder per day, and الصلاحيات into a folder per month', async ({ page }) => {
+  await page.goto('/manager.html?test=1');
+  await page.evaluate(() => {
+    localStorage.setItem('test-counts', JSON.stringify([
+      { name: 'جرد رف الألبان', createdBy: 'أحمد', branch: 'فرع قويسنا', createdAt: 1753700000000,
+        items: [{ barcode: '111', name: 'لبن', qty: 4, sys: 6 }] },
+    ]));
+    localStorage.setItem('test-expiry', JSON.stringify([
+      { _id: 'e1', barcode: '111', name: 'لبن', qty: 2, day: 14, month: 9, year: 2026,
+        branch: 'فرع قويسنا', createdBy: 'أحمد', createdAt: 1753700000001 },
+      { _id: 'e2', barcode: '222', name: 'جبنة', qty: 5, day: 3, month: 11, year: 2026,
+        branch: 'فرع قويسنا', createdBy: 'أحمد', createdAt: 1753700000002 },
+    ]));
+  });
+  await page.fill('#pin-input', await page.evaluate(() => window.APP_CONFIG.managerPin));
+  await page.click('#btn-pin');
+
+  await page.click('#list-tabs button[data-tab="count"]');
+  const counts = (await Promise.all([page.waitForEvent('download'), page.click('#btn-zip-counts')]))[0];
+  expect(counts.suggestedFilename()).toMatch(/^جرد-\d{4}-\d{2}-\d{2}\.zip$/);
+  const day = await page.evaluate(() => new Date(1753700000000).toLocaleDateString('en-CA'));
+  const countsRaw = require('fs').readFileSync(await counts.path()).toString('utf8');
+  expect(countsRaw).toContain(`${day}/جرد رف الألبان.csv`);
+
+  await page.click('#list-tabs button[data-tab="expiry"]');
+  const exp = (await Promise.all([page.waitForEvent('download'), page.click('#btn-zip-expiry')]))[0];
+  expect(exp.suggestedFilename()).toMatch(/^صلاحيات-\d{4}-\d{2}-\d{2}\.zip$/);
+  const expRaw = require('fs').readFileSync(await exp.path()).toString('utf8');
+  expect(expRaw).toContain('سبتمبر 2026/الصلاحيات.csv');
+  expect(expRaw).toContain('نوفمبر 2026/الصلاحيات.csv');
 });
 
 test('camera settings: reachable from the app bar and the choices stick', async ({ page }) => {

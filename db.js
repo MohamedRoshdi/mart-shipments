@@ -292,9 +292,11 @@ export async function listLogs(max = 100) {
 // admin bulk delete for either collection; 500 writes is the Firestore batch limit
 export async function deleteMany(collection, ids) {
   if (TEST_MODE) {
-    if (collection === 'shipments') {
-      const keep = lsArr('test-shipments').filter((s) => !ids.includes(String(s.createdAt)));
-      localStorage.setItem('test-shipments', JSON.stringify(keep));
+    // shipments, counts and expiry are lists keyed by their row id; products is a map by barcode
+    const listKey = { shipments: 'test-shipments', counts: 'test-counts', expiry: 'test-expiry' }[collection];
+    if (listKey) {
+      const keep = lsArr(listKey).filter((r) => !ids.includes(String(r._id || r.createdAt)));
+      localStorage.setItem(listKey, JSON.stringify(keep));
     } else {
       const map = lsObj('test-products');
       ids.forEach((id) => delete map[id]);

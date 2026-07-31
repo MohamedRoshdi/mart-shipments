@@ -23,9 +23,13 @@ let cfg = null;        // working copy of the settings
 let identity = "الأدمن";
 let dirty = false;
 let shipments = [];    // loaded once, for the bulk-delete count
+let counts = [];       // الجرد is deleted from the same tool
 let shipmentsLoaded = false;
+let bulkKind = "shipments";
 let bulkBranch = ALL;
 let bulkType = ALL;
+
+const KIND_LABEL = { shipments: "الشحنات", counts: "الجرد" };
 
 function render(id) {
   document.querySelectorAll("main > section").forEach(s => s.hidden = true);
@@ -73,7 +77,10 @@ async function enterAdmin() {
   renderAll();
   $("danger-tools").hidden = !canDo("danger");
   $("btn-logout").hidden = !auth.session();
-  shipments = await db.listShipments().catch(() => []);
+  [shipments, counts] = await Promise.all([
+    db.listShipments().catch(() => []),
+    db.listCounts().catch(() => []),
+  ]);
   shipmentsLoaded = true;
   renderBulk();
 }
@@ -312,18 +319,43 @@ function renderBulk() {
     $(id).innerHTML = opts.map(o =>
       `<button type="button" data-${attr}="${escAttr(o)}" aria-pressed="${o === active}">${esc(o)}</button>`).join("");
   };
+  $("bulk-kind").innerHTML = Object.entries(KIND_LABEL).map(([k, label]) =>
+    `<button type="button" data-bulkkind="${k}" aria-pressed="${k === bulkKind}">${esc(label)}</button>`).join("");
   chips("bulk-branch", [ALL, ...cfg.branches.map(b => b.name)], bulkBranch, "bulkbranch");
   chips("bulk-type", [ALL, ...cfg.shipmentTypes], bulkType, "bulktype");
+  $("bulk-type").hidden = bulkKind !== "shipments";      // a stocktake has no type
   // a count of 0 before the list arrives reads as "nothing to delete" — say what is happening
   $("btn-bulk-delete").textContent = shipmentsLoaded
     ? `حذف المطابق (${matching().length})`
-    : "بنعد الشحنات...";
+    : "بنعد...";
 }
 
+// the day a row was recorded, as YYYY-MM-DD — the same shape the date inputs hand back, so the
+// range check is a plain string compare
+const dayOf = (ms) => new Date(ms).toLocaleDateString("en-CA");
+
 function matching() {
-  return shipments.filter(s => (bulkBranch === ALL || s.branch === bulkBranch)
-    && (bulkType === ALL || s.type === bulkType));
+  const from = $("bulk-from").value;
+  const to = $("bulk-to").value;
+  const rows = bulkKind === "counts" ? counts : shipments;
+  return rows.filter((s) => {
+    const day = dayOf(s.createdAt);
+    return (bulkBranch === ALL || s.branch === bulkBranch)
+      && (bulkKind === "counts" || bulkType === ALL || s.type === bulkType)
+      && (!from || day >= from)
+      && (!to || day <= to);
+  });
 }
+
+$("bulk-kind").onclick = (e) => {
+  const btn = e.target.closest("button[data-bulkkind]");
+  if (!btn) return;
+  bulkKind = btn.dataset.bulkkind;
+  renderBulk();
+};
+
+$("bulk-from").onchange = renderBulk;
+$("bulk-to").onchange = renderBulk;
 
 $("bulk-branch").onclick = (e) => {
   const btn = e.target.closest("button[data-bulkbranch]");
@@ -339,22 +371,34 @@ $("bulk-type").onclick = (e) => {
   renderBulk();
 };
 
+// what the user picked, in words, for the confirm box and the audit row
+function bulkScope() {
+  const from = $("bulk-from").value;
+  const to = $("bulk-to").value;
+  const when = from && to ? (from === to ? `يوم ${from}` : `من ${from} لـ ${to}`)
+    : (from ? `من ${from}` : (to ? `لحد ${to}` : "كل الأيام"));
+  return [KIND_LABEL[bulkKind], bulkBranch, ...(bulkKind === "shipments" ? [bulkType] : []), when].join(" · ");
+}
+
 $("btn-bulk-delete").onclick = async () => {
-  if (!shipmentsLoaded) { toast("استنى لحد ما الشحنات تحمّل"); return; }
+  if (!shipmentsLoaded) { toast("استنى لحد ما البيانات تحمّل"); return; }
   const hit = matching();
-  if (!hit.length) { toast("مفيش شحنات مطابقة"); return; }
-  if (!confirm(`حذف ${hit.length} شحنة (${bulkBranch} · ${bulkType})؟ مش هينفع ترجّعها.`)) return;
+  const noun = bulkKind === "counts" ? "جرد" : "شحنة";
+  if (!hit.length) { toast("مفيش حاجة مطابقة"); return; }
+  const scope = bulkScope();
+  if (!confirm(`حذف ${hit.length} ${noun} (${scope})؟ مش هينفع ترجّعها.`)) return;
   try {
-    await db.deleteMany("shipments", hit.map(s => s._id));
+    await db.deleteMany(bulkKind, hit.map(s => s._id));
   } catch (err) {
     console.error(err);
     toast("الحذف ما نفعش — جرّب تاني");
     return;
   }
-  db.logAction(identity,"حذف شحنات بالجملة", `${hit.length} شحنة · ${bulkBranch} · ${bulkType}`);
-  shipments = await db.listShipments().catch(() => []);
+  db.logAction(identity, "حذف بالجملة", `${hit.length} ${noun} · ${scope}`);
+  if (bulkKind === "counts") counts = await db.listCounts().catch(() => []);
+  else shipments = await db.listShipments().catch(() => []);
   renderBulk();
-  toast(`تم حذف ${hit.length} شحنة`);
+  toast(`تم حذف ${hit.length} ${noun}`);
 };
 
 $("btn-wipe-products").onclick = async () => {

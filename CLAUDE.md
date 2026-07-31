@@ -22,7 +22,7 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 5. **`db.js` is the only file that knows where data lives.** `app.js` and
    `manager.js` never touch Firestore or localStorage keys directly.
 6. **Bump `CACHE` in `sw.js` on every deploy.** Serving is cache-first, so phones
-   keep the old bundle until the cache name changes. Currently `mart-v29`.
+   keep the old bundle until the cache name changes. Currently `mart-v30`.
 7. **Deploy = push to master.** GitHub Pages serves the repo root. Firestore rules
    deploy separately: `npx firebase deploy --only firestore:rules --project shipments-alaela-mart`.
 
@@ -43,7 +43,7 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 | `firestore.rules` | shape validation; the only server-side guard that exists |
 | `SETUP.md` | Arabic guide for the shop owner |
 | `products-template.csv`, `stock-template.csv` | the two import shapes: barcode+name, and barcode+name+quantity |
-| `tests/app.spec.js` | 53 Playwright tests, all in localStorage mode |
+| `tests/app.spec.js` | 55 Playwright tests, all in localStorage mode |
 | `scripts/*.mjs` | live checks and screenshot helpers (see below) |
 
 ## Data model
@@ -199,6 +199,16 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
 - **The ZIP is store-only on purpose.** Folder structure comes from `/` inside the entry
   names plus flag bit `0x0800` for UTF-8; a browser download cannot create folders itself
   (Chrome rewrites `/` in the file name). Verified with `python3 -c` + `zipfile.testzip()`.
+- **Each ZIP is grouped by the thing that identifies its rows**, which is not the same field
+  everywhere: shipments are `YYYY-MM-DD/النوع/اسم الشحنة.csv|txt`, a stocktake is
+  `YYYY-MM-DD/اسم الجرد.csv`, and الصلاحيات is `<شهر سنة>/الصلاحيات.csv` — a month, never a
+  day, because that is what an expiry row is filed under. `dayOf()` uses `en-CA`, so the
+  folder name sorts itself; `uniquePath()` appends ` (2)` rather than letting a repeated name
+  overwrite an earlier entry.
+- **The admin bulk delete covers `shipments` and `counts`**, filtered by branch, type
+  (shipments only — a count has none) and a `from`/`to` day range compared as plain
+  `YYYY-MM-DD` strings. `db.deleteMany` maps the collection to its localStorage list in test
+  mode, so adding a collection there means adding it to that map too.
 - **Every `db.js` export awaits `live()`**, which resolves `initDb()`. Without it a
   call that lands before the Firebase SDK finishes throws on `fs` being null — this
   once made the catalog import silently save 0 rows.
@@ -231,7 +241,7 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
 ## Commands
 
 ```bash
-npx playwright test                 # 53 tests, localStorage mode, ~25s
+npx playwright test                 # 55 tests, localStorage mode, ~25s
 npx playwright test -g "catalog"    # one group
 python3 -m http.server 8080         # serve locally, then open /?test=1
 node scripts/make-icons.mjs         # regenerate the PWA icons

@@ -524,6 +524,31 @@ $("btn-export-counts").onclick = () => {
   toast("تم تحميل ملف Excel");
 };
 
+// الجرد, same idea: a folder per day, one file per count
+$("btn-zip-counts").onclick = () => {
+  if (!shownCounts.length) { toast("مفيش جرد يتحمّل"); return; }
+  const used = new Set();
+  const files = shownCounts.map(c => ({
+    path: `${uniquePath(used, `${dayOf(c.createdAt)}/${safeName(c.name)}`)}.csv`,
+    text: csvText(countRows(c)),
+  }));
+  downloadBlob(`جرد-${today()}.zip`, zipBlob(files));
+  toast(`تم تحميل ${shownCounts.length} جرد في مجلدات`);
+};
+
+// الصلاحيات is not a day thing: the month is the folder, and it comes from the rows themselves
+$("btn-zip-expiry").onclick = () => {
+  const months = ex.months(expInScope());
+  if (!months.length) { toast("مفيش صلاحيات تتحمّل"); return; }
+  const used = new Set();
+  const files = months.map(m => ({
+    path: `${uniquePath(used, `${safeName(m.label)}/الصلاحيات`)}.csv`,
+    text: csvText(expiryRows(m.items)),
+  }));
+  downloadBlob(`صلاحيات-${today()}.zip`, zipBlob(files));
+  toast(`تم تحميل ${months.length} شهر في مجلدات`);
+};
+
 function downloadShipmentTxt(s) {
   downloadTxt(`${safeName(s.name)}.txt`, shipmentText(s));   // barcode TAB qty, same as the copy button
   toast("تم تحميل ملف TXT");
@@ -547,21 +572,30 @@ $("btn-export-all-txt").onclick = () => {
   toast("تم تحميل ملف TXT");
 };
 
-// One archive, a folder per shipment type, both file shapes inside. Two shipments with
-// the same name in the same type folder would overwrite each other, so the second gets (2).
+// The day a row was recorded, as YYYY-MM-DD so the folders sort themselves in any file manager
+const dayOf = (ms) => new Date(ms).toLocaleDateString("en-CA");
+
+// Two rows with the same name in the same folder would overwrite each other in the archive
+const uniquePath = (used, base) => {
+  let path = base;
+  for (let n = 2; used.has(path); n++) path = `${base} (${n})`;
+  used.add(path);
+  return path;
+};
+
+const today = () => new Date().toLocaleDateString("en-CA");
+
+// One archive: a folder per day, a folder per type inside it, both file shapes for each shipment
 $("btn-export-zip").onclick = () => {
   if (!shown.length) { toast("مفيش شحنات تتحمّل"); return; }
   const used = new Set();
   const files = [];
   for (const s of shown) {
-    const base = `${safeName(s.type || "بدون نوع")}/${safeName(s.name)}`;
-    let path = base;
-    for (let n = 2; used.has(path); n++) path = `${base} (${n})`;
-    used.add(path);
+    const path = uniquePath(used, `${dayOf(s.createdAt)}/${safeName(s.type || "بدون نوع")}/${safeName(s.name)}`);
     files.push({ path: `${path}.csv`, text: csvText(shipmentRows(s)) });
     files.push({ path: `${path}.txt`, text: shipmentText(s) });
   }
-  downloadBlob(`شحنات-${new Date().toLocaleDateString("en-CA")}.zip`, zipBlob(files));
+  downloadBlob(`شحنات-${today()}.zip`, zipBlob(files));
   toast(`تم تحميل ${shown.length} شحنة في مجلدات`);
 };
 

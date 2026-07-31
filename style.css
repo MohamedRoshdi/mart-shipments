@@ -186,6 +186,9 @@ button.scan::after {
 /* the block moves between screens, so it spaces itself instead of leaning on `section > * + *` */
 #scan-block > * + * { margin-block-start: 12px; }
 
+.date-range { display: flex; gap: 8px; flex-wrap: wrap; }
+.date-range label { flex: 1 1 44%; display: grid; gap: 4px; font-size: .78rem; color: var(--ink-2); }
+
 /* ---------- cards ---------- */
 ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
 li {
