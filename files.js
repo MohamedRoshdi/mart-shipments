@@ -75,14 +75,15 @@ export async function available() {
 
 /** The chosen folder's name, for the settings screen. Null when none is chosen. */
 export async function folderName() {
-  if (bridge()) return bridge().rootName || "D:\\import";
+  if (bridge()) return bridge().root().catch(() => "D:\\import");
   const h = await getHandle();
   return h ? h.name : null;
 }
 
 /** Ask for the folder. This is the ONE prompt, and only a button may cause it. */
 export async function chooseFolder() {
-  if (bridge()) return bridge().rootName || "D:\\import";
+  // the desktop build owns its folder; there is nothing to pick and nothing to ask
+  if (bridge()) return folderName();
   if (!supported()) throw new Error("المتصفح ده مش بيسمح بالحفظ في مجلد — افتح البرنامج من كروم على الويندوز");
   const h = await window.showDirectoryPicker({ mode: "readwrite", startIn: "documents" });
   await putHandle(h);

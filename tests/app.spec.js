@@ -2015,6 +2015,41 @@ test('files: the names are safe and unique, and no folder means the old download
   expect(saved).toBe('download');
 });
 
+/* The desktop build's whole contract with the app is window.mart, and scripts/desktop-check.cjs
+   proves the Electron side of it. This is the other side: that files.js actually prefers a bridge
+   when one is there, and never falls back to a download or a picker in front of it. */
+test('files: a desktop bridge wins over the picker and the download', async ({ page }) => {
+  await page.goto('/?test=1');
+  const r = await page.evaluate(async () => {
+    const calls = [];
+    window.mart = {
+      root: async () => 'D:\\import',
+      saveText: async (folder, name, text) => { calls.push([folder, name, text]); },
+      readText: async () => '111\t3',
+      listFolder: async () => ['المراعي.txt'],
+    };
+    const f = await import('./files.js');
+    const saved = await f.saveText('اذن استلام', 'المراعي.txt', '111\t3');
+    return {
+      calls, how: saved.how, path: saved.path,
+      name: await f.folderName(),
+      available: await f.available(),
+      list: await f.listFolder('اذن استلام'),
+      read: await f.readText('اذن استلام', 'المراعي.txt'),
+      // with a bridge there is nothing to pick: it answers with the folder it already owns
+      chosen: await f.chooseFolder(),
+    };
+  });
+  expect(r.calls).toEqual([['اذن استلام', 'المراعي.txt', '111\t3']]);
+  expect(r.how).toBe('disk');                       // never 'download' while a bridge is there
+  expect(r.path).toBe('اذن استلام\\المراعي.txt');
+  expect(r.name).toBe('D:\\import');
+  expect(r.available).toBe(true);
+  expect(r.list).toEqual(['المراعي.txt']);
+  expect(r.read).toBe('111\t3');
+  expect(r.chosen).toBe('D:\\import');
+});
+
 test('admin: the folder section says what this browser can do', async ({ page }) => {
   await openAdmin(page);
   const supported = await page.evaluate(async () => (await import('./files.js')).supported());

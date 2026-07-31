@@ -79,6 +79,19 @@ https://mohamedroshdi.github.io/mart-shipments/
 
 خطوات الإعداد الكاملة لصاحب المحل بالعربي في [SETUP.md](SETUP.md).
 
+## نسخة الويندوز
+
+نفس التطبيق بالظبط، في نافذة على الكمبيوتر — **نفس الملفات، مفيش نسخة تانية من الكود**. الفرق
+الوحيد إن ملفات TXT بتتحفظ لوحدها في `D:\import` من غير أي نافذة حفظ، والمجلدات بتتعمل لوحدها.
+
+```bash
+cd desktop && npm install && npm start     # يفتح البرنامج
+cd desktop && npm run dist                 # يطلّع ملف تنصيب ويندوز
+node scripts/desktop-check.cjs             # يفحص الشِل من غير ما ينزّل Electron
+```
+
+نسخة الويب فضلت شغالة زي ما هي — الموبايلات مش هيحصلها حاجة.
+
 ## للمطوّر
 
 HTML/CSS/JS خام — مفيش framework ولا build. Firebase Firestore للبيانات،
@@ -86,7 +99,7 @@ GitHub Pages للاستضافة، Playwright للاختبارات.
 
 ```bash
 npm install
-npx playwright test          # 86 اختبار
+npx playwright test          # 87 اختبار
 python3 -m http.server 8080  # ثم افتح http://localhost:8080/?test=1
 ```
 

@@ -1,0 +1,22 @@
+{
+  "name": "mart-shipments-desktop",
+  "version": "1.0.50",
+  "private": true,
+  "description": "العائلة مارت — نظام إدارة الشحنات والجرد (Windows)",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win --x64"
+  },
+  "devDependencies": {
+    "electron": "^32.0.0",
+    "electron-builder": "^25.0.0"
+  },
+  "build": {
+    "appId": "mart.alaela.shipments",
+    "productName": "AlaelaMart",
+    "directories": { "output": "out" },
+    "files": ["main.js", "preload.js"],
+    "win": { "target": "nsis" }
+  }
+}

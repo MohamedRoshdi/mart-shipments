@@ -186,6 +186,14 @@ async function renderFolder() {
   $("folder-now").textContent = name
     ? (ok ? `المجلد الحالي: ${name}` : `المجلد الحالي: ${name} — محتاج إذن تاني، دوس «اختار مجلد الاستيراد»`)
     : "";
+  // in the Windows build the shell owns the folder: a button that cannot change it is a button
+  // that looks broken, so both of them go and the note says where the files land
+  if (files.bridge()) {
+    $("btn-folder-pick").hidden = true;
+    $("btn-folder-clear").hidden = true;
+    $("folder-note").textContent = `ملفات TXT بتتحفظ لوحدها في ${name} — المجلد ده جزء من نسخة الويندوز.`;
+    return;
+  }
   $("btn-folder-clear").hidden = !name;
   $("btn-folder-pick").textContent = name ? "غيّر المجلد" : "اختار مجلد الاستيراد";
   $("btn-folder-pick").disabled = !files.supported();

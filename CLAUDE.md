@@ -27,7 +27,7 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 6. **Bump `CACHE` in `sw.js` on every deploy.** Serving is cache-first, so phones
    keep the old bundle until the cache name changes. Currently `mart-v50`.
    **Bump `version.js` in the same edit** — its `VERSION` ends in the cache generation
-   (`1.0.49`) and `BUILD` is the day, and every page prints both in its footer. A footer that
+   (`1.0.50`) and `BUILD` is the day, and every page prints both in its footer. A footer that
    lags the cache is worse than no footer.
    The bump only works because install fetches with `new Request(u, { cache: "reload" })` —
    a plain `addAll` reads the browser's HTTP cache and copies **stale** files into the new
@@ -50,6 +50,7 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 | `zip.js` | store-only ZIP writer, ~80 lines, no dependency; used by the folder export |
 | `sheet.js` | everything about reading a spreadsheet: `sheetRows` (**a real `.xlsx`** — zip walk + `DecompressionStream` — or CSV read field by field, quotes and all, and the only place that knows Excel writes Arabic as windows-1256), `headerMap` (columns by Arabic heading, so the shop's own export order works), **`requireColumns`** (the guard: no headings → positional, headings with a column missing → **throws in Arabic naming it**), `unitName` (unit **code** → word, `null` for a code the table does not know) and `unitCode` (the number itself, kept only when it is 1–5). Used by the catalog/stock import (manager) and the supplier import (admin) |
 | `style.css` | one stylesheet for all three pages |
+| `desktop/` | the Windows build: `main.js` (serves the repo root over `http://127.0.0.1` on a random port, plus the three IPC handlers), `preload.js` (the whole `window.mart` contract), `package.json` (electron + electron-builder, kept entirely in here so the repo no-build rule still holds for the web target). **Never loaded by the web version** |
 | `files.js` | where a file goes when it leaves the app: `window.mart` bridge → File System Access folder handle (IndexedDB, chosen once) → the `<a download>` that has always happened. Also `listFolder`/`readText` (what the ERP check will read back), `uniqueName`, `safeSegment`, and the single copy of `downloadBlob` |
 | `version.js` | the release, in one place: `APP_NAME`, `VERSION`, `BUILD` and `versionLine()`. All three pages print it in a footer. `BUILD` is a literal on purpose — `new Date()` would print the day the page was *opened*, which looks like a build date and is not one |
 | `sw.js`, `manifest.json` | **one** installable PWA, on the main URL. `manager.html` and `admin.html` carry no manifest: the PIN routes people to their screen (`auth.landingPage`), and the home screen links to the other two. Dropped 2026-07-31 on the owner's call — a phone with three near-identical icons was the confusing part. |
@@ -57,7 +58,7 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 | `firestore.rules` | shape validation; the only server-side guard that exists |
 | `SETUP.md` | Arabic guide for the shop owner |
 | `products-template.csv`, `stock-template.csv`, `suppliers-template.csv` | the three import shapes, **each one exactly what the ERP exports**: «كود الصنف، الوحدة، اسم الصنف، معامل التحويل»، «الرصيد، كود الصنف، الوحدة، اسم الصنف»، «كود المورد، اسم المورد» |
-| `tests/app.spec.js` | 86 Playwright tests, all in localStorage mode |
+| `tests/app.spec.js` | 87 Playwright tests, all in localStorage mode |
 | `scripts/*.mjs` | live checks and screenshot helpers (see below) |
 
 ## Data model
@@ -420,6 +421,39 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   TXT / حذف all live on the screen it opens — which is the same two taps they used to take. The
   branch filter row hides itself when the user is scoped to one branch, because a single disabled
   chip is a row that does nothing.
+- **The Windows build is a window around the same files, and `preload.js` is the entire contract.**
+  `desktop/main.js` serves the repo root over `http://127.0.0.1` on a random loopback port rather
+  than loading `file://` — ES modules, the service worker and the Firebase SDK all behave
+  differently or not at all on `file://`, and one codebase only means something if the desktop
+  build runs the same code down the same paths. `scripts/desktop-check.cjs` asserts the served
+  `files.js` is **byte for byte** the one the web build uses, which is what keeps that honest.
+  The renderer gets no Node: `contextIsolation: true`, `nodeIntegration: false`, and `window.mart`
+  is three functions over IPC. **Every path is resolved and proved to be under the root before
+  anything is written** — a folder name arrives from a shipment type the shop typed, and the
+  renderer is a web page. Three traversal refusals are asserted (climbing folder, climbing file
+  name, absolute path). `app.whenReady` is stubbed to a never-resolving promise for the bridge
+  half of the check, so no port is bound when only the handlers are being tested.
+  Electron is **not** installed or run by that check — the window itself, the `.exe` and the
+  install are unproven until somebody builds them on Windows.
+- **The Windows build is a window around the same files, and it must stay that way.** `desktop/`
+  serves the repo root over `http://127.0.0.1` on a random port rather than loading `file://`:
+  ES modules, the service worker and the Firebase SDK all behave differently (or not at all) on
+  `file://`, and "one codebase" has to mean the desktop build runs the same code down the same
+  paths. `desktop-check.cjs` asserts the served `files.js` is **byte for byte** the web one — that
+  is the check that keeps the claim true. `npm`/electron live entirely under `desktop/`, so the
+  repo's no-build rule still holds for the web target.
+- **`window.mart` is the whole desktop contract: `root`, `saveText`, `readText`, `listFolder`.**
+  `contextIsolation: true`, `nodeIntegration: false` — the renderer never sees Node. `root` goes
+  over IPC rather than reading `process.env` in the preload, because what a preload sees of
+  `process` depends on whether the renderer is sandboxed, and `main.js` owns `ROOT` anyway.
+  **The path guard is security, not tidiness**: a folder name arrives from a shipment type the
+  shop typed into a publicly-writable settings doc, so `inside()` resolves it and proves it stayed
+  under the root. Four of the 18 checks are traversal attempts.
+  With a bridge present the admin page hides the folder picker entirely — a button that cannot
+  change anything is a button that looks broken.
+- **UNVERIFIED in `desktop/`**: `npm run dist` has never been run (electron is a ~200 MB download
+  and nothing here installs it), so the `.exe` is written but unbuilt. The logic is covered without
+  it — that is the point of stubbing electron out of the require cache in `desktop-check.cjs`.
 - **A browser cannot write to `D:\` — but it can be handed a folder once.** `files.js` prefers a
   `window.mart` desktop bridge (nothing provides one yet; the preference exists so an Electron
   shell can be added without touching app code), then a File System Access directory handle the
@@ -487,10 +521,15 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
 ## Commands
 
 ```bash
-npx playwright test                 # 86 tests, localStorage mode, ~40s
+npx playwright test                 # 87 tests, localStorage mode, ~40s
+node scripts/desktop-check.cjs      # 18 checks of desktop/main.js with electron stubbed out — the
+                                    # path guards and the local server, no 200 MB download needed
 npx playwright test -g "catalog"    # one group
 python3 -m http.server 8080         # serve locally, then open /?test=1
 node scripts/make-icons.mjs         # regenerate the PWA icons
+node scripts/desktop-check.cjs      # the Windows shell: path guard + the local server, with electron stubbed out (no download, no display)
+cd desktop && npm install && npm start   # run the Windows build here
+cd desktop && npm run dist              # build the .exe (electron-builder, output in desktop/out)
 node scripts/make-xlsx-fixture.mjs  # rebuild tests/fixtures/catalog.xlsx (deflate, Excel-openable)
 ```
 
