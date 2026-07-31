@@ -703,10 +703,6 @@ $("btn-save-month").onclick = async () => {
 
 /* ---------- ليبل الرف: pick a product, print it. Nothing is saved. ---------- */
 
-// per phone, like the camera: one shop phone feeds the roll printer, another the A4 sheet
-const printCfg = () => ({ copies: 1, ...JSON.parse(localStorage.getItem("printSettings") || "{}") });
-const savePrint = (patch) => localStorage.setItem("printSettings", JSON.stringify({ ...printCfg(), ...patch }));
-
 let labelItem = null;
 let labelQueue = [];        // {barcode, name, price, copies} — printed in one go at the end
 
@@ -747,9 +743,13 @@ function showLabel(barcode, name, price) {
   labelItem = { barcode, name };
   $("label-empty").hidden = true;
   $("label-box").hidden = false;
-  // the catalog price when the sheet carried one; still editable for this print only
-  $("label-price").value = Number.isFinite(price) ? String(price) : "";
-  $("label-copies").value = Math.max(1, printCfg().copies);
+  // the catalog price when the sheet carried one; still editable for this print only. An empty
+  // box is not a broken screen — it means that product has no price yet, and it says so.
+  const known = Number.isFinite(price);
+  $("label-price").value = known ? String(price) : "";
+  $("label-price-note").hidden = known;
+  // always 1, never the last count used: the owner adds copies himself when he wants them
+  $("label-copies").value = 1;
   paintLabel();
   renderQueue();
 }
@@ -840,7 +840,6 @@ $("btn-print-label").onclick = () => {
   if (printing) { printing.stop = true; toast("وقفنا الطباعة"); return; }
   const rows = toPrint();
   if (!rows.length) return;
-  savePrint({ copies: rows[rows.length - 1].copies });
   const cfg = lbl.labelCfg(window.APP_CONFIG);
   // a roll printer wants one label per page at the label's own size; an A4 sheet wants them
   // tiled on one page, which is a different @page and a different flow

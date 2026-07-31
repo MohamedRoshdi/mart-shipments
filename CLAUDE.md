@@ -188,10 +188,15 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   A4 flows them across one sheet. Verified on paper, not on screen: `scripts/shots-label.mjs`
   prints to PDF with `preferCSSPageSize` and measures the `/MediaBox` (66.0 × 34.9 mm × 3 pages,
   measured 2026-07-31).
-- **Nothing about a label is saved.** No collection, no draft, no audit row — the screen reads a
-  product and prints. Only the copy count is remembered, in `localStorage.printSettings`, per
-  phone (the same reasoning as the camera settings). The price is typed on the screen and dies
-  with it, and so does the print queue: leaving the screen empties it.
+- **Nothing about a label is saved — including the copy count.** No collection, no draft, no audit
+  row, and since 2026-07-31 no `localStorage.printSettings` either: the box opens on **1** every
+  time, on the owner's own instruction («وثبت عدد النسخ ١ وانا ازود براحتى»). Remembering the last
+  count meant a screen that opened on 3 because somebody once printed 3. The price is typed on the
+  screen and dies with it, and so does the print queue: leaving the screen empties it.
+- **An empty price box is not a broken screen.** `showLabel` fills the price from the product when
+  the catalog carries one; when it does not, `#label-price-note` says so in as many words, because
+  a blank box next to a barcode reads as a bug. The catalog only carries a price when a sheet with
+  an «اخر سعر بيع» column has been imported.
 - **The label is the shop's own design, and the price is the loud part** (their label software,
   2026-07-31): logo, then the price at 8 mm with a small `LE`, then the name, the bars, the number
   centred and the print date tucked in the corner. Every row is always in the markup — a label

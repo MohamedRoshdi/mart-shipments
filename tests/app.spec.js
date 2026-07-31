@@ -1634,11 +1634,15 @@ test('label: pick a product, preview it, print the copies asked for', async ({ p
   expect(await page.evaluate(() => window.printed)).toBe(1);
   expect(await page.evaluate(() => document.getElementById('print-size').textContent)).toContain('66mm 35mm');
 
-  await page.reload();                                               // the count sticks per phone
+  // the count is never remembered: the box opens on 1 every time, and the owner adds from there
+  await page.reload();
   await page.click('#btn-label');
   await page.fill('#barcode-input', '6223001234562');
   await page.click('#btn-lookup');
-  await expect(page.locator('#label-copies')).toHaveValue('3');
+  await expect(page.locator('#label-copies')).toHaveValue('1');
+  // and a product the catalog has no price for says so instead of showing a blank box
+  await expect(page.locator('#label-price')).toHaveValue('');
+  await expect(page.locator('#label-price-note')).toBeVisible();
 });
 
 test('import: the two templates the app itself hands out still import', async ({ page }) => {
