@@ -96,8 +96,15 @@ export async function forgetFolder() {
 
 /* ---------- names ---------- */
 
-// Windows forbids these outright, and a folder name that contains one is a write that fails
-export const safeSegment = (s) => String(s || "").replace(/[\\/:*?"<>|]/g, "-").trim() || "ملف";
+/* Windows forbids these outright, and a folder name that contains one is a write that fails.
+   `.` and `..` are stripped too. The desktop bridge already proves every path stayed under its
+   root (six checks in scripts/desktop-check.cjs) and the File System Access API refuses those two
+   names itself — but a segment builder that can emit ".." is only safe because of what happens to
+   be downstream of it today, and that is not a property worth relying on. */
+export const safeSegment = (s) => {
+  const t = String(s || "").replace(/[\\/:*?"<>|]/g, "-").trim();
+  return !t || t === "." || t === ".." ? "ملف" : t;
+};
 
 /* A second file for the same supplier must not overwrite the first. The extra part is the caller's
    (a permit number when there is one), and the timestamp is the fallback — the point is only that

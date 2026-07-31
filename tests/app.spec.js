@@ -1986,6 +1986,10 @@ test('files: the names are safe and unique, and no folder means the old download
       // Windows refuses these outright, so a folder built from a supplier name has to lose them
       safe: f.safeSegment('مورد/شحنة: 2026?'),
       empty: f.safeSegment('   '),
+      // a segment builder must never be able to emit a climb, whatever is downstream of it
+      dots: f.safeSegment('..'),
+      dot: f.safeSegment('.'),
+      slashed: f.safeSegment('../../etc'),
       free: f.uniqueName('المراعي', '.txt', []),
       // the second file for the same supplier takes the permit number rather than overwriting
       withExtra: f.uniqueName('المراعي', '.txt', ['المراعي.txt'], '4471'),
@@ -1998,6 +2002,11 @@ test('files: the names are safe and unique, and no folder means the old download
   });
   expect(r.safe).toBe('مورد-شحنة- 2026-');
   expect(r.empty).toBe('ملف');
+  expect(r.dots).toBe('ملف');
+  expect(r.dot).toBe('ملف');
+  // the dots survive inside a longer name, which is fine — what makes a climb is the SEPARATOR,
+  // and there is none left, so this is one harmless segment rather than three
+  expect(r.slashed).toBe('..-..-etc');
   expect(r.free).toBe('المراعي.txt');
   expect(r.withExtra).toBe('المراعي - 4471.txt');
   expect(r.noExtra).toBe('المراعي (3).txt');
