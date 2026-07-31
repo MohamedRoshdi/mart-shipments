@@ -14,7 +14,9 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
    string lives in the HTML/JS as literal Arabic text. No i18n layer.
 3. **Logical CSS properties only** (`margin-inline`, `inset-block-end`,
    `inline-size`, `border-start-start-radius`). Never `left`/`right`/`width` for
-   layout. Barcodes, quantities and PINs get `dir="ltr"`.
+   layout. Barcodes, quantities and PINs get `dir="ltr"`. The one deliberate exception is the
+   drawn chevron in `.action::after`: it is a shape that must always point the way the screen
+   opens, and the physical sides are commented as such where they are used.
 4. **Every interpolation into HTML goes through `esc()`** — and through
    `escAttr()` when it lands inside an attribute (`value="…"`, `data-…="…"`).
    Both `shipments` and `products` are publicly writable, so all stored text is
@@ -35,28 +37,28 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 | File | Role |
 |---|---|
 | `index.html` / `app.js` | employee app: setup, home, new/edit shipment **or stocktake**, **الصلاحيات** (months + one month), camera, item sheet |
-| `manager.html` / `manager.js` | manager app: PIN, shipments tab, stocktake tab, **expiry tab**, edit, catalog screen, import/export |
-| `admin.html` / `admin.js` | admin app: users + permissions, settings (branches, PINs, types), audit trail, bulk delete, catalog wipe |
+| `manager.html` / `manager.js` | manager app: PIN, shipments tab, stocktake tab, **expiry tab**, one search box over the list, edit, catalog screen, import/export (Excel, TXT, ZIP by day/month) |
+| `admin.html` / `admin.js` | admin app: users + permissions + phone binding, settings (branches, types, **suppliers**, PINs), audit trail, bulk delete by kind/branch/type/day-range, catalog wipe |
 | `auth.js` | permission list, PIN → identity, the 12-hour session shared by all three pages |
 | `expiry.js` | the pure part of الصلاحيات: month grouping, sorting, counters, the four colour states |
 | `db.js` | data layer; `?test=1` switches the whole app to localStorage |
 | `zip.js` | store-only ZIP writer, ~80 lines, no dependency; used by the folder export |
 | `style.css` | one stylesheet for all three pages |
 | `sw.js`, `manifest.json` | **one** installable PWA, on the main URL. `manager.html` and `admin.html` carry no manifest: the PIN routes people to their screen (`auth.landingPage`), and the home screen links to the other two. Dropped 2026-07-31 on the owner's call — a phone with three near-identical icons was the confusing part. |
-| `firebase-config.js` | Firebase keys **plus** `APP_CONFIG`: PINs (incl. `adminPin`), branches, shipment types |
+| `firebase-config.js` | Firebase keys **plus** `APP_CONFIG`: PINs (incl. `adminPin`), branches, shipment types, suppliers |
 | `firestore.rules` | shape validation; the only server-side guard that exists |
 | `SETUP.md` | Arabic guide for the shop owner |
-| `products-template.csv`, `stock-template.csv` | the two import shapes: barcode+name, and barcode+name+quantity |
+| `products-template.csv`, `stock-template.csv` | the two import shapes: barcode+name+**unit**, and barcode+name+quantity |
 | `tests/app.spec.js` | 59 Playwright tests, all in localStorage mode |
 | `scripts/*.mjs` | live checks and screenshot helpers (see below) |
 
 ## Data model
 
-`shipments/{auto}` — `name`, `createdBy`, `createdAt` (epoch ms), `branch`, `type`,
-`items: [{barcode, name, qty}]`.
+`shipments/{auto}` — `name` (**the supplier**), `createdBy`, `createdAt` (epoch ms), `branch`,
+`type`, `items: [{barcode, name, qty, unit?}]`.
 
-`counts/{auto}` — a stocktake (جرد): `name`, `createdBy`, `createdAt`, `branch`,
-`items: [{barcode, name, qty, sys}]`. `qty` is what the employee counted on the shelf,
+`counts/{auto}` — a stocktake (جرد): `name` (a shelf, never a supplier), `createdBy`,
+`createdAt`, `branch`, `items: [{barcode, name, qty, sys, unit?}]`. `qty` is what the employee counted on the shelf,
 `sys` what the imported sheet says the system holds. **`sys` is absent when the sheet never
 listed that product** — writing 0 would claim the system said zero. No `type`: a count is
 not a kind of shipment.
@@ -291,11 +293,15 @@ STAMP=$RANDOM node scripts/live-expiry.mjs       # الصلاحيات: record a 
 node scripts/live-expiry-cleanup.mjs             # janitor for a live-expiry run that died mid-way
 node scripts/live-expiry-server.mjs              # fresh context: what the SERVER holds, no local cache
 node scripts/live-users-probe.mjs                # read-only users list; TIME=1 also times one save ack
+node scripts/live-mobile-known.mjs               # read-only: Pixel 5 on the live site, a real catalog barcode
+OUT=/tmp/shots node scripts/shot-refused.mjs     # read-only: the refusal sheet, settled, on the live site
+OUT=/tmp/shots node scripts/shot-live-manager.mjs # read-only: one shot of the live manager screen
 BASE=http://localhost:8087 node scripts/live-camera.mjs   # camera list/start/stop/fallback on a fake device
 OUT=/tmp/shots node scripts/shots.mjs            # local screenshots (needs the server above)
 OUT=/tmp/shots BASE=http://localhost:8080 node scripts/shots-expiry.mjs   # home + الصلاحيات screens
 OUT=/tmp/shots BASE=http://localhost:8080 node scripts/shots-all.mjs      # all 16 screens, the visual reference set
 OUT=/tmp/shots BASE=http://localhost:8080 node scripts/shots-search.mjs   # the name search on all three modes
+OUT=/tmp/shots BASE=http://localhost:8080 node scripts/shots-supplier.mjs # the supplier list, admin side and employee side
 ```
 
 Writing live scripts: pull real barcodes from the catalog first — invented ones are
@@ -309,8 +315,10 @@ debounce, or it reports false negatives.
   `test-counts` / `test-expiry` in localStorage. An `expiry` seed carries its own `_id`
   (`saveExpiry` writes `createdAt-barcode`, because two rows can land in the same millisecond). Seed `test-products` in any test that adds items, or the add
   is refused (`setUp()` seeds `111`/`222` by default).
-- A `test-products` value may be a plain string **or** `{name, qty}` — the string form is kept
-  so older seeds still work, and `qty` is what a stocktake compares against.
+- A `test-products` value may be a plain string **or** `{name, qty?, unit?, stock?}` — the string
+  form is kept so older seeds still work, `qty`/`stock` is what a stocktake compares against, and
+  `unit` is what the item sheet shows.
+- `seedSuppliers()` writes `test-config.suppliers` and reloads, same reason as `seedUsers()`.
 - Empty states render an `li.empty`, so count assertions use
   `#items-list li:not(.empty)`.
 - Product names live in `value=""`, so assert with `toHaveValue`, not `toContainText`.
@@ -345,7 +353,11 @@ debounce, or it reports false negatives.
   edited or removed once written.
 - `scripts/live-admin.mjs` leaves one audit row behind on purpose: the rules forbid deleting
   audit rows, so a live check of that collection cannot clean up after itself.
-- Catalog search matches the **start** of a name; mid-word search needs a search service.
+- Catalog search reads a **copy of the catalog taken up to 7 days ago** (`localStorage.catalogIndex`).
+  A product added from another phone is findable by scanning its barcode immediately — that is a
+  direct doc read — but by name only after this phone refreshes the copy, or through the server
+  prefix fallback when the local copy returns nothing. Any product write on the phone drops the
+  copy at once.
 - **The free Spark plan is 20k writes / 50k reads a day, and a full sheet import is one write
   per row.** The owner's catalog is ~10k products, so two full imports in a day exhaust the
   write quota; Firestore then answers `[code=resource-exhausted]: Quota exceeded` and writes
