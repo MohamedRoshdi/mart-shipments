@@ -4,6 +4,7 @@ import * as lbl from "./label.js";
 import { sheetRows, requireColumns } from "./sheet.js";
 import { versionLine } from "./version.js";
 import * as files from "./files.js";
+import { applyBrand } from "./brand.js";
 
 const $ = (id) => document.getElementById(id);
 const esc = (t) => { const d = document.createElement("div"); d.textContent = t; return d.innerHTML; };
@@ -681,6 +682,7 @@ cfgReady = (async () => {
   await db.initDb().catch(console.error);
   const stored = await db.getConfig().catch(() => ({}));
   Object.assign(window.APP_CONFIG, stored);
+  applyBrand(window.APP_CONFIG);
   cfg = {
     managerPin: window.APP_CONFIG.managerPin,
     adminPin: window.APP_CONFIG.adminPin,

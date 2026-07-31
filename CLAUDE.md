@@ -46,6 +46,8 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 | `auth.js` | permission list, PIN → identity, the 12-hour session shared by all three pages |
 | `expiry.js` | the pure part of الصلاحيات: month grouping, sorting, counters, the four colour states |
 | `label.js` | the whole of ليبل الرف that is not a screen: EAN-13 + Code 128 encoding, the barcode SVG, the label's HTML, and the settings guard. No db, no DOM, no session — that is what makes the price (or any other field) a one-line change later |
+| `erp.js` | what PowerTech leaves behind after an import, pure: `pulledRows`, `isImported` (the «1» flag in field 5 of every row), `permitOf` (`store 1_4552.txt` → `4552`), `sameGoods`. Built from a measured pulled file, never guessed. Nothing wires it to `erpAt` yet — blocked on where the pulled file lives |
+| `brand.js` | the uploaded logo (config `label.logo`) as the app-bar image and the tab icon on all three pages; no logo in the config = the pages look exactly as before |
 | `db.js` | data layer; `?test=1` switches the whole app to localStorage |
 | `zip.js` | store-only ZIP writer, ~80 lines, no dependency; used by the folder export |
 | `sheet.js` | everything about reading a spreadsheet: `sheetRows` (**a real `.xlsx`** — zip walk + `DecompressionStream` — or CSV read field by field, quotes and all, and the only place that knows Excel writes Arabic as windows-1256), `headerMap` (columns by Arabic heading, so the shop's own export order works), **`requireColumns`** (the guard: no headings → positional, headings with a column missing → **throws in Arabic naming it**), `unitName` (unit **code** → word, `null` for a code the table does not know) and `unitCode` (the number itself, kept only when it is 1–5). Used by the catalog/stock import (manager) and the supplier import (admin) |
@@ -207,7 +209,10 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
 - **An empty price box is not a broken screen.** `showLabel` fills the price from the product when
   the catalog carries one; when it does not, `#label-price-note` says so in as many words, because
   a blank box next to a barcode reads as a bug. The catalog only carries a price when a sheet with
-  an «اخر سعر بيع» column has been imported.
+  an «اخر سعر بيع» column has been imported — **and the shop's catalog export has no such column
+  and never will** (the owner, 2026-08-01): a future price would come from a separate file, so the
+  typed-per-print price is the normal case, not the fallback. The header pattern stays because it
+  costs nothing and a price file may reuse it.
 - **The label is the shop's own design, and the price is the loud part** (their label software,
   2026-07-31): logo, then the price at 8 mm with a small `LE`, then the name, the bars, the number
   centred and the print date tucked in the corner. Every row is always in the markup — a label
@@ -364,10 +369,14 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
 - **The ERP state is derived, never stored.** `erpState(s)` reads `erpAt` → «تم الاستيراد»,
   `loadedAt` → «جاهزة للاستيراد», neither → «جديدة». The absence of a key IS a state, the same
   shape as «تم تحميلها»; there is no status column to keep in step with the two timestamps that
-  already say everything. **Nothing sets `erpAt` yet** — reading PowerTech's success flag out of
-  the TXT needs a real sample of one it has touched, and a guessed parser would mark a shipment
-  «تم الاستيراد» when it was never imported, which is the worst failure this feature has. The
-  state model is in place so the screen could be built against it.
+  already say everything. **Nothing sets `erpAt` yet**, but the flag is no longer a guess:
+  `erp.js` reads it, built from a real pulled file (`store 1_4552.txt`, measured 2026-08-01) —
+  six tab fields per row, `barcode \t qty(5 decimals) \t \t \t 1 \t CRLF`, the «1» in the fifth
+  field of EVERY row is the success flag, and the ERP renames the file to `store <n>_<permit>.txt`
+  so the CONTENT (`sameGoods`) is the identity, never the name. The app's own two-field file can
+  never read as imported, and one unflagged row means not imported. What still blocks the
+  `erpAt` write: **where the pulled file lives** — whether PowerTech rewrites the file in
+  `D:\import\<folder>` in place, deletes it, or writes its copy somewhere else. Asked 2026-08-01.
 - **The manager opens on «النهارده والمعلّق», and that is a filter, not a query.** `#month-pick`
   gained it as its first option and its default. It reads **this month and last** — two bounded
   reads, because an unfinished shipment must not vanish at midnight on the 1st — and then shows
@@ -507,8 +516,8 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   `shipmentText` — `barcode TAB qty`, where a count's `qty` is what was **counted on the shelf**,
   never `sys` and never the difference. `#detail-load` stays hidden for a count: downloading a
   stocktake is not taking it into the shop's system on somebody's behalf.
-  **Open with the shop**: whether PowerTech's جرد import wants the same two columns. If it wants a
-  third, `shipmentText` is the only line that changes.
+  **Closed with the shop 2026-08-01**: PowerTech's جرد import takes exactly two columns, كود الصنف
+  and الكمية — `shipmentText`'s `barcode TAB qty` is already the right shape for both kinds.
 - **The TXT folder names are mapped, never derived.** The shop writes «اذن استلام» without the
   hamza and the app's shipment types carry it (`إذن استلام`), so `TXT_FOLDER` in `manager.js` maps
   them by hand. A folder name one character off is a second folder nobody looks in. A type the

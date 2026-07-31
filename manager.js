@@ -5,6 +5,7 @@ import { zipBlob } from "./zip.js";
 import { sheetRows, requireColumns, unitName, unitCode, clean as cell } from "./sheet.js";
 import { versionLine } from "./version.js";
 import { downloadBlob, saveText, listFolder, uniqueName, safeSegment } from "./files.js";
+import { applyBrand } from "./brand.js";
 
 const $ = (id) => document.getElementById(id);
 const esc = (t) => { const d = document.createElement("div"); d.textContent = t; return d.innerHTML; };
@@ -1200,6 +1201,7 @@ if ("serviceWorker" in navigator && !new URLSearchParams(location.search).has("t
 function watchSettings() {
   db.watchConfig((cfg) => {
     Object.assign(window.APP_CONFIG, cfg);
+    applyBrand(window.APP_CONFIG);
     renderTypeFilter();
   }).catch(console.error);
 }
@@ -1208,6 +1210,7 @@ function watchSettings() {
 cfgReady = (async () => {
   await db.initDb().catch(console.error);
   Object.assign(window.APP_CONFIG, await db.getConfig().catch(() => ({})));
+  applyBrand(window.APP_CONFIG);
   watchSettings();
   const s = auth.session();
   if (!s) return;

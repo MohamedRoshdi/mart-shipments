@@ -4,6 +4,7 @@ import * as ex from "./expiry.js";
 import * as lbl from "./label.js";
 
 import { versionLine } from "./version.js";
+import { applyBrand } from "./brand.js";
 
 const $ = (id) => document.getElementById(id);
 const esc = (t) => { const d = document.createElement("div"); d.textContent = t; return d.innerHTML; };
@@ -1145,6 +1146,7 @@ cfgReady = (async () => {
   updateSync();
   // branches, PINs, types and users the admin edited win over the ones shipped in the code
   Object.assign(window.APP_CONFIG, await db.getConfig().catch(() => ({})));
+  applyBrand(window.APP_CONFIG);
   state.branch = myBranch();
   if (!types().includes(state.type)) state.type = types()[0];
   renderBranchPicker();
@@ -1156,6 +1158,7 @@ cfgReady = (async () => {
      stamp the delivery with the wrong branch. */
   db.watchConfig((cfg) => {
     Object.assign(window.APP_CONFIG, cfg);
+    applyBrand(window.APP_CONFIG);
     if (!allowedBranches().includes(state.branch)) state.branch = allowedBranches()[0];
     renderBranchPicker();
     renderSuppliers();

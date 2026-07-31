@@ -73,6 +73,17 @@ body {
   color: #fff;
 }
 .appbar h1 { margin: 0; font-size: 1.06rem; font-weight: 700; white-space: nowrap; }
+/* the shop's own logo, beside the title on every page — white plate because the logo is drawn
+   for a light background and the bar is charcoal */
+.appbar .brand {
+  block-size: 26px;
+  inline-size: auto;
+  max-inline-size: 64px;
+  object-fit: contain;
+  background: #fff;
+  border-radius: 6px;
+  padding: 2px 4px;
+}
 .icon-btn {
   background: rgba(255, 255, 255, .14);
   color: #fff;

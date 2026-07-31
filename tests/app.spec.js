@@ -2081,8 +2081,53 @@ test('files: a bridge that fails to write still hands the person their file', as
     }),
   ]);
   expect(r.how).toBe('download');
-  expect(r.fell).toBe(true);   // and the caller can warn that the folder is broken                   // the toast stays honest about what happened
+  expect(r.fell).toBe(true);   // and the caller can warn that the folder is broken
   expect(download.suggestedFilename()).toBe('المراعي.txt');
+});
+
+/* The success flag, built from a real pulled file and nothing else: PowerTech rewrites the TXT
+   to six tab fields with «1» in the fifth of every row (store 1_4552.txt, measured 2026-08-01).
+   The two-field file the app writes must never read as imported, and neither may a file with
+   even one unflagged row — «تم الاستيراد» on a half-taken permit is the failure this feature
+   exists to avoid. */
+test('erp: the pulled file reads as imported, and our own file never does', async ({ page }) => {
+  await page.goto('/?test=1');
+  const r = await page.evaluate(async () => {
+    const erp = await import('./erp.js');
+    const pulled = '6223001930518\t70.00000\t\t\t1\t\r\n6223001930594\t15.00000\t\t\t1\t\r\n'
+      + '6223001930617\t24.00000\t\t\t1\t\r\n27\t8.00000\t\t\t1\t\r\n';
+    return {
+      imported: erp.isImported(pulled),
+      oursNot: erp.isImported('6223001930518\t70\n27\t8'),        // what the app writes
+      halfNot: erp.isImported(pulled.replace('24.00000\t\t\t1', '24.00000\t\t\t')),
+      emptyNot: erp.isImported(''),
+      permit: erp.permitOf('store 1_4552.txt'),
+      noPermit: erp.permitOf('المراعي.txt'),
+      match: erp.sameGoods(erp.pulledRows(pulled), [
+        { barcode: '6223001930518', qty: 70 }, { barcode: '6223001930594', qty: 15 },
+        { barcode: '6223001930617', qty: 24 }, { barcode: '27', qty: 8 }]),
+      short: erp.sameGoods(erp.pulledRows(pulled), [{ barcode: '6223001930518', qty: 70 }]),
+    };
+  });
+  expect(r).toEqual({ imported: true, oursNot: false, halfNot: false, emptyNot: false,
+    permit: '4552', noPermit: '', match: true, short: false });
+});
+
+/* The logo the admin uploads for the label is also the brand: app bar + tab icon, on every page,
+   straight from the config — and a config with no logo changes nothing at all. */
+test('the uploaded logo lands in the app bar and the tab icon', async ({ page }) => {
+  await page.goto('/?test=1');
+  await expect(page.locator('.appbar .brand')).toHaveCount(0);    // no logo, no image
+  const logo = 'data:image/png;base64,'
+    + 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+  await page.evaluate((l) => {
+    const cfg = JSON.parse(localStorage.getItem('test-config') || '{}');
+    cfg.label = { ...(cfg.label || {}), logo: l };
+    localStorage.setItem('test-config', JSON.stringify(cfg));
+  }, logo);
+  await page.reload();
+  await expect(page.locator('.appbar .brand')).toHaveAttribute('src', logo);
+  await expect(page.locator('link[rel="icon"]')).toHaveAttribute('href', logo);
 });
 
 test('admin: the folder section says what this browser can do', async ({ page }) => {
