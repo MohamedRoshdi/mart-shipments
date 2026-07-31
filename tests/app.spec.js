@@ -155,11 +155,12 @@ test('manager page: PIN gate, list, copy barcode-tab-qty', async ({ page }) => {
   await expect(page.locator('#screen-pin')).toBeVisible(); // wrong PIN stays
   await openManagerPage(page);
   await expect(page.locator('#all-shipments li')).toHaveCount(1);
-  await page.click('button[data-act="copy"]');
-  const text = await page.evaluate(() => navigator.clipboard.readText());
-  expect(text).toBe('6221031250057\t3');
+  await expect(page.locator('#all-shipments button')).toHaveCount(1);   // one card, one tap
   await page.click('button[data-act="view"]');
   await expect(page.locator('#detail-name')).toHaveValue('شحنة المراعي');
+  await page.click('#btn-copy');                                        // exports live on the card screen
+  const text = await page.evaluate(() => navigator.clipboard.readText());
+  expect(text).toBe('6221031250057\t3');
 });
 
 test('manager page: edit name, change qty, delete item', async ({ page }) => {
@@ -169,10 +170,10 @@ test('manager page: edit name, change qty, delete item', async ({ page }) => {
   await page.fill('input[data-qty="0"]', '7');
   await page.click('#btn-save-edit');
   await expect(page.locator('#all-shipments li')).toContainText('شحنة معدّلة');
-  await page.click('button[data-act="copy"]');
-  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('6221031250057\t7');
   await page.click('button[data-act="view"]');
-  await page.click('button[data-delitem="0"]');
+  await page.click('#btn-copy');
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('6221031250057\t7');
+  await page.click('button[data-delitem="0"]');           // still on the card screen
   await page.click('#btn-save-edit');
   await page.click('button[data-act="view"]');
   await expect(page.locator('#detail-items tr:has(button)')).toHaveCount(0);
@@ -218,7 +219,9 @@ test('manager page: delete removes shipment', async ({ page }) => {
   await openManagerPage(page);
   await expect(page.locator('#all-shipments li')).toHaveCount(1);
   page.on('dialog', (d) => d.accept());
-  await page.click('button[data-act="del"]');
+  await page.click('button[data-act="view"]');
+  await page.click('#btn-delete-detail');
+  await expect(page.locator('#screen-manager')).toBeVisible();     // the gone card is not behind back
   await expect(page.locator('#all-shipments li')).toContainText('مفيش شحنات');
 });
 
@@ -350,13 +353,15 @@ test('manager page: download one shipment and all shipments, CSV and TXT', async
     page.click(selector),
   ]))[0];
 
-  const one = await grab('button[data-act="download"]');
+  await page.click('button[data-act="view"]');           // one shipment: from the card screen
+  const one = await grab('#btn-download');
   expect(one.suggestedFilename()).toBe('شحنة المراعي.csv');
   const oneText = require('fs').readFileSync(await one.path(), 'utf8');
   expect(oneText.startsWith('﻿')).toBe(true);            // Excel needs the BOM for Arabic
   expect(oneText).toContain('"6221031250057","لبن","","3"');   // الوحدة column, empty here
 
-  const oneTxt = await grab('button[data-act="txt"]');
+  const oneTxt = await grab('#btn-download-txt');
+  await page.click('#btn-back');
   expect(oneTxt.suggestedFilename()).toBe('شحنة المراعي.txt');
   expect(require('fs').readFileSync(await oneTxt.path(), 'utf8')).toBe('6221031250057\t3');
 
@@ -617,11 +622,12 @@ test("الوحدة: the third column rides from the sheet to the item sheet and 
   await page.fill("#pin-input", await page.evaluate(() => window.APP_CONFIG.managerPin));
   await page.click("#btn-pin");
   const grab = async (loc) => (await Promise.all([page.waitForEvent("download"), loc.click()]))[0];
-  const csvDl = await grab(page.locator("button[data-act='download']").first());
+  await page.locator("button[data-act='view']").first().click();
+  const csvDl = await grab(page.locator("#btn-download"));
   const csv = require("fs").readFileSync(await csvDl.path(), "utf8");
   expect(csv).toContain("الوحدة");
   expect(csv).toContain("كرتونة");
-  const txtDl = await grab(page.locator("button[data-act='txt']").first());
+  const txtDl = await grab(page.locator("#btn-download-txt"));
   const txt = require("fs").readFileSync(await txtDl.path(), "utf8");
   expect(txt).not.toContain("كرتونة");
 });
@@ -676,7 +682,8 @@ test('admin: a saved branch and type reach the employee app and the manager', as
 test('admin: the audit trail shows what the manager did', async ({ page }) => {
   await openManagerPage(page);
   page.on('dialog', (d) => d.accept());
-  await page.click('button[data-act="del"]');
+  await page.click('button[data-act="view"]');
+  await page.click('#btn-delete-detail');
   await expect(page.locator('#all-shipments li')).toContainText('مفيش شحنات');
 
   await openAdmin(page);
@@ -1006,15 +1013,14 @@ test('permissions actually hide the actions on the manager page', async ({ page 
   await page.fill('#pin-input', MGR.pin);
   await page.click('#btn-pin');
   await expect(page.locator('#all-shipments li')).toHaveCount(1);
-  await expect(page.locator('button[data-act="del"]')).toHaveCount(0);      // no delete permission
-  await expect(page.locator('button[data-act="download"]')).toHaveCount(1); // download is allowed
   await expect(page.locator('#btn-products')).toBeHidden();                 // no catalog permission
   await expect(page.locator('#tool-import')).toBeHidden();
   await expect(page.locator('#tool-export')).toBeVisible();
-  await expect(page.locator('#branch-filter button')).toHaveCount(1);       // one branch → locked chip
-  await expect(page.locator('#branch-filter button')).toBeDisabled();
+  await expect(page.locator('#branch-filter-row')).toBeHidden();            // one branch → nothing to filter
   await page.click('button[data-act="view"]');
   await expect(page.locator('#btn-save-edit')).toBeVisible();               // edit is allowed
+  await expect(page.locator('#detail-exports')).toBeVisible();              // download is allowed
+  await expect(page.locator('#detail-danger')).toBeHidden();                // delete is not
 });
 
 test('a PIN typed on the wrong page is redirected to the right one', async ({ page }) => {
@@ -1224,9 +1230,11 @@ test('manager: the stocktake tab lists a count with its difference, exports it a
   await expect(page.locator('#all-counts li')).toContainText('جرد التلاجة');
   await expect(page.locator('#all-counts li')).toContainText('الفرق ناقص 1');   // 3 short, 2 not in the system
 
+  await page.click('#all-counts button[data-cact="view"]');
+  await expect(page.locator('#btn-download-txt')).toBeHidden();     // a TXT of a count says nothing
   const exp = (await Promise.all([
     page.waitForEvent('download'),
-    page.click('#all-counts button[data-cact="download"]'),
+    page.click('#btn-download'),
   ]))[0];
   expect(exp.suggestedFilename()).toBe('جرد التلاجة.csv');
   const csv = require('fs').readFileSync(await exp.path(), 'utf8');
@@ -1234,8 +1242,7 @@ test('manager: the stocktake tab lists a count with its difference, exports it a
   expect(csv).toContain('"111","لبن","","10","7","-3"');
   expect(csv).toContain('"222","جبنة","","غير مسجّلة","2",""');
 
-  await page.click('#all-counts button[data-cact="view"]');          // the manager may fix a number
-  await expect(page.locator('#detail-type-row')).toBeHidden();
+  await expect(page.locator('#detail-type-row')).toBeHidden();       // the manager may fix a number
   await expect(page.locator('#detail-items tr').first()).toContainText('في النظام 10 · ناقص 3');
   await page.fill('#detail-items input[data-qty="0"]', '10');
   await expect(page.locator('#detail-items tr').first()).toContainText('مظبوط');
@@ -1245,7 +1252,8 @@ test('manager: the stocktake tab lists a count with its difference, exports it a
 
   await page.click('#list-tabs button[data-tab="count"]');
   page.on('dialog', (d) => d.accept());
-  await page.click('#all-counts button[data-cact="del"]');
+  await page.click('#all-counts button[data-cact="view"]');
+  await page.click('#btn-delete-detail');
   await expect(page.locator('#toast')).toContainText('تم الحذف');
   await page.click('#list-tabs button[data-tab="count"]');
   await expect(page.locator('#all-counts li')).toContainText('مفيش جرد');
@@ -1417,16 +1425,16 @@ test('manager: the expiry tab groups by month, exports Excel and deletes a row',
   await expect(page.locator('#all-months li').nth(0)).toContainText('سبتمبر 2026');
   await expect(page.locator('#all-months li').nth(0)).toContainText('2 صنف · 7 قطعة');
 
+  await page.click('#all-months button[data-month="2026-09"]');      // Excel is inside the month
   const dl = (await Promise.all([
     page.waitForEvent('download'),
-    page.click('#all-months button[data-monthcsv="2026-09"]'),
+    page.click('#btn-export-month'),
   ]))[0];
   expect(dl.suggestedFilename()).toBe('صلاحيات-سبتمبر 2026.csv');
   const csv = require('fs').readFileSync(await dl.path(), 'utf8');
   expect(csv).toContain('"الفرع","الباركود","اسم الصنف","الكمية","تاريخ الصلاحية","الحالة","الموظف"');
   expect(csv).toContain('"فرع قويسنا","222","جبنة","2","2026-09-03"');
 
-  await page.click('#all-months button[data-month="2026-09"]');
   await expect(page.locator('#m-head')).toHaveText('سبتمبر 2026');
   page.on('dialog', (d) => d.accept());
   await page.click('#m-items button[data-delexp="e2"]');

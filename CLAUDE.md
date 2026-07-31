@@ -25,7 +25,7 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 5. **`db.js` is the only file that knows where data lives.** `app.js` and
    `manager.js` never touch Firestore or localStorage keys directly.
 6. **Bump `CACHE` in `sw.js` on every deploy.** Serving is cache-first, so phones
-   keep the old bundle until the cache name changes. Currently `mart-v37`.
+   keep the old bundle until the cache name changes. Currently `mart-v38`.
    The bump only works because install fetches with `new Request(u, { cache: "reload" })` —
    a plain `addAll` reads the browser's HTTP cache and copies **stale** files into the new
    cache name (caught in Chrome 2026-07-31: `mart-v34` held a `style.css` 262 bytes behind
@@ -274,8 +274,11 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   border; and **no Arabic text ever gets `letter-spacing`** — it is a joined script and spacing
   breaks the ligatures. `.code` is `direction:ltr` **plus `unicode-bidi:isolate`**, and it wraps
   the barcode ONLY: putting Arabic inside it is what produced «فى الـنـظام» in the catalog rows.
-  A list row's actions stay on one line, with `عرض` filled ink and `حذف` the narrowest thing on
-  the card.
+  **A list card carries no buttons at all** (2026-07-31, the owner's «a lot of buttons»): the card
+  *is* the button (`button.card-open`, same drawn chevron as the home cards), and نسخ / Excel /
+  TXT / حذف all live on the screen it opens — which is the same two taps they used to take. The
+  branch filter row hides itself when the user is scoped to one branch, because a single disabled
+  chip is a row that does nothing.
 - **`[hidden] { display: none !important }` in `style.css` must stay.** A class
   with `display: flex/grid` otherwise outranks the `hidden` attribute and the
   element stays visible.
@@ -335,6 +338,7 @@ OUT=/tmp/shots BASE=http://localhost:8080 node scripts/shots-all.mjs      # all 
 OUT=/tmp/shots BASE=http://localhost:8080 node scripts/shots-search.mjs   # the name search on all three modes
 OUT=/tmp/shots BASE=http://localhost:8080 node scripts/shots-supplier.mjs # the supplier list, admin side and employee side
 OUT=/tmp/shots BASE=http://localhost:8080 node scripts/shots-label.mjs    # ليبل الرف + prints 3 copies to PDF and measures the page (exits 1 if the paper is wrong)
+OUT=/tmp/shots BASE=http://localhost:8080 node scripts/shots-manager-list.mjs # the manager list, a card screen, the stocktake tab
 ```
 
 Writing live scripts: pull real barcodes from the catalog first — invented ones are

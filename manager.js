@@ -115,6 +115,7 @@ function applyPerms() {
   $("tool-admin").hidden = !canDo("adm");
   $("btn-save-edit").hidden = !canDo("edit");
   $("detail-exports").hidden = !canDo("download");
+  $("detail-danger").hidden = !canDo("del");
   $("btn-export-products").hidden = !canDo("download");
   $("tool-logout").hidden = !auth.session();
   $("link-admin-page").href = auth.withQuery("admin.html");   // keep ?test=1 across pages
@@ -156,6 +157,8 @@ function renderFilter() {
   const mine = scopes.length ? scopes : window.APP_CONFIG.branches.map(b => b.name);
   const opts = scopes.length === 1 ? scopes : [ALL, ...mine];
   const locked = scopes.length === 1;
+  // one branch = nothing to filter; the title already says which one, so the row is just noise
+  $("branch-filter-row").hidden = locked;
   $("branch-filter").innerHTML = opts.map(b =>
     `<button type="button" data-branch="${esc(b)}" aria-pressed="${b === filter}" ${locked ? "disabled" : ""}>${esc(shortBranch(b))}</button>`).join("");
 }
@@ -231,41 +234,20 @@ function renderList() {
   shown = all.filter(s => (filter === ALL || s.branch === filter)
     && (typeFilter === ALL || s.type === typeFilter)
     && matchesSearch(s));
+  // One card, one tap. Five buttons on every row turned the list into a wall of controls (the
+  // owner's words, 2026-07-31); copy/Excel/TXT/delete all live on the screen the card opens,
+  // which is the same two taps they took before.
   $("all-shipments").innerHTML = shown.map((s, i) => `<li>
-      <div class="card-main">
-        <div class="card-title">${esc(s.name)}</div>
-        <div class="meta">${esc(s.type || "بدون نوع")} · ${esc(s.branch || "بدون فرع")} · ${esc(s.createdBy)} · ${fmtDate(s.createdAt)} · ${s.items.length} صنف</div>
-      </div>
-      <div class="row-actions">
-        <button data-act="view" data-i="${i}">عرض</button>
-        ${canDo("download") ? `<button data-act="copy" data-i="${i}">نسخ</button>
-        <button data-act="download" data-i="${i}">Excel</button>
-        <button data-act="txt" data-i="${i}">TXT</button>` : ""}
-        ${canDo("del") ? `<button data-act="del" data-i="${i}" class="danger">حذف</button>` : ""}
-      </div>
+      <button class="card-open" data-act="view" data-i="${i}">
+        <span class="card-title">${esc(s.name)}</span>
+        <span class="meta">${esc(s.type || "بدون نوع")} · ${esc(s.branch || "بدون فرع")} · ${esc(s.createdBy)} · ${fmtDate(s.createdAt)} · ${s.items.length} صنف</span>
+      </button>
     </li>`).join("") || `<li class="empty">${filter === ALL ? "مفيش شحنات لسه" : "مفيش شحنات في الفرع ده"}</li>`;
 }
 
-$("all-shipments").onclick = async (e) => {
-  const btn = e.target.closest("button[data-act]");
-  if (!btn) return;
-  const s = shown[+btn.dataset.i];
-  if (btn.dataset.act === "view") openDetail(s);
-  else if (btn.dataset.act === "copy") copyShipment(s);
-  else if (btn.dataset.act === "download") downloadShipment(s);
-  else if (btn.dataset.act === "txt") downloadShipmentTxt(s);
-  else if (btn.dataset.act === "del") {
-    if (!confirm(`حذف «${s.name}»؟ مش هينفع ترجّعها.`)) return;
-    try {
-      await db.deleteShipment(s._id);
-      db.logAction(identity, "حذف شحنة", `${s.name} · ${s.branch || ""}`);
-      toast("تم الحذف");
-    } catch (err) {
-      console.error(err);
-      toast("الحذف ما نفعش — جرّب تاني");
-    }
-    openManager();
-  }
+$("all-shipments").onclick = (e) => {
+  const btn = e.target.closest("button[data-i]");
+  if (btn) openDetail(shown[+btn.dataset.i]);
 };
 
 /* ---------- stocktake list (الجرد) ---------- */
@@ -280,38 +262,16 @@ const diffWord = (n) => (n === 0 ? "مظبوط" : (n > 0 ? `زيادة ${n}` : `
 function renderCounts() {
   shownCounts = counts.filter(c => (filter === ALL || c.branch === filter) && matchesSearch(c));
   $("all-counts").innerHTML = shownCounts.map((c, i) => `<li>
-      <div class="card-main">
-        <div class="card-title">${esc(c.name)}</div>
-        <div class="meta">${esc(c.branch || "بدون فرع")} · ${esc(c.createdBy)} · ${fmtDate(c.createdAt)} · ${c.items.length} صنف · الفرق ${esc(diffWord(countDiff(c)))}</div>
-      </div>
-      <div class="row-actions">
-        <button data-cact="view" data-i="${i}">عرض</button>
-        ${canDo("download") ? `<button data-cact="copy" data-i="${i}">نسخ</button>
-        <button data-cact="download" data-i="${i}">Excel</button>` : ""}
-        ${canDo("del") ? `<button data-cact="del" data-i="${i}" class="danger">حذف</button>` : ""}
-      </div>
+      <button class="card-open" data-cact="view" data-i="${i}">
+        <span class="card-title">${esc(c.name)}</span>
+        <span class="meta">${esc(c.branch || "بدون فرع")} · ${esc(c.createdBy)} · ${fmtDate(c.createdAt)} · ${c.items.length} صنف · الفرق ${esc(diffWord(countDiff(c)))}</span>
+      </button>
     </li>`).join("") || `<li class="empty">${filter === ALL ? "مفيش جرد لسه" : "مفيش جرد في الفرع ده"}</li>`;
 }
 
-$("all-counts").onclick = async (e) => {
-  const btn = e.target.closest("button[data-cact]");
-  if (!btn) return;
-  const c = shownCounts[+btn.dataset.i];
-  if (btn.dataset.cact === "view") openDetail(c, "count");
-  else if (btn.dataset.cact === "copy") copyShipment(c);
-  else if (btn.dataset.cact === "download") downloadCount(c);
-  else if (btn.dataset.cact === "del") {
-    if (!confirm(`حذف «${c.name}»؟ مش هينفع ترجّعه.`)) return;
-    try {
-      await db.deleteCount(c._id);
-      db.logAction(identity, "حذف جرد", `${c.name} · ${c.branch || ""}`);
-      toast("تم الحذف");
-    } catch (err) {
-      console.error(err);
-      toast("الحذف ما نفعش — جرّب تاني");
-    }
-    openManager();
-  }
+$("all-counts").onclick = (e) => {
+  const btn = e.target.closest("button[data-i]");
+  if (btn) openDetail(shownCounts[+btn.dataset.i], "count");
 };
 
 /* ---------- الصلاحيات (expiry): months are derived from the rows, never stored ---------- */
@@ -321,22 +281,16 @@ const expInScope = () => expRows.filter(e => filter === ALL || !e.branch || e.br
 function renderMonths() {
   const ms = ex.months(expInScope());
   $("all-months").innerHTML = ms.map(m => `<li class="exp exp-${m.status}">
-      <div class="card-main">
-        <div class="card-title">${esc(m.label)}</div>
-        <div class="meta">${m.count} صنف · ${m.qty} قطعة · ${esc(ex.daysWord(m.days))}</div>
-      </div>
-      <div class="row-actions">
-        <button data-month="${escAttr(m.key)}">عرض</button>
-        ${canDo("download") ? `<button data-monthcsv="${escAttr(m.key)}">Excel</button>` : ""}
-      </div>
+      <button class="card-open" data-month="${escAttr(m.key)}">
+        <span class="card-title">${esc(m.label)}</span>
+        <span class="meta">${m.count} صنف · ${m.qty} قطعة · ${esc(ex.daysWord(m.days))}</span>
+      </button>
     </li>`).join("") || `<li class="empty">${filter === ALL ? "مفيش صلاحيات مسجّلة" : "مفيش صلاحيات في الفرع ده"}</li>`;
 }
 
 $("all-months").onclick = (e) => {
   const open = e.target.closest("button[data-month]");
-  if (open) { openMonth(open.dataset.month); return; }
-  const csv = e.target.closest("button[data-monthcsv]");
-  if (csv) exportMonth(csv.dataset.monthcsv);
+  if (open) openMonth(open.dataset.month);   // Excel for the month is inside it, next to its rows
 };
 
 const monthRows = () => expInScope().filter(e => ex.monthKey(e) === monthKey);
@@ -620,6 +574,8 @@ function openDetail(s, kind = "ship") {
   $("detail-name-head").textContent = isCount ? "اسم الجرد" : "اسم الشحنة";
   $("detail-type-row").hidden = isCount;                  // a stocktake has no shipment type
   $("detail-meta").textContent = `${s.branch || "بدون فرع"} · ${s.createdBy} · ${fmtDate(s.createdAt)}`;
+  $("btn-download-txt").hidden = isCount;                 // a TXT of a count says nothing about it
+  $("btn-delete-detail").textContent = isCount ? "حذف الجرد" : "حذف الشحنة";
   renderDetailType();
   renderDetailItems();
   history.pushState({ screen: "screen-detail" }, "");
@@ -677,6 +633,25 @@ $("btn-download").onclick = () => (current.kind === "count"
   ? downloadCount(detailShipment())
   : downloadShipment(detailShipment()));
 $("btn-download-txt").onclick = () => downloadShipmentTxt(detailShipment());
+
+// deleting from the card screen, not from the list: the row you are about to lose is on screen
+$("btn-delete-detail").onclick = async () => {
+  const isCount = current.kind === "count";
+  if (!confirm(`حذف «${current.name}»؟ مش هينفع ترجّع${isCount ? "ه" : "ها"}.`)) return;
+  try {
+    if (isCount) await db.deleteCount(current._id);
+    else await db.deleteShipment(current._id);
+    db.logAction(identity, isCount ? "حذف جرد" : "حذف شحنة", `${current.name} · ${current.branch || ""}`);
+    toast("تم الحذف");
+  } catch (err) {
+    console.error(err);
+    toast("الحذف ما نفعش — جرّب تاني");
+    return;
+  }
+  // the detail screen is gone with the row, so it must not stay behind the back button
+  history.replaceState({ screen: "screen-manager" }, "");
+  await openManager();
+};
 
 $("btn-save-edit").onclick = async () => {
   const name = $("detail-name").value.trim();

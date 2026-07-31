@@ -180,7 +180,7 @@ input[type=date] {
    pseudo-element to stop that flips which edge `inset-inline-end` means — it landed on top of
    the title. Two borders rotated 45° have no text direction at all. Physical sides on purpose:
    this arrow always points the way the screen opens, and this app only ever runs RTL. */
-.action::after {
+.action::after, .card-open::after {
   content: "";
   position: absolute;
   inset-inline-end: 18px;
@@ -331,6 +331,23 @@ li.empty {
   padding-block: 26px;
 }
 .card-main { flex: 1; min-inline-size: 0; display: grid; gap: 4px; }
+/* A whole card that opens a screen. The list used to carry five buttons per row and read as a
+   wall of controls; the card itself is the target now, and everything else lives on the screen
+   it opens. Same chevron as the home cards, so "this opens" reads the same everywhere. */
+button.card-open {
+  position: relative;
+  flex: 1;
+  min-inline-size: 0;
+  display: grid;
+  gap: 4px;
+  text-align: start;
+  background: transparent;
+  border-radius: 0;
+  padding: 0;
+  padding-inline-end: 24px;
+  font-weight: 400;
+}
+.card-open::after { inset-inline-end: 4px; }   /* the card's own padding is the outer gap */
 .card-title { font-weight: 700; font-size: 1.02rem; line-height: 1.35; }
 .row-actions { display: flex; gap: 8px; flex-wrap: wrap; inline-size: 100%; }
 .row-actions button.primary { background: var(--amber); }   /* must beat the plain rule below */
@@ -346,23 +363,8 @@ li.empty {
   color: var(--ink);
   font-weight: 600;
 }
-/* One action per card leads. «عرض» is the one anybody taps; the exports sit beside it at half
-   the weight, and the destructive one is never the widest thing on the card. */
-.row-actions button[data-act=view], .row-actions button[data-cact=view] {
-  flex: 1.7;
-  background: var(--ink);
-  color: #fff;
-}
-.row-actions button[data-act=del], .row-actions button[data-cact=del],
+/* the one destructive control on a card screen: soft, full width, and below the exports */
 .row-actions button[data-expdel] { flex: 0 0 auto; min-inline-size: 0; padding-inline: 14px; }
-/* a list row keeps its actions on ONE line — a delete button alone on a second row read as the
-   card's main action, which is the last thing it should look like */
-#all-shipments .row-actions, #all-counts .row-actions { flex-wrap: nowrap; }
-#all-shipments .row-actions button, #all-counts .row-actions button {
-  min-inline-size: 0;
-  padding-inline: 6px;
-  font-size: .84rem;
-}
 /* a chip row inside a card is a full-width control, not a neighbour of the text */
 li > .seg { inline-size: 100%; }
 

@@ -28,7 +28,7 @@
         <button type="button" data-tab="count" aria-pressed="false">الجرد</button>
         <button type="button" data-tab="expiry" aria-pressed="false">الصلاحيات</button>
       </div>
-      <div class="filter-row">
+      <div class="filter-row" id="branch-filter-row">
         <span class="filter-label">الفرع</span>
         <div id="branch-filter" class="seg"></div>
       </div>
@@ -158,6 +158,9 @@
         <button id="btn-copy">نسخ</button>
         <button id="btn-download">Excel</button>
         <button id="btn-download-txt">TXT</button>
+      </div>
+      <div id="detail-danger" class="row-actions">
+        <button id="btn-delete-detail" class="danger">حذف الشحنة</button>
       </div>
       <div class="bottombar">
         <button id="btn-save-edit" class="primary big">حفظ التعديلات</button>
