@@ -101,9 +101,12 @@ service cloud.firestore {
       allow read: if true;
       allow delete: if true;
       // stock = { branch: quantity } from that branch's stocktake sheet; qty is the older
-      // shop-wide import, still read as the fallback
+      // shop-wide import, still read as the fallback. unit is the third column of the catalog
+      // sheet (كرتونة / كيلو / علبة) — shown next to the name, never counted.
       allow create, update: if barcode.size() <= 32
-        && request.resource.data.keys().hasOnly(['name', 'qty', 'stock'])
+        && request.resource.data.keys().hasOnly(['name', 'qty', 'stock', 'unit'])
+        && (!('unit' in request.resource.data)
+            || (request.resource.data.unit is string && request.resource.data.unit.size() <= 30))
         && request.resource.data.name is string && request.resource.data.name.size() > 0
         && request.resource.data.name.size() <= 100
         && (!('qty' in request.resource.data)

@@ -350,10 +350,13 @@ async function onBarcode(code) {
   state.currentName = (p && p.name) || "";
   // each branch has its own sheet, so the number depends on the branch this count is for
   state.currentSys = db.stockFor(p, state.branch);
+  state.currentUnit = (p && p.unit) || "";     // information only: it is never counted or summed
   const known = state.currentName !== "";
   $("item-barcode").textContent = code;
   $("item-name").textContent = known ? state.currentName : "صنف غير مسجّل في ملف الأصناف";
   $("item-name").classList.toggle("unknown", !known);
+  $("item-unit").hidden = !(known && state.currentUnit);
+  $("item-unit-name").textContent = state.currentUnit;
   $("item-warn").hidden = known;                 // full explanation instead of a silent add
   $("item-warn-line").textContent = WARN[state.mode];
   // the whole point of a stocktake: the employee sees what the system claims before he types
@@ -415,10 +418,12 @@ $("btn-add-item").onclick = async () => {
   // a second scan of the same item means more of it was found, in both modes
   if (dup) dup.qty += qty;
   // sys is left out when the sheet never gave a quantity for this product — 0 would be a lie
-  else if (counting()) state.items.push(state.currentSys === null
-    ? { barcode, name, qty }
-    : { barcode, name, qty, sys: state.currentSys });
-  else state.items.push({ barcode, name, qty });
+  else {
+    const item = { barcode, name, qty };
+    if (state.currentUnit) item.unit = state.currentUnit;
+    if (counting() && state.currentSys !== null) item.sys = state.currentSys;
+    state.items.push(item);
+  }
   hideSheet();
   $("barcode-input").value = "";
   renderItems();

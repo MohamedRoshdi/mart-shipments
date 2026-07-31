@@ -22,7 +22,7 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 5. **`db.js` is the only file that knows where data lives.** `app.js` and
    `manager.js` never touch Firestore or localStorage keys directly.
 6. **Bump `CACHE` in `sw.js` on every deploy.** Serving is cache-first, so phones
-   keep the old bundle until the cache name changes. Currently `mart-v31`.
+   keep the old bundle until the cache name changes. Currently `mart-v32`.
 7. **Deploy = push to master.** GitHub Pages serves the repo root. Firestore rules
    deploy separately: `npx firebase deploy --only firestore:rules --project shipments-alaela-mart`.
 
@@ -43,7 +43,7 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 | `firestore.rules` | shape validation; the only server-side guard that exists |
 | `SETUP.md` | Arabic guide for the shop owner |
 | `products-template.csv`, `stock-template.csv` | the two import shapes: barcode+name, and barcode+name+quantity |
-| `tests/app.spec.js` | 55 Playwright tests, all in localStorage mode |
+| `tests/app.spec.js` | 56 Playwright tests, all in localStorage mode |
 | `scripts/*.mjs` | live checks and screenshot helpers (see below) |
 
 ## Data model
@@ -63,7 +63,9 @@ not a kind of shipment.
 with its last one — nothing to create, nothing to clean up, and no empty months piling up.
 Re-scanning the same barcode with the same date grows that row instead of adding a second.
 
-`products/{barcode}` — `{ name, stock?: {branch: qty}, qty? }`. The barcode **is** the document
+`products/{barcode}` — `{ name, unit?, stock?: {branch: qty}, qty? }`. `unit` is the third column
+of the catalog sheet (كرتونة / كيلو / علبة): shown next to the name and copied onto the item as
+`item.unit`, **never counted, never summed, and never written into a TXT file**. The barcode **is** the document
 id. **Each branch has its own sheet**, so the system quantity is a map keyed by branch name;
 `qty` is the older shop-wide import (9,501 products carried it on 2026-07-30) and stays as the
 fallback for any barcode a branch sheet has not covered. `db.stockFor(product, branch)` is the
@@ -142,7 +144,11 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   second collection for it.
 - **One chip drives both directions.** `stockBranch` in `manager.js` feeds the import *and* the
   catalog export, so the file that comes out (`الباركود، الاسم، الكمية في <الفرع>`) is exactly
-  the file that goes back in. The import reads the **last** column as the quantity.
+  the file that goes back in. The import reads the **last** column as the quantity — which is
+  why `unit` is never added to that export: it would land in the quantity column on the way
+  back. The catalog sheet is the other file (`الباركود، الاسم، الوحدة`), and there `unitOf()`
+  takes the last cell **unless it is numeric**, so a stocktake sheet imported into the wrong
+  box cannot turn a quantity into a unit.
 - **The difference is computed, never stored.** `countDiff()` in both `app.js` and
   `manager.js` sums `qty - (sys || 0)`; an item with no `sys` counts as pure surplus, which
   is what an unlisted product on the shelf actually is.
@@ -244,7 +250,7 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
 ## Commands
 
 ```bash
-npx playwright test                 # 55 tests, localStorage mode, ~25s
+npx playwright test                 # 56 tests, localStorage mode, ~25s
 npx playwright test -g "catalog"    # one group
 python3 -m http.server 8080         # serve locally, then open /?test=1
 node scripts/make-icons.mjs         # regenerate the PWA icons

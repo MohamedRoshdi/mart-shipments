@@ -492,8 +492,8 @@ const downloadTxt = (filename, text) => download(filename, text, "text/plain;cha
 function safeName(t) { return String(t).replace(/[\\/:*?"<>|]/g, "-").slice(0, 60); }
 
 const shipmentRows = (s) => [
-  ["الباركود", "اسم الصنف", "الكمية"],
-  ...s.items.map(i => [i.barcode, i.name || "", i.qty]),
+  ["الباركود", "اسم الصنف", "الوحدة", "الكمية"],
+  ...s.items.map(i => [i.barcode, i.name || "", i.unit || "", i.qty]),
 ];
 
 function downloadShipment(s) {
@@ -505,8 +505,8 @@ const sysCell = (i) => (Number.isFinite(i.sys) ? i.sys : "غير مسجّلة");
 const diffCell = (i) => (Number.isFinite(i.sys) ? withSign((Number(i.qty) || 0) - i.sys) : "");
 
 const countRows = (c) => [
-  ["الباركود", "اسم الصنف", "في النظام", "المعدود", "الفرق"],
-  ...c.items.map(i => [i.barcode, i.name || "", sysCell(i), i.qty, diffCell(i)]),
+  ["الباركود", "اسم الصنف", "الوحدة", "في النظام", "المعدود", "الفرق"],
+  ...c.items.map(i => [i.barcode, i.name || "", i.unit || "", sysCell(i), i.qty, diffCell(i)]),
 ];
 
 function downloadCount(c) {
@@ -517,9 +517,9 @@ function downloadCount(c) {
 $("btn-export-counts").onclick = () => {
   if (!shownCounts.length) { toast("مفيش جرد يتحمّل"); return; }
   downloadCsv(`stocktake-${filter === ALL ? "all" : safeName(filter)}.csv`, [
-    ["الفرع", "الجرد", "الموظف", "التاريخ", "الباركود", "اسم الصنف", "في النظام", "المعدود", "الفرق"],
+    ["الفرع", "الجرد", "الموظف", "التاريخ", "الباركود", "اسم الصنف", "الوحدة", "في النظام", "المعدود", "الفرق"],
     ...shownCounts.flatMap(c => c.items.map(i =>
-      [c.branch || "", c.name, c.createdBy, fmtDate(c.createdAt), i.barcode, i.name || "", sysCell(i), i.qty, diffCell(i)])),
+      [c.branch || "", c.name, c.createdBy, fmtDate(c.createdAt), i.barcode, i.name || "", i.unit || "", sysCell(i), i.qty, diffCell(i)])),
   ]);
   toast("تم تحميل ملف Excel");
 };
@@ -559,9 +559,9 @@ const exportName = (ext) => `shipments-${filter === ALL ? "all" : safeName(filte
 $("btn-export-all").onclick = () => {
   if (!shown.length) { toast("مفيش شحنات تتحمّل"); return; }
   downloadCsv(exportName("csv"), [
-    ["الفرع", "نوع الشحنة", "الشحنة", "الموظف", "التاريخ", "الباركود", "اسم الصنف", "الكمية"],
+    ["الفرع", "نوع الشحنة", "الشحنة", "الموظف", "التاريخ", "الباركود", "اسم الصنف", "الوحدة", "الكمية"],
     ...shown.flatMap(s => s.items.map(i =>
-      [s.branch || "", s.type || "", s.name, s.createdBy, fmtDate(s.createdAt), i.barcode, i.name || "", i.qty])),
+      [s.branch || "", s.type || "", s.name, s.createdBy, fmtDate(s.createdAt), i.barcode, i.name || "", i.unit || "", i.qty])),
   ]);
   toast("تم تحميل ملف Excel");
 };
@@ -730,7 +730,7 @@ function renderProducts() {
   $("products-list").innerHTML = page.map(p => `<li>
       <div class="card-main">
         <input class="product-name" type="text" maxlength="100" data-barcode="${escAttr(p.barcode)}" value="${escAttr(edits.get(p.barcode) ?? p.name)}">
-        <div class="code">${esc(p.barcode)}${stockLine(p)}</div>
+        <div class="code">${esc(p.barcode)}${p.unit ? ` · ${esc(p.unit)}` : ""}${stockLine(p)}</div>
       </div>
       <button class="del" data-delproduct="${escAttr(p.barcode)}" aria-label="حذف الصنف">×</button>
     </li>`).join("") || `<li class="empty">${searching ? "مفيش نتيجة — جرّب أي جزء من الاسم أو الباركود" : "مفيش أصناف — استورد ملف الأصناف الأول"}</li>`;
@@ -831,6 +831,16 @@ async function sheetRows(file) {
 
 const cell = (c) => String(c || "").trim().replace(/^﻿/, "");
 
+// The catalog sheet is باركود، اسم الصنف، الوحدة. The name still swallows the middle cells, so
+// a name with a comma survives the naive split; the unit is the last cell, and a numeric one is
+// ignored so a stocktake sheet imported by mistake cannot turn a quantity into a unit.
+const unitOf = (c) => {
+  if (c.length < 3) return "";
+  const last = cell(c[c.length - 1]);
+  return /^[\d.,]+$/.test(last) ? "" : last;
+};
+const nameOf = (c) => (unitOf(c) ? c.slice(1, -1) : c.slice(1)).map(cell).join(" ").trim();
+
 $("btn-import").onclick = () => $("import-file").click();
 $("import-file").onchange = async (e) => {
   const file = e.target.files[0];
@@ -839,7 +849,7 @@ $("import-file").onchange = async (e) => {
     .filter(c => c.length >= 2 && /\d/.test(c[0]) && c[1].trim());
   let n = 0;
   try {
-    for (const c of rows) { await db.saveProductName(c[0].trim().replace(/^﻿/, ""), c.slice(1).join(" ").trim()); n++; }
+    for (const c of rows) { await db.saveProductName(c[0].trim().replace(/^﻿/, ""), nameOf(c), unitOf(c)); n++; }
     db.logAction(identity, "استيراد أصناف", `${n} صنف`);
     toast(`تم استيراد ${n} صنف`);
   } catch (err) {

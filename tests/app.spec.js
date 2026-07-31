@@ -354,7 +354,7 @@ test('manager page: download one shipment and all shipments, CSV and TXT', async
   expect(one.suggestedFilename()).toBe('شحنة المراعي.csv');
   const oneText = require('fs').readFileSync(await one.path(), 'utf8');
   expect(oneText.startsWith('﻿')).toBe(true);            // Excel needs the BOM for Arabic
-  expect(oneText).toContain('"6221031250057","لبن","3"');
+  expect(oneText).toContain('"6221031250057","لبن","","3"');   // الوحدة column, empty here
 
   const oneTxt = await grab('button[data-act="txt"]');
   expect(oneTxt.suggestedFilename()).toBe('شحنة المراعي.txt');
@@ -363,7 +363,7 @@ test('manager page: download one shipment and all shipments, CSV and TXT', async
   const all = await grab('#btn-export-all');
   expect(all.suggestedFilename()).toBe('shipments-all.csv');
   const allText = require('fs').readFileSync(await all.path(), 'utf8');
-  expect(allText).toContain('"الفرع","نوع الشحنة","الشحنة","الموظف","التاريخ","الباركود","اسم الصنف","الكمية"');
+  expect(allText).toContain('"الفرع","نوع الشحنة","الشحنة","الموظف","التاريخ","الباركود","اسم الصنف","الوحدة","الكمية"');
   expect(allText).toContain('"شحنة المراعي","أحمد"');
 
   const allTxt = await grab('#btn-export-all-txt');
@@ -510,6 +510,49 @@ test("catalog CSV import on manager page autofills names in employee app", async
   await page.click("#btn-lookup");
   await expect(page.locator("#item-name")).toHaveText("لبن المراعي");
   await expect(page.locator("#btn-add-item")).toBeEnabled();                 // imported → addable
+});
+
+test("الوحدة: the third column rides from the sheet to the item sheet and into Excel", async ({ page }) => {
+  await openManagerPage(page);
+  await page.setInputFiles("#import-file", "tests/fixtures/catalog-units.csv");
+  await expect(page.locator("#toast")).toContainText("تم استيراد 4 صنف");
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("test-products")));
+  expect(saved["6221031250057"]).toEqual({ name: "لبن المراعي", unit: "كرتونة" });
+  expect(saved["6220000999888"]).toEqual({ name: "شاي أحمر", unit: "كيس" });   // a comma in the name survives
+  expect(saved["6229000111222"]).toEqual({ name: "أرز" });                      // no unit given, none written
+
+  await page.goto("/?test=1");
+  await page.evaluate(() => localStorage.setItem("employeeName", "أحمد"));
+  await page.reload();
+  await page.click("#btn-new");
+  await page.fill("#shipment-name", "شحنة الوحدات");
+  await page.fill("#barcode-input", "6221031250057");
+  await page.click("#btn-lookup");
+  await expect(page.locator("#item-unit")).toBeVisible();
+  await expect(page.locator("#item-unit-name")).toHaveText("كرتونة");
+  await page.click("#btn-add-item");
+  await page.fill("#barcode-input", "6229000111222");            // no unit → the line stays hidden
+  await page.click("#btn-lookup");
+  await expect(page.locator("#item-unit")).toBeHidden();
+  await page.click("#btn-add-item");
+  await page.click("#btn-save-shipment");
+  const saveditems = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem("test-shipments")).find(s => s.name === "شحنة الوحدات").items);
+  expect(saveditems).toEqual([{ barcode: "6221031250057", name: "لبن المراعي", qty: 1, unit: "كرتونة" },
+                              { barcode: "6229000111222", name: "أرز", qty: 1 }]);
+
+  await signOut(page);                                           // Excel carries it, TXT never does
+  await page.goto("/manager.html?test=1");
+  await page.fill("#pin-input", await page.evaluate(() => window.APP_CONFIG.managerPin));
+  await page.click("#btn-pin");
+  const grab = async (loc) => (await Promise.all([page.waitForEvent("download"), loc.click()]))[0];
+  const csvDl = await grab(page.locator("button[data-act='download']").first());
+  const csv = require("fs").readFileSync(await csvDl.path(), "utf8");
+  expect(csv).toContain("الوحدة");
+  expect(csv).toContain("كرتونة");
+  const txtDl = await grab(page.locator("button[data-act='txt']").first());
+  const txt = require("fs").readFileSync(await txtDl.path(), "utf8");
+  expect(txt).not.toContain("كرتونة");
 });
 
 async function openAdmin(page) {
@@ -1116,9 +1159,9 @@ test('manager: the stocktake tab lists a count with its difference, exports it a
   ]))[0];
   expect(exp.suggestedFilename()).toBe('جرد التلاجة.csv');
   const csv = require('fs').readFileSync(await exp.path(), 'utf8');
-  expect(csv).toContain('"الباركود","اسم الصنف","في النظام","المعدود","الفرق"');
-  expect(csv).toContain('"111","لبن","10","7","-3"');
-  expect(csv).toContain('"222","جبنة","غير مسجّلة","2",""');
+  expect(csv).toContain('"الباركود","اسم الصنف","الوحدة","في النظام","المعدود","الفرق"');
+  expect(csv).toContain('"111","لبن","","10","7","-3"');
+  expect(csv).toContain('"222","جبنة","","غير مسجّلة","2",""');
 
   await page.click('#all-counts button[data-cact="view"]');          // the manager may fix a number
   await expect(page.locator('#detail-type-row')).toBeHidden();
