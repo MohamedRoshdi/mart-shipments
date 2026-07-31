@@ -1,6 +1,10 @@
 /* Receiving-bay kit: concrete surfaces, hi-vis amber actions, ink chrome.
    Arabic system sans carries the words; tabular monospace carries machine data. */
 :root {
+  /* The app is drawn light on purpose. Without this, Chrome's «force dark» on a phone repaints
+     it — and a shelf label that prints white-on-black is a wasted label. Declaring the scheme
+     is what tells the browser this page already handles its own colours. */
+  color-scheme: light;
   --ink: #171a1c;
   --ink-2: #5b666d;
   --bg: #eef1f4;
@@ -305,6 +309,10 @@ button.scan::after {
 #supplier-results li { padding: 0; }
 button.suggest {
   inline-size: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;   /* name at the start, the shop's code at the end */
+  gap: 10px;
   text-align: start;
   background: transparent;
   padding: 14px;
@@ -548,6 +556,8 @@ input[type=range] { flex: 1; inline-size: 100%; accent-color: var(--amber); bloc
    markup the printer gets, so what the shop sees is what comes out. Everything inside is in mm
    too, so changing the size in the settings scales the whole thing instead of breaking it. */
 .lbl {
+  color-scheme: light;            /* the label is ink on paper, whatever the phone is doing */
+  forced-color-adjust: none;
   display: grid;
   grid-template-rows: auto auto 1fr auto auto;
   align-items: center;

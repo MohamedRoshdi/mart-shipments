@@ -314,7 +314,7 @@ test('shipment type: picked under the branch, saved, filtered and editable', asy
     page.click('#btn-export-all'),
   ]))[0];
   const csv = require('fs').readFileSync(await exp.path(), 'utf8');
-  expect(csv).toContain('"الفرع","نوع الشحنة","الشحنة"');
+  expect(csv).toContain('"الفرع","نوع الشحنة","كود المورد","الشحنة"');
   expect(csv).toContain(`"${t3}"`);
 });
 
@@ -372,7 +372,7 @@ test('manager page: download one shipment and all shipments, CSV and TXT', async
   const all = await grab('#btn-export-all');
   expect(all.suggestedFilename()).toBe('shipments-all.csv');
   const allText = require('fs').readFileSync(await all.path(), 'utf8');
-  expect(allText).toContain('"الفرع","نوع الشحنة","الشحنة","الموظف","التاريخ","الباركود","اسم الصنف","الوحدة","الكمية"');
+  expect(allText).toContain('"الفرع","نوع الشحنة","كود المورد","الشحنة","الموظف","التاريخ","الباركود","اسم الصنف","الوحدة","الكمية"');
   expect(allText).toContain('"شحنة المراعي","أحمد"');
 
   const allTxt = await grab('#btn-export-all-txt');
@@ -516,14 +516,75 @@ async function seedSuppliers(page, list) {
   await page.reload();
 }
 
-test('admin: the supplier list is one name per line, trimmed', async ({ page }) => {
+test('admin: the supplier list is one line each, code optional, trimmed', async ({ page }) => {
   await openAdmin(page);
-  await page.fill('#cfg-suppliers', '  المراعي  \n\nجهينة\nبيبسي\n   \n');
-  await expect(page.locator('#suppliers-count')).toHaveText('3 مورد');
+  await page.fill('#cfg-suppliers', '  1042، المراعي  \n\n1088,جهينة\nبيبسي\n   \n');
+  await expect(page.locator('#suppliers-count')).toHaveText('3 مورد · 2 منهم بكود');
   await page.click('#btn-save-config');
   await expect(page.locator('#toast')).toContainText('تم حفظ الإعدادات');
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem('test-config')).suppliers))
-    .toEqual(['المراعي', 'جهينة', 'بيبسي']);
+    .toEqual([
+      { code: '1042', name: 'المراعي' },
+      { code: '1088', name: 'جهينة' },
+      { code: '', name: 'بيبسي' },
+    ]);
+});
+
+test('admin: the supplier list can be imported from a sheet, header row dropped', async ({ page }) => {
+  await openAdmin(page);
+  await page.setInputFiles('#suppliers-file', {
+    name: 'suppliers.csv',
+    mimeType: 'text/csv',
+    buffer: Buffer.from('كود المورد,اسم المورد\n1042,المراعي\n1088,جهينة\n,بيبسي\n', 'utf8'),
+  });
+  await expect(page.locator('#toast')).toContainText('اتقرأ 3 مورد');
+  await expect(page.locator('#cfg-suppliers')).toHaveValue('1042، المراعي\n1088، جهينة\nبيبسي');
+  await page.click('#btn-save-config');
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('test-config')).suppliers))
+    .toEqual([
+      { code: '1042', name: 'المراعي' },
+      { code: '1088', name: 'جهينة' },
+      { code: '', name: 'بيبسي' },
+    ]);
+});
+
+test('supplier code: found by code, stamped on the shipment, searchable and in Excel', async ({ page }) => {
+  await page.goto('/?test=1');
+  await page.evaluate(() => {
+    localStorage.setItem('employeeName', 'أحمد');
+    localStorage.setItem('test-products', JSON.stringify({ '111': 'لبن' }));
+  });
+  await seedSuppliers(page, [{ code: '1042', name: 'المراعي' }, { code: '1088', name: 'جهينة' }]);
+  await page.click('#btn-new');
+  await page.click('#shipment-name');
+  await page.fill('#shipment-name', '1042');                       // typed the code, not the name
+  await expect(page.locator('#supplier-results button.suggest')).toHaveCount(1);
+  await expect(page.locator('#supplier-results')).toContainText('المراعي');
+  await page.click('#supplier-results button[data-supplier="المراعي"]');
+  await expect(page.locator('#shipment-name')).toHaveValue('المراعي');   // the name is what is typed
+
+  await page.fill('#barcode-input', '111');
+  await page.click('#btn-lookup');
+  await page.click('#btn-add-item');
+  await page.click('#btn-save-shipment');
+  await expect(page.locator('#toast')).toContainText('تم حفظ الشحنة');
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('test-shipments'))[0]);
+  expect(saved.name).toBe('المراعي');
+  expect(saved.supplierCode).toBe('1042');                          // looked up, never typed
+
+  await page.goto('/manager.html?test=1');                          // keep the shipment just saved
+  await page.fill('#pin-input', await page.evaluate(() => window.APP_CONFIG.managerPin));
+  await page.click('#btn-pin');
+  await page.fill('#list-search', '1042');                          // the manager finds it by code
+  await expect(page.locator('#all-shipments li')).toHaveCount(1);
+  await expect(page.locator('#all-shipments li')).toContainText('المراعي');
+  const dl = (await Promise.all([
+    page.waitForEvent('download'),
+    page.click('#btn-export-all'),
+  ]))[0];
+  const csv = require('fs').readFileSync(await dl.path(), 'utf8');
+  expect(csv).toContain('"كود المورد"');
+  expect(csv).toContain('"1042","المراعي"');
 });
 
 test('supplier suggestions: loose Arabic, free text still allowed, none during a stocktake', async ({ page }) => {
@@ -759,7 +820,7 @@ test('admin: bulk delete can take one day, a range of days, or a stocktake', asy
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem('test-counts')))).toEqual([]);
 });
 
-test('manager: ZIP export puts each shipment in a day folder, then its type', async ({ page }) => {
+test('manager: ZIP export puts each shipment straight in its day folder', async ({ page }) => {
   await page.goto('/manager.html?test=1');
   await page.evaluate(() => localStorage.setItem('test-shipments', JSON.stringify([
     { name: 'شحنة اللحمة', createdBy: 'أحمد', branch: 'فرع قويسنا', type: 'إذن استلام',
@@ -779,13 +840,14 @@ test('manager: ZIP export puts each shipment in a day folder, then its type', as
   const raw = buf.toString('utf8');           // stored, not compressed: names and rows are literal
   const [day1, day2] = await page.evaluate(() =>
     [1753700000000, 1753600000000].map(ms => new Date(ms).toLocaleDateString('en-CA')));
-  expect(raw).toContain(`${day1}/إذن استلام/شحنة اللحمة.csv`);
-  expect(raw).toContain(`${day1}/إذن استلام/شحنة اللحمة.txt`);
-  expect(raw).toContain(`${day2}/إذن مرتجع/مرتجع الألبان.csv`);
+  expect(raw).toContain(`${day1}/شحنة اللحمة.csv`);
+  expect(raw).toContain(`${day1}/شحنة اللحمة.txt`);
+  expect(raw).toContain(`${day2}/مرتجع الألبان.csv`);
+  expect(raw).not.toContain('إذن استلام/');            // no folder per type any more
   expect(raw).toContain('111\t3');
 });
 
-test('manager: الجرد zips into a folder per day, and الصلاحيات into a folder per month', async ({ page }) => {
+test('manager: الجرد zips into a folder per day, and الصلاحيات into one per expiry day', async ({ page }) => {
   await page.goto('/manager.html?test=1');
   await page.evaluate(() => {
     localStorage.setItem('test-counts', JSON.stringify([
@@ -813,8 +875,9 @@ test('manager: الجرد zips into a folder per day, and الصلاحيات int
   const exp = (await Promise.all([page.waitForEvent('download'), page.click('#btn-zip-expiry')]))[0];
   expect(exp.suggestedFilename()).toMatch(/^صلاحيات-\d{4}-\d{2}-\d{2}\.zip$/);
   const expRaw = require('fs').readFileSync(await exp.path()).toString('utf8');
-  expect(expRaw).toContain('سبتمبر 2026/الصلاحيات.csv');
-  expect(expRaw).toContain('نوفمبر 2026/الصلاحيات.csv');
+  expect(expRaw).toContain('2026-09-14/الصلاحيات.csv');   // the expiry date, not the day it was typed
+  expect(expRaw).toContain('2026-11-03/الصلاحيات.csv');
+  expect(expRaw).not.toContain('سبتمبر 2026/');
 });
 
 test('camera settings: reachable from the app bar and the choices stick', async ({ page }) => {
@@ -1376,6 +1439,7 @@ test('الصلاحيات: the month screen searches, fixes a quantity and moves 
   await page.fill('#month-search', 'جبن');                          // search inside the month
   await expect(page.locator('#month-items li')).toHaveCount(1);
   await expect(page.locator('#month-items li')).toContainText('جبنة');
+  await expect(page.locator('#month-items li')).toContainText('أحمد');   // who recorded it
   await page.fill('#month-search', '');
 
   await page.fill('#month-items input[data-eqty="e1"]', '9');
@@ -1442,6 +1506,7 @@ test('manager: the expiry tab groups by month, exports Excel and deletes a row',
   expect(csv).toContain('"فرع قويسنا","222","جبنة","2","2026-09-03"');
 
   await expect(page.locator('#m-head')).toHaveText('سبتمبر 2026');
+  await expect(page.locator('#m-items li').first()).toContainText('أحمد');   // who recorded the row
   page.on('dialog', (d) => d.accept());
   await page.click('#m-items button[data-delexp="e2"]');
   await expect(page.locator('#toast')).toContainText('تم الحذف');

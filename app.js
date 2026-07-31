@@ -340,7 +340,7 @@ function openCount(c) {
 /* --- the shipment IS the supplier: the admin's list is offered as you type, and a name that is
    not on it is still accepted (a new supplier must not block a delivery) --- */
 
-const suppliers = () => (window.APP_CONFIG.suppliers || []);
+const suppliers = () => db.supplierList(window.APP_CONFIG);
 
 function renderSuppliers() {
   const box = $("supplier-results");
@@ -348,15 +348,16 @@ function renderSuppliers() {
   // a count is a shelf, not a delivery — the list belongs to shipments only
   if (counting() || !suppliers().length) { box.hidden = true; return; }
   const all = suppliers();
-  const hits = q
-    ? [...all.filter(s => db.norm(s).startsWith(q)), ...all.filter(s => !db.norm(s).startsWith(q) && db.norm(s).includes(q))]
-    : all;
+  // the code counts as much as the name: the storekeeper knows «1042» before he knows the spelling
+  const starts = (s) => db.norm(s.name).startsWith(q) || s.code.startsWith(q);
+  const has = (s) => db.norm(s.name).includes(q) || s.code.includes(q);
+  const hits = q ? [...all.filter(starts), ...all.filter(s => !starts(s) && has(s))] : all;
   // an exact hit means the employee already picked it; nothing left to suggest
-  if (hits.length === 1 && db.norm(hits[0]) === q) { box.hidden = true; return; }
+  if (hits.length === 1 && db.norm(hits[0].name) === q) { box.hidden = true; return; }
   box.hidden = false;
   // the whole row is the target: a thumb on a phone should not have to find a small button
   box.innerHTML = hits.slice(0, 20).map(s => `<li>
-      <button class="suggest" data-supplier="${escAttr(s)}">${esc(s)}</button>
+      <button class="suggest" data-supplier="${escAttr(s.name)}">${esc(s.name)}${s.code ? `<span class="code">${esc(s.code)}</span>` : ""}</button>
     </li>`).join("") || `<li class="empty">مورد جديد — هيتسجّل بالاسم اللي كتبته</li>`;
 }
 
@@ -510,8 +511,15 @@ $("btn-save-shipment").onclick = async () => {
   try {
     if (counting() && editing) await db.updateCount(editing, { name, items: state.items });
     else if (counting()) await db.saveCount({ name, createdBy: myName(), branch: state.branch, items: state.items });
-    else if (editing) await db.updateShipment(editing, { name, items: state.items, type: state.type });
-    else await db.saveShipment({ name, createdBy: myName(), branch: state.branch, type: state.type, items: state.items });
+    else if (editing) await db.updateShipment(editing, {
+      name, items: state.items, type: state.type,
+      supplierCode: db.supplierCodeOf(window.APP_CONFIG, name),
+    });
+    else await db.saveShipment({
+      name, createdBy: myName(), branch: state.branch, type: state.type, items: state.items,
+      // looked up from the name, never typed: the code follows the supplier list, not the employee
+      supplierCode: db.supplierCodeOf(window.APP_CONFIG, name),
+    });
   } catch (e) {
     console.error(e);
     toast("الحفظ ما نفعش — حاول تاني");
@@ -614,7 +622,8 @@ function renderMonthItems() {
       <div class="card-main">
         <div class="card-title">${esc(e.name || "بدون اسم")}</div>
         <div class="code">${esc(e.barcode)}</div>
-        <div class="meta">${esc(ex.daysWord(days))}</div>
+        <!-- who recorded it: two employees on one shelf need to know whose row this is -->
+        <div class="meta">${esc(ex.daysWord(days))}${e.createdBy ? ` · ${esc(e.createdBy)}` : ""}</div>
         <input class="date-cell" type="date" dir="ltr" min="2000-01-01" max="2100-12-31" data-edate="${escAttr(e._id)}"
           value="${escAttr(ex.isoOf(e))}" ${canDo("edit") ? "" : "disabled"}>
       </div>

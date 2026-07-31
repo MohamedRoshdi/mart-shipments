@@ -2,6 +2,7 @@ import * as db from "./db.js";
 import * as auth from "./auth.js";
 import * as ex from "./expiry.js";
 import { zipBlob } from "./zip.js";
+import { sheetRows } from "./sheet.js";
 
 const $ = (id) => document.getElementById(id);
 const esc = (t) => { const d = document.createElement("div"); d.textContent = t; return d.innerHTML; };
@@ -222,7 +223,9 @@ $("list-tabs").onclick = (e) => {
 function matchesSearch(s) {
   const q = db.norm($("list-search").value);
   if (!q) return true;
-  return db.norm(s.name).includes(q) || db.norm(s.createdBy).includes(q);
+  // the supplier code is a search term too: it is what the shop's own paperwork carries
+  return db.norm(s.name).includes(q) || db.norm(s.createdBy).includes(q)
+    || String(s.supplierCode || "").includes(q);
 }
 
 $("list-search").oninput = renderList;
@@ -347,7 +350,8 @@ function renderMonthItems() {
       <div class="card-main">
         <div class="card-title">${esc(e.name || "بدون اسم")}</div>
         <div class="meta"><span class="code">${esc(e.barcode)}</span>${e.branch ? ` · ${esc(shortBranch(e.branch))}` : ""}</div>
-        <div class="meta">${esc(ex.daysWord(days))}</div>
+        <!-- who recorded it, on the row itself: the owner asked to know that without opening Excel -->
+        <div class="meta">${esc(ex.daysWord(days))}${e.createdBy ? ` · ${esc(e.createdBy)}` : ""}</div>
         <input class="date-cell" type="date" dir="ltr" min="2000-01-01" max="2100-12-31" data-edate="${escAttr(e._id)}"
           value="${escAttr(ex.isoOf(e))}" ${canDo("edit") ? "" : "disabled"}>
       </div>
@@ -527,17 +531,24 @@ $("btn-zip-counts").onclick = () => {
   toast(`تم تحميل ${shownCounts.length} جرد في مجلدات`);
 };
 
-// الصلاحيات is not a day thing: the month is the folder, and it comes from the rows themselves
+// A folder per expiry DAY, like the shipments (the owner's call 2026-07-31). The day comes from
+// the row's own date, never from when it was typed — that is the date the shelf has to be cleared.
 $("btn-zip-expiry").onclick = () => {
-  const months = ex.months(expInScope());
-  if (!months.length) { toast("مفيش صلاحيات تتحمّل"); return; }
+  const rows = expInScope();
+  if (!rows.length) { toast("مفيش صلاحيات تتحمّل"); return; }
+  const byDay = new Map();
+  for (const e of rows) {
+    const day = ex.isoOf(e);
+    if (!byDay.has(day)) byDay.set(day, []);
+    byDay.get(day).push(e);
+  }
   const used = new Set();
-  const files = months.map(m => ({
-    path: `${uniquePath(used, `${safeName(m.label)}/الصلاحيات`)}.csv`,
-    text: csvText(expiryRows(m.items)),
+  const files = [...byDay.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([day, items]) => ({
+    path: `${uniquePath(used, `${safeName(day)}/الصلاحيات`)}.csv`,
+    text: csvText(expiryRows(items)),
   }));
   downloadBlob(`صلاحيات-${today()}.zip`, zipBlob(files));
-  toast(`تم تحميل ${months.length} شهر في مجلدات`);
+  toast(`تم تحميل ${byDay.size} يوم في مجلدات`);
 };
 
 function downloadShipmentTxt(s) {
@@ -550,9 +561,10 @@ const exportName = (ext) => `shipments-${filter === ALL ? "all" : safeName(filte
 $("btn-export-all").onclick = () => {
   if (!shown.length) { toast("مفيش شحنات تتحمّل"); return; }
   downloadCsv(exportName("csv"), [
-    ["الفرع", "نوع الشحنة", "الشحنة", "الموظف", "التاريخ", "الباركود", "اسم الصنف", "الوحدة", "الكمية"],
+    ["الفرع", "نوع الشحنة", "كود المورد", "الشحنة", "الموظف", "التاريخ", "الباركود", "اسم الصنف", "الوحدة", "الكمية"],
     ...shown.flatMap(s => s.items.map(i =>
-      [s.branch || "", s.type || "", s.name, s.createdBy, fmtDate(s.createdAt), i.barcode, i.name || "", i.unit || "", i.qty])),
+      [s.branch || "", s.type || "", s.supplierCode || "", s.name, s.createdBy, fmtDate(s.createdAt),
+       i.barcode, i.name || "", i.unit || "", i.qty])),
   ]);
   toast("تم تحميل ملف Excel");
 };
@@ -582,7 +594,9 @@ $("btn-export-zip").onclick = () => {
   const used = new Set();
   const files = [];
   for (const s of shown) {
-    const path = uniquePath(used, `${dayOf(s.createdAt)}/${safeName(s.type || "بدون نوع")}/${safeName(s.name)}`);
+    // one folder per day, the shipments straight inside it (the owner's call 2026-07-31: the
+    // extra type folder meant three clicks to reach one file). The type is still in the row.
+    const path = uniquePath(used, `${dayOf(s.createdAt)}/${safeName(s.name)}`);
     files.push({ path: `${path}.csv`, text: csvText(shipmentRows(s)) });
     files.push({ path: `${path}.txt`, text: shipmentText(s) });
   }
@@ -598,7 +612,8 @@ function openDetail(s, kind = "ship") {
   $("detail-name").value = s.name;
   $("detail-name-head").textContent = isCount ? "اسم الجرد" : "اسم الشحنة";
   $("detail-type-row").hidden = isCount;                  // a stocktake has no shipment type
-  $("detail-meta").textContent = `${s.branch || "بدون فرع"} · ${s.createdBy} · ${fmtDate(s.createdAt)}`;
+  $("detail-meta").textContent = [s.branch || "بدون فرع", s.createdBy, fmtDate(s.createdAt),
+    ...(s.supplierCode ? [`كود المورد ${s.supplierCode}`] : [])].join(" · ");
   $("btn-download-txt").hidden = isCount;                 // a TXT of a count says nothing about it
   $("btn-delete-detail").textContent = isCount ? "حذف الجرد" : "حذف الشحنة";
   renderDetailType();
@@ -687,7 +702,11 @@ $("btn-save-edit").onclick = async () => {
       await db.updateCount(current._id, { name, items: current.items });
       db.logAction(identity, "تعديل جرد", `${name} · ${current.items.length} صنف`);
     } else {
-      await db.updateShipment(current._id, { name, items: current.items, type: current.type });
+      // the code follows the name: renaming a shipment to another supplier must not keep the old code
+      await db.updateShipment(current._id, {
+        name, items: current.items, type: current.type,
+        supplierCode: db.supplierCodeOf(window.APP_CONFIG, name),
+      });
       db.logAction(identity, "تعديل شحنة", `${name} · ${current.items.length} صنف`);
     }
     toast("تم حفظ التعديلات");
@@ -840,13 +859,6 @@ $("btn-export-products").onclick = async () => {
 
 /* ---------- catalog import ---------- */
 
-async function sheetRows(file) {
-  const buf = await file.arrayBuffer();
-  let text = new TextDecoder("utf-8").decode(buf);
-  // Excel on Arabic Windows exports windows-1256; UTF-8 decode of that yields replacement chars
-  if (text.includes("�")) text = new TextDecoder("windows-1256").decode(buf);
-  return text.split(/\r?\n/).map(l => l.split(/[,;\t]/));
-}
 
 const cell = (c) => String(c || "").trim().replace(/^﻿/, "");
 

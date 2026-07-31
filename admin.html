@@ -38,9 +38,15 @@
       <button id="btn-add-type" class="ghost">+ إضافة نوع</button>
 
       <h2>الموردين</h2>
-      <p class="meta">اكتب كل مورد في سطر. الموظف هيلاقيهم اقتراحات وهو بيكتب اسم الشحنة، ويقدر
-        برضه يكتب اسم من عنده. سيب الخانة فاضية لو مش عايز اقتراحات.</p>
-      <textarea id="cfg-suppliers" rows="6" placeholder="المراعي&#10;جهينة&#10;بيبسي"></textarea>
+      <p class="meta">كل مورد في سطر: <strong>كود المورد ثم فاصلة ثم الاسم</strong> — والكود اختياري.
+        الموظف هيلاقيهم اقتراحات وهو بيكتب اسم الشحنة (بالاسم أو بالكود)، ويقدر برضه يكتب اسم من
+        عنده. الكود بيتسجّل على الشحنة وبيطلع في ملف Excel.</p>
+      <textarea id="cfg-suppliers" rows="6" placeholder="1042، المراعي&#10;1088، جهينة&#10;بيبسي"></textarea>
+      <div class="row-actions">
+        <button id="btn-suppliers-file" type="button" class="ghost">استيراد من ملف Excel</button>
+        <a id="btn-suppliers-template" class="ghost" href="suppliers-template.csv" download>تحميل النموذج</a>
+      </div>
+      <input id="suppliers-file" type="file" accept=".csv,text/csv" hidden>
       <p id="suppliers-count" class="meta"></p>
 
       <h2>ليبل الرف</h2>

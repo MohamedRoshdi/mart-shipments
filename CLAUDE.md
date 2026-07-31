@@ -25,7 +25,7 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 5. **`db.js` is the only file that knows where data lives.** `app.js` and
    `manager.js` never touch Firestore or localStorage keys directly.
 6. **Bump `CACHE` in `sw.js` on every deploy.** Serving is cache-first, so phones
-   keep the old bundle until the cache name changes. Currently `mart-v39`.
+   keep the old bundle until the cache name changes. Currently `mart-v40`.
    The bump only works because install fetches with `new Request(u, { cache: "reload" })` —
    a plain `addAll` reads the browser's HTTP cache and copies **stale** files into the new
    cache name (caught in Chrome 2026-07-31: `mart-v34` held a `style.css` 262 bytes behind
@@ -45,19 +45,21 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 | `label.js` | the whole of ليبل الرف that is not a screen: EAN-13 + Code 128 encoding, the barcode SVG, the label's HTML, and the settings guard. No db, no DOM, no session — that is what makes the price (or any other field) a one-line change later |
 | `db.js` | data layer; `?test=1` switches the whole app to localStorage |
 | `zip.js` | store-only ZIP writer, ~80 lines, no dependency; used by the folder export |
+| `sheet.js` | one `sheetRows(file)`: the only place that knows Excel writes Arabic as windows-1256. Used by the catalog/stock import (manager) and the supplier import (admin) |
 | `style.css` | one stylesheet for all three pages |
 | `sw.js`, `manifest.json` | **one** installable PWA, on the main URL. `manager.html` and `admin.html` carry no manifest: the PIN routes people to their screen (`auth.landingPage`), and the home screen links to the other two. Dropped 2026-07-31 on the owner's call — a phone with three near-identical icons was the confusing part. |
 | `firebase-config.js` | Firebase keys **plus** `APP_CONFIG`: PINs (incl. `adminPin`), branches, shipment types, suppliers, label settings |
 | `firestore.rules` | shape validation; the only server-side guard that exists |
 | `SETUP.md` | Arabic guide for the shop owner |
-| `products-template.csv`, `stock-template.csv` | the two import shapes: barcode+name+**unit**, and barcode+name+quantity |
-| `tests/app.spec.js` | 65 Playwright tests, all in localStorage mode |
+| `products-template.csv`, `stock-template.csv`, `suppliers-template.csv` | the three import shapes: barcode+name+**unit**, barcode+name+quantity, and **code+supplier name** |
+| `tests/app.spec.js` | 67 Playwright tests, all in localStorage mode |
 | `scripts/*.mjs` | live checks and screenshot helpers (see below) |
 
 ## Data model
 
-`shipments/{auto}` — `name` (**the supplier**), `createdBy`, `createdAt` (epoch ms), `branch`,
-`type`, `items: [{barcode, name, qty, unit?}]`.
+`shipments/{auto}` — `name` (**the supplier**), `supplierCode?` (the code in the shop's own system,
+**looked up from the name at save time, never typed** — `db.supplierCodeOf`), `createdBy`,
+`createdAt` (epoch ms), `branch`, `type`, `items: [{barcode, name, qty, unit?}]`.
 
 `counts/{auto}` — a stocktake (جرد): `name` (a shelf, never a supplier), `createdBy`,
 `createdAt`, `branch`, `items: [{barcode, name, qty, sys, unit?}]`. `qty` is what the employee counted on the shelf,
@@ -86,8 +88,10 @@ label: { w, h, sheet, logo } }`. `label` is the shelf label: millimetres (66 × 
 the sheet the shop already buys), `sheet` is `"label"` (one label per page, thermal roll) or
 `"a4"` (tiled on a sheet), and `logo` is the shop logo as a data URL, redrawn to 360 px before
 it is stored because **every page reads this doc at boot**.
-`suppliers` is a plain list of vendor names, typed one per line in the admin page and offered as
-the shipment name — **a suggestion, never a constraint**: a name that is not on the list still saves.
+`suppliers` is a list of `{code, name}` (a plain string is an older row and still reads, through
+`db.supplierList`), typed one per line as «كود، اسم» in the admin page — or imported from a sheet —
+and offered as the shipment name — **a suggestion, never a constraint**: a name that is not on the
+list still saves, with an empty code.
 Each user is `{ name, pin, branches: [], perms: [], device? }`; `perms` holds ids from `auth.js` `PERMS`
 (`emp`/`mgr`/`adm` are screens, the rest are actions). **`branches: []` means every branch**, one
 name means locked to it, several means the user works across them. `auth.branchesOf()` also reads
@@ -102,8 +106,8 @@ Rules in force (all live-tested):
 - `config`: only the doc id `app`, only those seven keys, PINs ≤ 8 chars, lists ≤ 10, users ≤ 40,
   suppliers ≤ 300, `label` a map of ≤ 6 keys whose `logo` is a string ≤ 200,000 chars.
 - `logs`: create-only with the four keys; `update`/`delete` always denied.
-- create: key allow-list, types, sizes, `items` ≤ 200.
-- update: `name`, `items`, `type` may change; `createdBy`, `createdAt` and
+- create: key allow-list, types, sizes, `items` ≤ 200, optional `supplierCode` a string ≤ 20.
+- update: `name`, `items`, `type`, `supplierCode` may change; `createdBy`, `createdAt` and
   **`branch` are immutable** (403 on any attempt).
 - delete: allowed on both collections (the owner asked for it).
 - `counts`: the same shape as `shipments` minus `type`, `items` ≤ 500; `createdBy`,
@@ -190,8 +194,13 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   back. The catalog sheet is the other file (`الباركود، الاسم، الوحدة`), and there `unitOf()`
   takes the last cell **unless it is numeric**, so a stocktake sheet imported into the wrong
   box cannot turn a quantity into a unit.
+- **The supplier code is derived, never entered.** `db.supplierCodeOf(cfg, name)` resolves it from
+  the saved name at save time, in `app.js` and in the manager's edit screen alike, so a shipment can
+  never carry another supplier's code and renaming one moves the code with it. Old shipments keep
+  the code they were saved with.
 - **The shipment name is the supplier, and the list only suggests.** `renderSuppliers()` in
-  `app.js` filters `APP_CONFIG.suppliers` with `db.norm` (prefix hits first, then anything
+  `app.js` filters `db.supplierList(APP_CONFIG)` with `db.norm` — **on the name and on the code**,
+  because the storekeeper knows «1042» before he knows the spelling (prefix hits first, then anything
   containing the term) and shows nothing during a stocktake — a shelf has no supplier. Typing a
   name that is not on the list is allowed on purpose: a new supplier at the door must not block
   a delivery. The manager's `#list-search` runs the same matcher over the shipment name **and**
@@ -254,12 +263,13 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
 - **The ZIP is store-only on purpose.** Folder structure comes from `/` inside the entry
   names plus flag bit `0x0800` for UTF-8; a browser download cannot create folders itself
   (Chrome rewrites `/` in the file name). Verified with `python3 -c` + `zipfile.testzip()`.
-- **Each ZIP is grouped by the thing that identifies its rows**, which is not the same field
-  everywhere: shipments are `YYYY-MM-DD/النوع/اسم الشحنة.csv|txt`, a stocktake is
-  `YYYY-MM-DD/اسم الجرد.csv`, and الصلاحيات is `<شهر سنة>/الصلاحيات.csv` — a month, never a
-  day, because that is what an expiry row is filed under. `dayOf()` uses `en-CA`, so the
-  folder name sorts itself; `uniquePath()` appends ` (2)` rather than letting a repeated name
-  overwrite an earlier entry.
+- **Every ZIP is one folder per day** (2026-07-31, the owner's call — the type level under a
+  shipment day meant three taps to reach one file): shipments are `YYYY-MM-DD/اسم الشحنة.csv|txt`,
+  a stocktake `YYYY-MM-DD/اسم الجرد.csv`, and الصلاحيات `YYYY-MM-DD/الصلاحيات.csv`. The day is
+  **the field that identifies the rows**, and for الصلاحيات that is the expiry date (`ex.isoOf`),
+  never `createdAt` — the folder name is the day the shelf has to be cleared. `dayOf()` uses
+  `en-CA`, so the folder name sorts itself; `uniquePath()` appends ` (2)` rather than letting a
+  repeated name overwrite an earlier entry.
 - **The admin bulk delete covers `shipments` and `counts`**, filtered by branch, type
   (shipments only — a count has none) and a `from`/`to` day range compared as plain
   `YYYY-MM-DD` strings. `db.deleteMany` maps the collection to its localStorage list in test

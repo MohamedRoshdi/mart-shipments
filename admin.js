@@ -1,6 +1,7 @@
 import * as db from "./db.js";
 import * as auth from "./auth.js";
 import * as lbl from "./label.js";
+import { sheetRows } from "./sheet.js";
 
 const $ = (id) => document.getElementById(id);
 const esc = (t) => { const d = document.createElement("div"); d.textContent = t; return d.innerHTML; };
@@ -107,7 +108,7 @@ function renderAll() {
   $("cfg-manager-pin").value = cfg.managerPin;
   $("cfg-admin-pin").value = cfg.adminPin;
   // a shop with fifty suppliers should not tap «+ إضافة» fifty times: one line each, paste and go
-  $("cfg-suppliers").value = cfg.suppliers.join("\n");
+  $("cfg-suppliers").value = cfg.suppliers.map(supplierLine).join("\n");
   paintSuppliers();
   renderLabelCfg();
   renderBulk();
@@ -191,14 +192,56 @@ async function shrinkImage(file) {
   }
 }
 
-const suppliersTyped = () => $("cfg-suppliers").value.split("\n").map(s => s.trim()).filter(Boolean);
+/* --- suppliers: one per line, «كود، اسم». The code is the shop's own, and it rides onto every
+   shipment saved under that supplier's name. A line with no code is still a supplier. --- */
+
+const isCode = (s) => /^[0-9A-Za-z\-_/]{1,20}$/.test(s);
+
+function parseSupplier(line) {
+  const parts = line.split(/[,،;\t]/).map(s => s.trim()).filter(Boolean);
+  if (!parts.length) return null;
+  // only a leading cell that looks like a code is one: an Arabic first cell is part of the name
+  if (parts.length >= 2 && isCode(parts[0])) return { code: parts[0], name: parts.slice(1).join(" ") };
+  return { code: "", name: parts.join(" ") };
+}
+
+const supplierLine = (s) => (s.code ? `${s.code}، ${s.name}` : s.name);
+const suppliersTyped = () => $("cfg-suppliers").value.split("\n").map(parseSupplier).filter(Boolean);
 
 function paintSuppliers() {
-  const n = suppliersTyped().length;
-  $("suppliers-count").textContent = n ? `${n} مورد` : "مفيش موردين — الموظف هيكتب الاسم بنفسه";
+  const list = suppliersTyped();
+  const coded = list.filter(s => s.code).length;
+  $("suppliers-count").textContent = list.length
+    ? `${list.length} مورد · ${coded} منهم بكود`
+    : "مفيش موردين — الموظف هيكتب الاسم بنفسه";
 }
 
 $("cfg-suppliers").oninput = () => { paintSuppliers(); markDirty(); };
+
+$("btn-suppliers-file").onclick = () => $("suppliers-file").click();
+
+// the file replaces the box, it does not append: the shop's list is the shop's list
+$("suppliers-file").onchange = async () => {
+  const file = $("suppliers-file").files[0];
+  if (!file) return;
+  let rows = [];
+  try {
+    rows = await sheetRows(file);
+  } catch (err) {
+    console.error(err);
+    toast("مقدرناش نقرا الملف — تأكد إنه CSV");
+    return;
+  }
+  const list = rows
+    .map(cells => parseSupplier(cells.join(",")))
+    .filter(s => s && !/اسم المورد|كود المورد/.test(s.name));   // drop the header row
+  $("suppliers-file").value = "";
+  if (!list.length) { toast("الملف مفيهوش موردين"); return; }
+  $("cfg-suppliers").value = list.map(supplierLine).join("\n");
+  paintSuppliers();
+  markDirty();
+  toast(`اتقرأ ${list.length} مورد — اضغط «حفظ الإعدادات»`);
+};
 
 // one card per user: name, PIN, branch, and a tick for every screen and every action
 function renderUsers() {
@@ -562,7 +605,7 @@ cfgReady = (async () => {
     adminPin: window.APP_CONFIG.adminPin,
     branches: window.APP_CONFIG.branches.map(b => ({ ...b })),
     shipmentTypes: [...window.APP_CONFIG.shipmentTypes],
-    suppliers: [...(window.APP_CONFIG.suppliers || [])],
+    suppliers: db.supplierList(window.APP_CONFIG),      // older configs held plain names
     label: lbl.labelCfg(window.APP_CONFIG),
     users: (window.APP_CONFIG.users || []).map(u => ({ ...u, branches: auth.branchesOf(u), perms: (u.perms || []).slice() })),
   };

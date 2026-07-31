@@ -1,8 +1,8 @@
 // bump CACHE version on every deploy - cache-first serving keeps old assets until the name changes
-const CACHE = "mart-v39";
+const CACHE = "mart-v40";
 const ASSETS = ["./", "index.html", "style.css", "app.js", "db.js", "auth.js", "expiry.js", "label.js", "firebase-config.js",
-  "manager.html", "manager.js", "products-template.csv", "stock-template.csv",
-  "admin.html", "admin.js", "zip.js",
+  "manager.html", "manager.js", "products-template.csv", "stock-template.csv", "suppliers-template.csv",
+  "admin.html", "admin.js", "zip.js", "sheet.js",
   "manifest.json", "vendor/html5-qrcode.min.js", "icon-192.png", "icon-512.png"];
 
 self.addEventListener("install", (e) => {

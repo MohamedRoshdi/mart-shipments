@@ -53,12 +53,16 @@ export async function listShipments() {
 export async function updateShipment(id, data) {
   if (TEST_MODE) {
     const all = lsArr('test-shipments').map((s) =>
-      String(s.createdAt) === id ? { ...s, name: data.name, items: data.items, type: data.type } : s);
+      String(s.createdAt) === id
+        ? { ...s, name: data.name, items: data.items, type: data.type, supplierCode: data.supplierCode || '' }
+        : s);
     localStorage.setItem('test-shipments', JSON.stringify(all));
     return;
   }
   await live();
-  await fs.updateDoc(fs.doc(dbRef, 'shipments', id), { name: data.name, items: data.items, type: data.type });
+  await fs.updateDoc(fs.doc(dbRef, 'shipments', id), {
+    name: data.name, items: data.items, type: data.type, supplierCode: data.supplierCode || '',
+  });
 }
 
 export async function deleteShipment(id) {
@@ -224,6 +228,20 @@ export async function getConfig() {
   const snap = await fs.getDoc(fs.doc(dbRef, 'config', 'app'));
   return snap.exists() ? snap.data() : {};
 }
+
+// A supplier is { code, name } — the code is the one in the shop's own system, typed once in the
+// admin page (or imported) and stamped on every shipment. Configs written before the code existed
+// hold plain names, and those still read fine.
+export const supplierList = (cfg) => ((cfg && cfg.suppliers) || [])
+  .map((s) => (typeof s === 'string'
+    ? { code: '', name: s }
+    : { code: String((s && s.code) || ''), name: String((s && s.name) || '') }))
+  .filter((s) => s.name);
+
+// the code is never typed on the shipment screen: it is looked up from the name that was saved,
+// so a shipment can never carry a code that belongs to another supplier
+export const supplierCodeOf = (cfg, name) =>
+  (supplierList(cfg).find((s) => norm(s.name) === norm(name)) || {}).code || '';
 
 export async function saveConfig(cfg) {
   if (TEST_MODE) {
