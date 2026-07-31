@@ -1641,6 +1641,25 @@ test('label: pick a product, preview it, print the copies asked for', async ({ p
   await expect(page.locator('#label-copies')).toHaveValue('3');
 });
 
+test('import: the two templates the app itself hands out still import', async ({ page }) => {
+  await page.goto('/manager.html?test=1');
+  await page.fill('#pin-input', await page.evaluate(() => window.APP_CONFIG.managerPin));
+  await page.click('#btn-pin');
+  await page.click('#btn-products');
+  await page.setInputFiles('#import-file', 'products-template.csv');   // الباركود، اسم الصنف، الوحدة
+  await expect(page.locator('#toast')).toContainText('تم استيراد 3 صنف');
+
+  await page.click('#btn-back');
+  await page.click('#stock-branch button');
+  // الكمية في النظام — the heading the template ships with, and the shape the catalog export writes
+  await page.setInputFiles('#stock-file', 'stock-template.csv');
+  await expect(page.locator('#toast')).toContainText('تم استيراد كميات 3 صنف');
+  const branch = await page.evaluate(() => window.APP_CONFIG.branches[0].name);
+  const rows = await page.evaluate(() => JSON.parse(localStorage.getItem('test-products')));
+  expect(rows['6221031250057'].stock[branch]).toBe(24);
+  expect(rows['6224007850005'].stock[branch]).toBe(15);
+});
+
 test("import: the shop's own column order, unit codes and last selling price", async ({ page }) => {
   await page.goto('/manager.html?test=1');
   await page.fill('#pin-input', await page.evaluate(() => window.APP_CONFIG.managerPin));

@@ -25,7 +25,7 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 5. **`db.js` is the only file that knows where data lives.** `app.js` and
    `manager.js` never touch Firestore or localStorage keys directly.
 6. **Bump `CACHE` in `sw.js` on every deploy.** Serving is cache-first, so phones
-   keep the old bundle until the cache name changes. Currently `mart-v45`.
+   keep the old bundle until the cache name changes. Currently `mart-v46`.
    The bump only works because install fetches with `new Request(u, { cache: "reload" })` —
    a plain `addAll` reads the browser's HTTP cache and copies **stale** files into the new
    cache name (caught in Chrome 2026-07-31: `mart-v34` held a `style.css` 262 bytes behind
@@ -38,21 +38,21 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 | File | Role |
 |---|---|
 | `index.html` / `app.js` | employee app: setup, home, new/edit shipment **or stocktake**, **الصلاحيات** (months + one month), **ليبل الرف**, camera, item sheet |
-| `manager.html` / `manager.js` | manager app: PIN, shipments tab, stocktake tab, **expiry tab**, one search box over the list, edit, catalog screen (with a **ليبل** link per row), import/export (Excel, TXT, ZIP by day/month) |
+| `manager.html` / `manager.js` | manager app: PIN, shipments tab, stocktake tab, **expiry tab**, one search box over the list, filters behind `#btn-filters`, cards that open (no row buttons), edit, catalog screen (with a **ليبل** link per row), import/export (Excel, TXT, **ZIP by day**) |
 | `admin.html` / `admin.js` | admin app: users + permissions + phone binding, settings (branches, types, **suppliers**, **label size/paper/logo**, PINs), audit trail, bulk delete by kind/branch/type/day-range, catalog wipe |
 | `auth.js` | permission list, PIN → identity, the 12-hour session shared by all three pages |
 | `expiry.js` | the pure part of الصلاحيات: month grouping, sorting, counters, the four colour states |
 | `label.js` | the whole of ليبل الرف that is not a screen: EAN-13 + Code 128 encoding, the barcode SVG, the label's HTML, and the settings guard. No db, no DOM, no session — that is what makes the price (or any other field) a one-line change later |
 | `db.js` | data layer; `?test=1` switches the whole app to localStorage |
 | `zip.js` | store-only ZIP writer, ~80 lines, no dependency; used by the folder export |
-| `sheet.js` | one `sheetRows(file)`: the only place that knows Excel writes Arabic as windows-1256. Used by the catalog/stock import (manager) and the supplier import (admin) |
+| `sheet.js` | everything about reading a spreadsheet: `sheetRows` (the only place that knows Excel writes Arabic as windows-1256), `headerMap` (columns by Arabic heading, so the shop's own export order works), `unitName` (unit **code** → word). Used by the catalog/stock import (manager) and the supplier import (admin) |
 | `style.css` | one stylesheet for all three pages |
 | `sw.js`, `manifest.json` | **one** installable PWA, on the main URL. `manager.html` and `admin.html` carry no manifest: the PIN routes people to their screen (`auth.landingPage`), and the home screen links to the other two. Dropped 2026-07-31 on the owner's call — a phone with three near-identical icons was the confusing part. |
 | `firebase-config.js` | Firebase keys **plus** `APP_CONFIG`: PINs (incl. `adminPin`), branches, shipment types, suppliers, label settings |
 | `firestore.rules` | shape validation; the only server-side guard that exists |
 | `SETUP.md` | Arabic guide for the shop owner |
 | `products-template.csv`, `stock-template.csv`, `suppliers-template.csv` | the three import shapes: barcode+name+**unit**, barcode+name+quantity, and **code+supplier name** |
-| `tests/app.spec.js` | 72 Playwright tests, all in localStorage mode |
+| `tests/app.spec.js` | 73 Playwright tests, all in localStorage mode |
 | `scripts/*.mjs` | live checks and screenshot helpers (see below) |
 
 ## Data model
@@ -215,6 +215,13 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   does. The unit arrives as a **code**, not a word (`unitName`: 1 قطعة، 2 كيلو، 3 علبة، 4 كرتونة،
   5 عرض); a non-numeric cell is taken as the word it already is. `معامل التحويل` is ignored on
   purpose — nothing in the app multiplies units.
+  **The headings are matched in Arabic only, and the quantity one has to allow a suffix**: the
+  shipped `stock-template.csv` says «الكمية في النظام» and the catalog export writes «الكمية في
+  فرع قويسنا», so the pattern ends in `( في .+)?`. Measured 2026-07-31: without it `headerMap`
+  matched barcode + name, found no quantity column, and the shop's own template imported **zero
+  rows** — the tests missed it because the fixtures use English headings and fall through to the
+  positional path. `tests/fixtures/catalog.csv` deliberately keeps a comma inside a name, which
+  only the positional path can carry, so adding English headings here would break it.
 - **A stock sheet must never wipe the price, and a catalog sheet must never wipe the stock.**
   `saveProductName` only writes the keys it was given and `writeProduct` merges, so an import that
   has no price column leaves the price alone.
