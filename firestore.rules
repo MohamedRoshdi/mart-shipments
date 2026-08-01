@@ -108,14 +108,17 @@ service cloud.firestore {
     // and jobs stay after printing so a reprint is one tap.
     match /print_jobs/{id} {
       allow read: if true;
-      allow create: if request.resource.data.keys().hasOnly(["name", "createdBy", "createdAt", "items"])
+      // branch is released now though nothing writes it yet — the erpAt precedent: the day the
+      // jobs list scopes by branch, the first write must not be a 403 behind a rules deploy
+      allow create: if request.resource.data.keys().hasOnly(["name", "createdBy", "createdAt", "items", "branch"])
         && request.resource.data.name is string && request.resource.data.name.size() > 0
         && request.resource.data.name.size() <= 100
         && request.resource.data.createdBy is string && request.resource.data.createdBy.size() <= 50
         && request.resource.data.createdAt is number
+        && (!("branch" in request.resource.data) || (request.resource.data.branch is string && request.resource.data.branch.size() <= 30))
         && request.resource.data.items is list && request.resource.data.items.size() <= 200;
       // the two stamp pairs may be added; who made the job and when never change
-      allow update: if request.resource.data.keys().hasOnly(["name", "createdBy", "createdAt", "items", "readyBy", "readyAt", "printedBy", "printedAt"])
+      allow update: if request.resource.data.keys().hasOnly(["name", "createdBy", "createdAt", "items", "branch", "readyBy", "readyAt", "printedBy", "printedAt"])
         && request.resource.data.createdBy == resource.data.createdBy
         && request.resource.data.createdAt == resource.data.createdAt
         && request.resource.data.name is string && request.resource.data.name.size() > 0

@@ -25,7 +25,8 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 5. **`db.js` is the only file that knows where data lives.** `app.js` and
    `manager.js` never touch Firestore or localStorage keys directly.
 6. **Bump `CACHE` in `sw.js` on every deploy.** Serving is cache-first, so phones
-   keep the old bundle until the cache name changes. Currently `mart-v52`.
+   keep the old bundle until the cache name changes. The current generation lives in `sw.js`
+   itself — a number written here went stale within a day (it said v52 at v71).
    **Bump `version.js` in the same edit** — its `VERSION` ends in the cache generation
    (`1.0.52`) and `BUILD` is the day, and every page prints both in its footer. A footer that
    lags the cache is worse than no footer.
