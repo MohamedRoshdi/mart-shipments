@@ -199,7 +199,8 @@ test('employee: edit own saved shipment', async ({ page }) => {
   await page.evaluate(() => {
     localStorage.setItem('employeeName', 'أحمد');
     localStorage.setItem('test-shipments', JSON.stringify([
-      { name: 'شحنة قديمة', createdBy: 'أحمد', createdAt: 1753700000000,
+      // stamped today: the employee home now shows today only, and editing is part of today
+      { name: 'شحنة قديمة', createdBy: 'أحمد', createdAt: Date.now(),
         items: [{ barcode: '111', name: 'لبن', qty: 2 }, { barcode: '222', name: 'جبنة', qty: 1 }] },
     ]));
   });
@@ -1271,7 +1272,8 @@ test('a stocktake reopens for editing and the difference follows the new quantit
     localStorage.setItem('employeeName', 'أحمد');
     localStorage.setItem('test-products', JSON.stringify({ '111': { name: 'لبن', qty: 10 } }));
     localStorage.setItem('test-counts', JSON.stringify([
-      { name: 'جرد قديم', createdBy: 'أحمد', createdAt: 1753700000000, branch: 'فرع قويسنا',
+      // stamped today: the employee home shows today only, and editing is part of today
+      { name: 'جرد قديم', createdBy: 'أحمد', createdAt: Date.now(), branch: 'فرع قويسنا',
         items: [{ barcode: '111', name: 'لبن', qty: 4, sys: 10 }] },
     ]));
   });
@@ -2111,6 +2113,40 @@ test('erp: the pulled file reads as imported, and our own file never does', asyn
   });
   expect(r).toEqual({ imported: true, oursNot: false, halfNot: false, emptyNot: false,
     permit: '4552', noPermit: '', match: true, short: false });
+});
+
+/* «شاشة الموظف تعرض شحنات اليوم فقط» (the owner, 2026-08-01): yesterday's rows and anything the
+   manager already took in («تم تحميلها») leave the employee's home — display only, the manager
+   page and the database keep everything. */
+test('the employee home shows today only, and a loaded shipment leaves it', async ({ page }) => {
+  await page.goto('/?test=1');
+  await page.evaluate(() => {
+    const day = 86400000;
+    localStorage.setItem('employeeName', 'أحمد');
+    const row = (name, extra) => ({
+      name, createdBy: 'أحمد', branch: 'فرع قويسنا', type: 'إذن استلام',
+      items: [{ barcode: '111', name: 'لبن', qty: 1 }], ...extra,
+    });
+    localStorage.setItem('test-shipments', JSON.stringify([
+      row('لسه النهارده', { createdAt: Date.now() }),
+      row('اتحملت النهارده', { createdAt: Date.now() - 60000, loadedBy: 'المدير', loadedAt: Date.now() }),
+      row('من امبارح', { createdAt: Date.now() - day }),
+    ]));
+    localStorage.setItem('test-counts', JSON.stringify([
+      { name: 'رف النهارده', createdBy: 'أحمد', branch: 'فرع قويسنا', createdAt: Date.now(),
+        items: [{ barcode: '111', name: 'لبن', qty: 1, sys: 1 }] },
+      { name: 'رف امبارح', createdBy: 'أحمد', branch: 'فرع قويسنا', createdAt: Date.now() - day,
+        items: [{ barcode: '111', name: 'لبن', qty: 1, sys: 1 }] },
+    ]));
+  });
+  await page.reload();
+  await expect(page.locator('#my-shipments li')).toHaveCount(1);
+  await expect(page.locator('#my-shipments')).toContainText('لسه النهارده');
+  await expect(page.locator('#my-counts li')).toHaveCount(1);
+  await expect(page.locator('#my-counts')).toContainText('رف النهارده');
+  // and the manager still sees all of it — nothing was deleted
+  const kept = await page.evaluate(() => JSON.parse(localStorage.getItem('test-shipments')).length);
+  expect(kept).toBe(3);
 });
 
 /* «استبدالها بالكامل» (the owner's daily-files spec, 2026-08-01): a header-driven catalog file

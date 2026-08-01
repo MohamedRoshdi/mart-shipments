@@ -82,20 +82,31 @@ function navTo(id) {
   render(id);
 }
 
+/* شاشة الموظف بتعرض النهارده وبس (the owner, 2026-08-01): yesterday's work leaves the screen at
+   midnight and a shipment leaves it the moment the manager takes it in («تم تحميلها»). Display
+   only — nothing is deleted, and the manager page still shows everything. The read is bounded to
+   the current month for the same reason the manager's is: the old unbounded read grew forever. */
+const dayKey = (ts) => new Date(ts).toLocaleDateString("en-CA");
+const isToday = (ts) => dayKey(ts) === dayKey(Date.now());
+const thisMonth = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+};
+
 async function goHome() {
   await stopScan();
   state.editingId = null;
   state.mode = "ship";
   render("screen-home");
-  const all = await db.listShipments().catch(() => []);
-  state.mine = all.filter(s => s.createdBy === myName());
+  const all = await db.listShipments(thisMonth()).catch(() => []);
+  state.mine = all.filter(s => s.createdBy === myName() && isToday(s.createdAt) && !s.loadedAt);
   $("my-shipments").innerHTML = state.mine.map((s, i) => `<li>
       <div class="card-main">
         <div class="card-title">${esc(s.name)}</div>
         <div class="meta">${esc(s.type || "")} · ${esc(s.branch || "")} · ${fmtDate(s.createdAt)} · ${s.items.length} صنف</div>
       </div>
       ${canDo("edit") ? `<button class="ghost" data-edit="${i}">تعديل</button>` : ""}
-    </li>`).join("") || `<li class="empty">لسه مفيش شحنات — ابدأ بـ «شحنة جديدة»</li>`;
+    </li>`).join("") || `<li class="empty">مفيش شحنات النهارده — ابدأ بـ «شحنة جديدة»</li>`;
   if (canDo("count")) await renderMyCounts();
   openDeepLabel();
 }
@@ -106,15 +117,15 @@ const countDiff = (c) => c.items.reduce((n, i) => n + (Number(i.qty) || 0) - (Nu
 const diffWord = (n) => (n === 0 ? "مظبوط" : (n > 0 ? `زيادة ${n}` : `ناقص ${-n}`));
 
 async function renderMyCounts() {
-  const all = await db.listCounts().catch(() => []);
-  state.myCounts = all.filter(c => c.createdBy === myName());
+  const all = await db.listCounts(thisMonth()).catch(() => []);
+  state.myCounts = all.filter(c => c.createdBy === myName() && isToday(c.createdAt));
   $("my-counts").innerHTML = state.myCounts.map((c, i) => `<li>
       <div class="card-main">
         <div class="card-title">${esc(c.name)}</div>
         <div class="meta">${esc(c.branch || "")} · ${fmtDate(c.createdAt)} · ${c.items.length} صنف · الفرق ${esc(diffWord(countDiff(c)))}</div>
       </div>
       ${canDo("edit") ? `<button class="ghost" data-editcount="${i}">تعديل</button>` : ""}
-    </li>`).join("") || `<li class="empty">لسه مفيش جرد — ابدأ بـ «جرد»</li>`;
+    </li>`).join("") || `<li class="empty">مفيش جرد النهارده — ابدأ بـ «جرد»</li>`;
 }
 
 // no session at all = the old single-PIN setup, where everything was allowed
