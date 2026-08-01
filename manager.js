@@ -4,7 +4,7 @@ import * as ex from "./expiry.js";
 import { zipBlob } from "./zip.js";
 import { sheetRows, requireColumns, unitName, unitCode, clean as cell } from "./sheet.js";
 import { versionLine } from "./version.js";
-import { downloadBlob, saveText, listFolder, readText, available as folderReady, uniqueName, safeSegment } from "./files.js";
+import { downloadBlob, saveText, listFolder, listFiles, readText, available as folderReady, uniqueName, safeSegment } from "./files.js";
 import * as erp from "./erp.js";
 import { applyBrand } from "./brand.js";
 import { keepFresh } from "./fresh.js";
@@ -313,6 +313,8 @@ async function openManager() {
     renderTabs();
     if (erpReady) checkErpFiles(true).catch(console.error);
   }).catch(console.error);
+  // and the other direction: data files the ERP exported since the last visit come in by themselves
+  autoImportFiles().catch(console.error);
 }
 
 function renderTabs() {
@@ -1196,12 +1198,16 @@ const productRow = (c, map) => (map
 $("btn-import").onclick = () => $("import-file").click();
 $("import-file").onchange = async (e) => {
   const file = e.target.files[0];
-  if (!file) return;
+  e.target.value = "";
+  if (file) await importCatalogFile(file);
+};
+
+async function importCatalogFile(file) {
   let all, map;
   try {
     all = await sheetRows(file);
     map = requireColumns(all, ["barcode", "name"]);
-  } catch (err) { toast(err.message, "bad"); e.target.value = ""; return; }
+  } catch (err) { toast(err.message, "bad"); return; }
   const usable = (map ? all.slice(1) : all)
     .map(c => productRow(c, map))
     .filter(r => r.barcode && /\d/.test(r.barcode) && r.name);
@@ -1233,20 +1239,7 @@ $("import-file").onchange = async (e) => {
       await db.saveProductName(r.barcode, r.name, r);
       n++;
     }
-    if (existingBy) {
-      const inFile = new Set(rows.map(r => r.barcode));
-      const gone = [...existingBy.values()].filter(p => !inFile.has(String(p.barcode)));
-      if (gone.length) {
-        // the numbers ARE the guard: a partial file shows a huge count and the manager backs out
-        const scary = gone.length > existingBy.size / 2;
-        const q = scary
-          ? `تحذير: الملف فيه ${rows.length} صنف بس، والنظام فيه ${existingBy.size}.\nلو كملت هيتشال ${gone.length} صنف — ده شكله ملف ناقص مش ملف الأصناف الكامل.\nمتأكد إنك عايز تشيلهم؟`
-          : `فيه ${gone.length} صنف موجودين في النظام ومش موجودين في الملف الجديد.\nنشيلهم عشان النظام يبقى مطابق للملف؟`;
-        if (confirm(q)) {
-          for (const p of gone) { await db.deleteProduct(p.barcode); removed++; }
-        }
-      }
-    }
+    if (existingBy) removed = await offerDeletions(existingBy, rows);
     const stamp = { at: Date.now(), rows: rows.length, by: identity };
     // merged locally too: the importing machine must show its own stamp even before (or without)
     // the server echoing it back through the config listener
@@ -1267,22 +1260,43 @@ $("import-file").onchange = async (e) => {
     toast(`اتسجل ${n} صنف وبعدين حصلت مشكلة — جرّب تاني`, "bad");
   }
   if (!$("screen-products").hidden) renderProducts();   // the screen behind the picker repaints now
-  e.target.value = "";
-};
+}
+
+/* What the file no longer carries may leave the catalog — but only behind a confirm whose
+   numbers ARE the guard: a partial file shows a huge count and the manager backs out. */
+async function offerDeletions(existingBy, rows) {
+  const inFile = new Set(rows.map(r => r.barcode));
+  const gone = [...existingBy.values()].filter(p => !inFile.has(String(p.barcode)));
+  if (!gone.length) return 0;
+  const scary = gone.length > existingBy.size / 2;
+  const q = scary
+    ? `تحذير: الملف فيه ${rows.length} صنف بس، والنظام فيه ${existingBy.size}.\nلو كملت هيتشال ${gone.length} صنف — ده شكله ملف ناقص مش ملف الأصناف الكامل.\nمتأكد إنك عايز تشيلهم؟`
+    : `فيه ${gone.length} صنف موجودين في النظام ومش موجودين في الملف الجديد.\nنشيلهم عشان النظام يبقى مطابق للملف؟`;
+  if (!confirm(q)) return 0;
+  let removed = 0;
+  for (const p of gone) { await db.deleteProduct(p.barcode); removed++; }
+  return removed;
+}
 
 /* ---------- stocktake sheet: barcode, name, system quantity ---------- */
 
 $("btn-import-stock").onclick = () => $("stock-file").click();
 $("stock-file").onchange = async (e) => {
   const file = e.target.files[0];
+  e.target.value = "";
   if (!file) return;
+  if (!stockBranch) { toast("اختار الفرع الأول"); return; }
+  await importStockFile(file, stockBranch);   // the chip, read before any await, owns the branch
+};
+
+async function importStockFile(file, branch) {
   // With a header row the columns can be in any order (theirs is الرصيد first); without one the
   // quantity is the last column, so a name with a comma in it still lands whole.
   let all, map;
   try {
     all = await sheetRows(file);
     map = requireColumns(all, ["qty", "barcode", "name"]);
-  } catch (err) { toast(err.message, "bad"); e.target.value = ""; return; }
+  } catch (err) { toast(err.message, "bad"); return; }
   const rows = (map ? all.slice(1) : all)
     .map(c => (map
       // the name is read for the report only — the catalog file owns names, units and prices,
@@ -1292,9 +1306,7 @@ $("stock-file").onchange = async (e) => {
       : { barcode: cell(c[0]), name: c.slice(1, -1).map(cell).join(" ").trim(),
           qty: parseInt(cell(c[c.length - 1]), 10) }))
     .filter(r => r.barcode && /\d/.test(r.barcode) && r.name && Number.isFinite(r.qty) && r.qty >= 0);
-  if (!rows.length) { toast("الملف مفيهوش صفوف صالحة — لازم: باركود، اسم، كمية"); e.target.value = ""; return; }
-  if (!stockBranch) { toast("اختار الفرع الأول"); e.target.value = ""; return; }
-  const branch = stockBranch;                    // a chip tapped mid-import must not move the rows
+  if (!rows.length) { toast("الملف مفيهوش صفوف صالحة — لازم: باركود، اسم، كمية"); return; }
   // The catalog is the reference: a barcode it does not know is reported, never created —
   // otherwise the stock sheet becomes a second catalog nobody curated. One full read per
   // import, the same price the catalog diff already pays on a daily file.
@@ -1325,8 +1337,31 @@ $("stock-file").onchange = async (e) => {
     toast(`اتسجل ${n} صنف وبعدين حصلت مشكلة — جرّب تاني`, "bad");
   }
   if (!$("screen-products").hidden) renderProducts();
-  e.target.value = "";
-};
+}
+
+/* ---------- auto-import: the folders are checked when the page opens ----------
+
+   The owner's chosen shape (2026-08-01): no service, no timer — «أول ما أفتح صفحة المدير يراجع
+   المجلدات، ولو فيه ملفات أحدث من آخر استيراد يستوردها تلقائيًا». The folders live under the one
+   root the shop already picked: «بيانات الأصناف» and «بيانات جرد <الفرع>». The newest file in
+   each is compared against the filesMeta stamp of its kind — the stamp is written at import
+   time, so it is always newer than the file it came from, and the same file never imports
+   twice. Nothing here deletes a source file: the stamp is what makes re-reading free. */
+
+let autoImported = false;
+async function autoImportFiles() {
+  if (autoImported || !canDo("import")) return;
+  autoImported = true;                        // once per page life, like keepFresh's reload
+  const jobs = [["بيانات الأصناف", "الأصناف", (f) => importCatalogFile(f)]];
+  for (const b of myBranches()) jobs.push([`بيانات جرد ${b}`, `جرد ${b}`, (f) => importStockFile(f, b)]);
+  for (const [folder, kind, run] of jobs) {
+    const files = (await listFiles(folder)).filter((f) => /\.(csv|txt|xlsx)$/i.test(f.name));
+    const newest = files.sort((a, b) => b.lastModified - a.lastModified)[0];
+    if (!newest) continue;
+    if (newest.lastModified <= (((window.APP_CONFIG.filesMeta || {})[kind] || {}).at || 0)) continue;
+    await run(newest.file);
+  }
+}
 
 /* ---------- keyboard: Enter does the obvious thing for the focused field ---------- */
 

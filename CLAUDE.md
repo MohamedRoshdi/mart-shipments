@@ -54,7 +54,7 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 | `sheet.js` | everything about reading a spreadsheet: `sheetRows` (**a real `.xlsx`** — zip walk + `DecompressionStream` — or CSV read field by field, quotes and all, and the only place that knows Excel writes Arabic as windows-1256), `headerMap` (columns by Arabic heading, so the shop's own export order works), **`requireColumns`** (the guard: no headings → positional, headings with a column missing → **throws in Arabic naming it**), `unitName` (unit **code** → word, `null` for a code the table does not know) and `unitCode` (the number itself, kept only when it is 1–5). Used by the catalog/stock import (manager) and the supplier import (admin) |
 | `style.css` | one stylesheet for all three pages |
 | `desktop/` | the Windows build: `main.js` (serves the repo root over `http://127.0.0.1` on a random port, plus the three IPC handlers), `preload.js` (the whole `window.mart` contract), `package.json` (electron + electron-builder, kept entirely in here so the repo no-build rule still holds for the web target). **Never loaded by the web version** |
-| `files.js` | where a file goes when it leaves the app: `window.mart` bridge → File System Access folder handle (IndexedDB, chosen once) → the `<a download>` that has always happened. Also `listFolder`/`readText` (what the ERP check will read back), `uniqueName`, `safeSegment`, and the single copy of `downloadBlob` |
+| `files.js` | where a file goes when it leaves the app: `window.mart` bridge → File System Access folder handle (IndexedDB, chosen once) → the `<a download>` that has always happened. Also `listFolder`/`readText` (what the ERP check will read back), `listFiles` (names + mtimes + the `File`s themselves — what the auto-import scans; in `?test=1` it reads the `test-datafiles` localStorage fixture), `uniqueName`, `safeSegment`, and the single copy of `downloadBlob` |
 | `version.js` | the release, in one place: `APP_NAME`, `VERSION`, `BUILD` and `versionLine()`. All three pages print it in a footer. `BUILD` is a literal on purpose — `new Date()` would print the day the page was *opened*, which looks like a build date and is not one |
 | `sw.js`, `manifest.json` | **one** installable PWA, on the main URL. `manager.html` and `admin.html` carry no manifest: the PIN routes people to their screen (`auth.landingPage`), and the home screen links to the other two. Dropped 2026-07-31 on the owner's call — a phone with three near-identical icons was the confusing part. |
 | `firebase-config.js` | Firebase keys **plus** `APP_CONFIG`: PINs (incl. `adminPin`), branches, shipment types, suppliers, label settings |
@@ -314,6 +314,17 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   the rest and says so in a `warn` toast. The owner updates ملف الأصناف first, then imports again.
   `saveProductName` only writes the keys it was given and `writeProduct` merges, so an import that
   has no price column leaves the price alone.
+- **The nightly import is the manager page opening, not a service** (the owner's own shape,
+  2026-08-01: «أول ما أفتح صفحة المدير يراجع المجلدات»). `autoImportFiles()` in `manager.js` runs
+  once per page life from `openManager()`, gated on the `import` permission: it lists
+  «بيانات الأصناف» and «بيانات جرد ‹الفرع›» (fixed subfolders of the ONE picked root — no second
+  picker), takes the newest `.csv/.txt/.xlsx` per folder, and imports it only when its mtime beats
+  the `filesMeta` stamp of its kind. The stamp is written at import time, so the same file never
+  imports twice, and **no source file is ever deleted** — the stamp is what makes re-reading free.
+  It calls the same `importCatalogFile`/`importStockFile` the buttons call, so the diff, the
+  refusals and the unknown-barcode report all apply unchanged. Suppliers stay manual: their import
+  writes `config/app`, and only the admin page owns that doc. **UNVERIFIED on a real machine**:
+  the FSA half needs the folder picked once in Chrome (same class as the D:\import write).
 - **A header-driven catalog import is a REPLACE, and the diff is what makes it affordable.**
   One `listAllProducts()` read per import (the owner's files are daily, 2026-08-01): rows
   identical to what is stored are **skipped** — a 10k-row daily file used to be 10k writes

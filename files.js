@@ -148,6 +148,34 @@ export async function listFolder(folder) {
   } catch { return []; }             // no such folder yet is not an error, it is "nothing there"
 }
 
+/* Auto-import needs more than names: the newest file wins, so the entry carries the mtime and
+   the File itself. File System Access only — the desktop bridge has no mtimes, and the machine
+   that runs this is Chrome on the website (the owner, 2026-08-01). In test mode the folder is a
+   localStorage fixture (`test-datafiles`), because Playwright cannot grant a directory picker. */
+export async function listFiles(folder) {
+  if (typeof location !== "undefined" && location.search.includes("test=1")) {
+    const all = JSON.parse(localStorage.getItem("test-datafiles") || "{}")[folder] || [];
+    return all.map((f) => ({
+      name: f.name,
+      lastModified: f.mtime,
+      file: { name: f.name, lastModified: f.mtime,
+        arrayBuffer: async () => new TextEncoder().encode(f.text).buffer },
+    }));
+  }
+  const root = await usableRoot(false);
+  if (!root) return [];
+  try {
+    const dir = await folderHandle(root, folder, false);
+    const out = [];
+    for await (const h of dir.values()) {
+      if (h.kind !== "file") continue;
+      const file = await h.getFile();
+      out.push({ name: h.name, lastModified: file.lastModified, file });
+    }
+    return out;
+  } catch { return []; }             // no such folder yet is not an error, it is "nothing there"
+}
+
 /** One file's text, or null when it is not there. This is what the ERP check reads back. */
 export async function readText(folder, name) {
   if (bridge()) return bridge().readText(folder, name).catch(() => null);

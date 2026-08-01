@@ -1240,6 +1240,43 @@ test('stocktake import: a barcode the catalog does not know is reported, never c
   expect(products['111']).toEqual({ name: 'لحمة بلدي', stock: { [branch]: 7 } });
 });
 
+/* The owner's chosen shape for the nightly import (2026-08-01): no service — opening the manager
+   page checks the data folders and imports anything newer than the last import's stamp. The
+   folders are a localStorage fixture here because Playwright cannot grant a directory picker;
+   the FSA half is the same UNVERIFIED class as the D:\import write itself. */
+test('auto-import: opening the manager page imports a data file newer than the stamp', async ({ page }) => {
+  await page.goto('/manager.html?test=1');
+  await page.evaluate(() => {
+    const branch = window.APP_CONFIG.branches[0].name;
+    localStorage.setItem('test-products', JSON.stringify({ '111': 'لحمة بلدي' }));
+    // the catalog stamp is OLDER than its file (imports), the stock stamp NEWER (skips)
+    localStorage.setItem('test-config', JSON.stringify({
+      filesMeta: { 'الأصناف': { at: 1000, rows: 1, by: 'قديم' }, [`جرد ${branch}`]: { at: 9e12, rows: 1, by: 'قديم' } },
+    }));
+    localStorage.setItem('test-datafiles', JSON.stringify({
+      'بيانات الأصناف': [
+        { name: 'catalog-old.csv', mtime: 500, text: 'كود الصنف,الوحدة,اسم الصنف\n111,2,اسم قديم\n' },
+        { name: 'catalog-new.csv', mtime: 2000, text: 'كود الصنف,الوحدة,اسم الصنف\n111,2,لحمة بلدي طازة\n' },
+      ],
+      [`بيانات جرد ${branch}`]: [
+        { name: 'stock.csv', mtime: 3000, text: 'الرصيد,كود الصنف,الوحدة,اسم الصنف\n7,111,2,لحمة\n' },
+      ],
+    }));
+  });
+  await page.reload();
+  await page.fill('#pin-input', await page.evaluate(() => window.APP_CONFIG.managerPin));
+  await page.click('#btn-pin');
+  // the NEWEST catalog file won, and only it: the old name never lands
+  await expect(page.locator('#toast')).toContainText('تم استيراد 1 صنف');
+  const products = await page.evaluate(() => JSON.parse(localStorage.getItem('test-products')));
+  expect(products['111'].name).toBe('لحمة بلدي طازة');
+  expect(products['111'].stock).toBeUndefined();          // the stale stock file was skipped
+  // and the stamp moved, so a reload does not import the same file again
+  const meta = await page.evaluate(() => window.APP_CONFIG.filesMeta['الأصناف']);
+  expect(meta.rows).toBe(1);
+  expect(meta.at).toBeGreaterThan(2000);
+});
+
 test('the same barcode shows each branch its own quantity', async ({ page }) => {
   await page.goto('/?test=1');
   const names = await page.evaluate(() => window.APP_CONFIG.branches.map(b => b.name));
