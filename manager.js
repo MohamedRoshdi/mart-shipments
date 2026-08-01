@@ -251,26 +251,43 @@ const lastMonth = () => {
   return monthOf(new Date(d.getFullYear(), d.getMonth() - 1, 1).getTime());
 };
 
+/* The list is LIVE (2026-08-02, the owner: a phone's shipment must reach the open laptop by
+   itself). loadMonth subscribes instead of reading: the first snapshot resolves it — so the
+   callers' await works exactly as before — and every later one repaints the list in place.
+   Switching months (or re-running the empty-view fallback) drops the old listeners first. */
+let unwatch = [];
+
+// resolves on the first delivery; every later one repaints. `start` is (cb) => Promise<unsub>.
+const feed = (start, apply) => new Promise((resolve) => {
+  let first = true;
+  start((rows) => {
+    apply(rows);
+    if (first) { first = false; resolve(); return; }
+    renderList();
+  }).then(u => unwatch.push(u)).catch((e) => { console.error(e); resolve(); });
+});
+
 async function loadMonth() {
+  for (const u of unwatch.splice(0)) u();
+  // never hold a branch this user may not see: the filter runs before anything is painted
+  const scoped = rows => (scopes.length ? rows.filter(r => scopes.includes(r.branch)) : rows);
+  let shipNow = [], shipPrev = [], cnt = [];
+  const put = () => { all = [...shipNow, ...shipPrev]; counts = cnt; };
+  const jobs = [];
   if (openView()) {
     /* This month AND last. An unfinished shipment must not vanish at midnight on the 1st, and two
-       bounded reads are still nothing like reading every month ever saved. Anything older than
+       bounded queries are still nothing like reading every month ever saved. Anything older than
        that is the archive — «كل الشهور» finds it. */
-    const [a, b] = await Promise.all([
-      db.listShipments(monthOf(Date.now())).catch(() => []),
-      db.listShipments(lastMonth()).catch(() => []),
-    ]);
-    all = [...a, ...b];
-    counts = canDo("count") ? await db.listCounts(monthOf(Date.now())).catch(() => []) : [];
+    jobs.push(feed(cb => db.watchShipments(monthOf(Date.now()), cb), rows => { shipNow = scoped(rows); put(); }));
+    jobs.push(feed(cb => db.watchShipments(lastMonth(), cb), rows => { shipPrev = scoped(rows); put(); }));
+    if (canDo("count"))
+      jobs.push(feed(cb => db.watchCounts(monthOf(Date.now()), cb), rows => { cnt = scoped(rows); put(); }));
   } else {
-    all = await db.listShipments(month).catch(() => []);
-    counts = canDo("count") ? await db.listCounts(month).catch(() => []) : [];
+    jobs.push(feed(cb => db.watchShipments(month, cb), rows => { shipNow = scoped(rows); shipPrev = []; put(); }));
+    if (canDo("count"))
+      jobs.push(feed(cb => db.watchCounts(month, cb), rows => { cnt = scoped(rows); put(); }));
   }
-  // never hold a branch this user may not see: the filter runs before anything is painted
-  if (scopes.length) {
-    all = all.filter(s => scopes.includes(s.branch));
-    counts = counts.filter(c => scopes.includes(c.branch));
-  }
+  await Promise.all(jobs);
 }
 
 $("month-pick").onchange = async () => {
@@ -1190,7 +1207,9 @@ const productRow = (c, map) => (map
     name: cell(c[map.name]),
     unit: unitName(map.unit !== undefined ? c[map.unit] : ""),
     unitCode: map.unit !== undefined ? unitCode(c[map.unit]) : null,
-    price: map.price !== undefined ? Number(cell(c[map.price])) : NaN,
+    // an EMPTY price cell is «no price», never 0 — Number("") is 0, and a stored 0 prints
+    // «0.00» on the shelf label (25 such rows in the real catalog file, measured 2026-08-02)
+    price: map.price !== undefined && cell(c[map.price]) !== "" ? Number(cell(c[map.price])) : NaN,
     factor: map.factor !== undefined ? Number(cell(c[map.factor])) : NaN,
   }
   : { barcode: cell(c[0]), name: nameOf(c), unit: unitOf(c), unitCode: null, price: NaN, factor: NaN });

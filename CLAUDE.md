@@ -503,7 +503,19 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   out of a TXT must not leave the shipment marked «تم تحميلها».
   Test-mode trap: `_id` is `String(createdAt)`, so two fixtures created in the same millisecond
   share an id and each is skipped as "itself". Seed twins with different timestamps.
-- **`config/app` is the one live listener in the app, and admin.js deliberately has none.**
+- **The manager's list is live** (2026-08-02, the owner: a phone's shipment must reach the open
+  laptop by itself). `loadMonth()` in `manager.js` SUBSCRIBES instead of reading:
+  `db.watchShipments(month, cb)` / `watchCounts` are `monthly()` as onSnapshot — first snapshot
+  resolves the await (so the boot flow is unchanged), every later one repaints `renderList()`.
+  Month switches and the empty-view fallback drop the old listeners first (`unwatch`). Errors
+  deliver `[]` AND the db-error toast, so a caller awaiting the first snapshot never hangs.
+  Cost: what the one-shot read already cost, plus one read per actual change — the watchConfig
+  arithmetic. In `?test=1` it relays the `storage` event, and the listener test dispatches a
+  synthetic `StorageEvent` (same-tab writes never fire the real one).
+- **An empty price cell is «no price», never 0.** `Number("")` is `0`, and a stored 0 prints
+  «0.00» on the shelf label — the real catalog file carries 25 such rows (measured 2026-08-02).
+  `productRow` in `manager.js` maps an empty price cell to `NaN`, which `saveProductName` drops.
+- **`config/app` is the one CONFIG listener in the app, and admin.js deliberately has none.**
   `db.watchConfig(cb)` is an `onSnapshot` that fires once immediately from the cache and again on
   every change, so a permission, a branch, a supplier or a shipment type edited on another machine
   reaches a phone in seconds. `app.js` and `manager.js` re-merge and repaint **only what is derived
@@ -811,6 +823,17 @@ debounce, or it reports false negatives.
   proven server-side**. Re-run that script after the reset before believing they work in the shop.
   The first symptom was a live script hanging for twelve minutes on a write it awaited: a backed-off
   write does not fail, it waits.
+  **Exhausted again 2026-08-01 ~21:14 UTC (measured: a single REST page read answered 429)** — the
+  owner's first real working day: one catalog import is ~10k writes and one `listAllProducts` read,
+  each جرد import is up to ~9.5k writes plus a full read, and he ran several. 10,068 + 2×9,550 is
+  past the 20k/day write cap by arithmetic alone. Every complaint he filed that evening traces to
+  it: the جرد report named codes the (half-landed) catalog didn't hold yet, the deletion offer
+  counted stale rows the file-side logic never wrote, the labels missed prices whose writes never
+  landed, and the phone's shipments sat in its local cache while the laptop read nothing new. The
+  files themselves are clean — `scratchpad/audit-real-files.mjs` ran the real exports through the
+  importers: 10,088 importable, 0 unit-refused, both جرد files 100% covered by the catalog file.
+  After a reset, ONE import of each file in order (الأصناف first, then the two جردs) fits the
+  budget; the diff makes every re-import of an unchanged file nearly free.
 - **Every write in the app is fire-and-forget except `saveConfig`, and that is load-bearing.**
   `markLoaded` awaited its `updateDoc` when it was first written, which put the file the manager is
   waiting for behind a server ack — twelve minutes of it while the quota was exhausted, and for

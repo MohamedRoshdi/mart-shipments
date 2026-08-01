@@ -69,6 +69,40 @@ export async function listShipments(month) {
   return monthly('shipments', month);
 }
 
+/* The manager's list, live: the same month query as `monthly`, but through onSnapshot, so a
+   shipment saved on a phone lands on the always-open laptop without anyone reloading («تظهر
+   مباشرة على باقي الأجهزة», the owner 2026-08-02). Costs what the one-shot read already cost
+   plus one read per actual change — the same arithmetic that justified watchConfig. Fires once
+   immediately (cache first), errors surface as db-error AND deliver an empty list, so a caller
+   awaiting the first snapshot is never left hanging. */
+const watchMonthly = async (name, month, cb) => {
+  await live();
+  const span = monthRange(month);
+  return fs.onSnapshot(fs.query(fs.collection(dbRef, name),
+    ...(span ? [fs.where('createdAt', '>=', span[0]), fs.where('createdAt', '<', span[1])] : []),
+    fs.orderBy('createdAt', 'desc')),
+  (snap) => cb(snap.docs.map((d) => ({ ...d.data(), _id: d.id }))),
+  (e) => { dispatchEvent(new CustomEvent('db-error', { detail: e })); cb([]); });
+};
+
+// test mode mirrors watchConfig: fire once from localStorage, then relay another tab's writes
+const watchLs = (key, month, cb) => {
+  const relay = (e) => { if (e.key === key) cb(lsMonth(key, month)); };
+  addEventListener('storage', relay);
+  cb(lsMonth(key, month));
+  return () => removeEventListener('storage', relay);
+};
+
+export async function watchShipments(month, cb) {
+  if (TEST_MODE) return watchLs('test-shipments', month, cb);
+  return watchMonthly('shipments', month, cb);
+}
+
+export async function watchCounts(month, cb) {
+  if (TEST_MODE) return watchLs('test-counts', month, cb);
+  return watchMonthly('counts', month, cb);
+}
+
 export async function updateShipment(id, data) {
   if (TEST_MODE) {
     const all = lsArr('test-shipments').map((s) =>

@@ -1321,11 +1321,14 @@ test('catalog import reads «أخر سعر بيع», the ERP\'s own spelling of 
     name: 'بيانات الاصناف.txt', mimeType: 'text/plain',
     buffer: Buffer.from(
       'كود الصنف\tالوحدة\tاسم الصنف\tمعامل التحويل\tأخر سعر بيع\r\n'
-      + '111\t1\tمربى فراولة\t1.00000\t34.95000\r\n', 'utf8'),
+      + '111\t1\tمربى فراولة\t1.00000\t34.95000\r\n'
+      + '222\t1\tصنف من غير سعر\t1.00000\t\r\n', 'utf8'),
   });
-  await expect(page.locator('#toast')).toContainText('تم استيراد 1 صنف');
+  await expect(page.locator('#toast')).toContainText('تم استيراد 2 صنف');
   const products = await page.evaluate(() => JSON.parse(localStorage.getItem('test-products')));
   expect(products['111']).toEqual({ name: 'مربى فراولة', unit: 'قطعة', unitCode: 1, price: 34.95 });
+  // an empty price cell is «no price», never 0 — a stored 0 would print «0.00» on the label
+  expect(products['222']).toEqual({ name: 'صنف من غير سعر', unit: 'قطعة', unitCode: 1 });
 });
 
 /* The owner's chosen shape for the nightly import (2026-08-01): no service — opening the manager
@@ -2873,6 +2876,22 @@ test('settings arrive live, with no reload', async ({ page }) => {
   });
   await expect(page.locator('#type-filter button')).toHaveCount(before + 1);
   await expect(page.locator('#type-filter')).toContainText('إذن تحويل مخزن');
+});
+
+// the list is live too (2026-08-02): a shipment written by another device shows up unprompted
+test('a shipment from another device lands on the open manager list, no reload', async ({ page }) => {
+  await openManagerPage(page);
+  await expect(page.locator('#all-shipments li')).toHaveCount(1);
+  await page.evaluate(() => {
+    const rows = JSON.parse(localStorage.getItem('test-shipments') || '[]');
+    rows.push({ name: 'شحنة من الموبايل', createdBy: 'سعيد', createdAt: Date.now(),
+      branch: 'فرع قويسنا', type: 'إذن استلام',
+      items: [{ barcode: '111', name: 'لبن', qty: 2 }] });
+    localStorage.setItem('test-shipments', JSON.stringify(rows));
+    dispatchEvent(new StorageEvent('storage', { key: 'test-shipments' }));
+  });
+  await expect(page.locator('#all-shipments li')).toHaveCount(2);
+  await expect(page.locator('#all-shipments')).toContainText('شحنة من الموبايل');
 });
 
 test('تم تحميلها: the export marks it, and somebody else has to confirm a second load', async ({ page }) => {
