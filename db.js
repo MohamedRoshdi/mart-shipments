@@ -469,18 +469,12 @@ export async function saveProductName(barcode, name, extra = {}) {
   });
 }
 
-// One branch's sheet: barcode, name, quantity — and the unit when that sheet carried one, which
-// the ERP's stock export does. The write is a merge on the branch key, so importing شبين الكوم
-// never touches what قويسنا imported.
-export async function saveProductRow(barcode, name, qty, branch, extra = {}) {
-  const { unit, unitCode } = extra;
-  const patch = {
-    name,
-    ...(unit ? { unit } : {}),
-    ...(Number.isFinite(unitCode) ? { unitCode } : {}),
-  };
-  if (!Number.isFinite(qty) || !branch) return writeProduct(barcode, patch);
-  return writeProduct(barcode, { ...patch, stock: { [branch]: qty } });
+// One branch's sheet writes ONE thing: the quantity, under that branch's key. The catalog file
+// is the reference for names, units and prices (the owner, 2026-08-01) — a stock sheet touches
+// none of them, and the importer reports a barcode the catalog does not know instead of creating
+// it. The write is a merge on the branch key, so importing شبين الكوم never touches قويسنا.
+export async function saveProductRow(barcode, qty, branch) {
+  return writeProduct(barcode, { stock: { [branch]: qty } });
 }
 
 async function writeProduct(barcode, patch) {

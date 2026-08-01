@@ -1285,26 +1285,41 @@ $("stock-file").onchange = async (e) => {
   } catch (err) { toast(err.message, "bad"); e.target.value = ""; return; }
   const rows = (map ? all.slice(1) : all)
     .map(c => (map
+      // the name is read for the report only — the catalog file owns names, units and prices,
+      // and a stock sheet writes nothing but the quantity (the owner, 2026-08-01)
       ? { barcode: cell(c[map.barcode]), name: cell(c[map.name]),
-          qty: parseInt(cell(map.qty !== undefined ? c[map.qty] : ""), 10),
-          // the ERP's stock export carries the unit too; writeProduct merges, so it is safe to
-          // carry across — but only when the column is there, or a stock file would blank it
-          unit: unitName(map.unit !== undefined ? c[map.unit] : "") || "",
-          unitCode: map.unit !== undefined ? unitCode(c[map.unit]) : null }
+          qty: parseInt(cell(map.qty !== undefined ? c[map.qty] : ""), 10) }
       : { barcode: cell(c[0]), name: c.slice(1, -1).map(cell).join(" ").trim(),
-          qty: parseInt(cell(c[c.length - 1]), 10), unit: "", unitCode: null }))
+          qty: parseInt(cell(c[c.length - 1]), 10) }))
     .filter(r => r.barcode && /\d/.test(r.barcode) && r.name && Number.isFinite(r.qty) && r.qty >= 0);
   if (!rows.length) { toast("الملف مفيهوش صفوف صالحة — لازم: باركود، اسم، كمية"); e.target.value = ""; return; }
   if (!stockBranch) { toast("اختار الفرع الأول"); e.target.value = ""; return; }
   const branch = stockBranch;                    // a chip tapped mid-import must not move the rows
+  // The catalog is the reference: a barcode it does not know is reported, never created —
+  // otherwise the stock sheet becomes a second catalog nobody curated. One full read per
+  // import, the same price the catalog diff already pays on a daily file.
+  let known;
+  try { known = new Set((await db.listAllProducts()).map(p => p.barcode)); }
+  catch (err) { console.error(err); toast("مقدرناش نقرا الأصناف — جرّب تاني", "bad"); e.target.value = ""; return; }
+  const missing = rows.filter(r => !known.has(r.barcode));
+  const found = rows.filter(r => known.has(r.barcode));
   let n = 0;
   try {
-    for (const r of rows) { await db.saveProductRow(r.barcode, r.name, r.qty, branch, r); n++; }
+    for (const r of found) { await db.saveProductRow(r.barcode, r.qty, branch); n++; }
     const stamp = { at: Date.now(), rows: n, by: identity };
     window.APP_CONFIG.filesMeta = { ...(window.APP_CONFIG.filesMeta || {}), [`جرد ${branch}`]: stamp };
     db.stampFile(`جرد ${branch}`, stamp).catch(console.error);
-    db.logAction(identity, "استيراد كميات الجرد", `${n} صنف · ${branch}`);
-    toast(`تم استيراد كميات ${n} صنف لـ${branch}`, "ok");
+    db.logAction(identity, "استيراد كميات الجرد",
+      `${n} صنف · ${branch}${missing.length ? ` · ${missing.length} مش في الأصناف` : ""}`);
+    if (missing.length) {
+      // the report the owner asked for: he updates ملف الأصناف first, then imports again
+      download(`جرد ${branch} — مش في الأصناف.csv`,
+        csvText([["الباركود", "اسم الصنف", "الكمية"], ...missing.map(r => [r.barcode, r.name, r.qty])]),
+        "text/csv");
+      toast(`اتسجل كميات ${n} صنف · ${missing.length} مش في الأصناف — التقرير اتحمّل`, "warn");
+    } else {
+      toast(`تم استيراد كميات ${n} صنف لـ${branch}`, "ok");
+    }
   } catch (err) {
     console.error(err);
     toast(`اتسجل ${n} صنف وبعدين حصلت مشكلة — جرّب تاني`, "bad");

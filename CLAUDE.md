@@ -61,7 +61,7 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 | `firestore.rules` | shape validation; the only server-side guard that exists |
 | `SETUP.md` | Arabic guide for the shop owner |
 | `products-template.csv`, `stock-template.csv`, `suppliers-template.csv` | the three import shapes, **each one exactly what the ERP exports**: «كود الصنف، الوحدة، اسم الصنف، معامل التحويل»، «الرصيد، كود الصنف، الوحدة، اسم الصنف»، «كود المورد، اسم المورد» |
-| `tests/app.spec.js` | 88 Playwright tests, all in localStorage mode |
+| `tests/app.spec.js` | 102 Playwright tests, all in localStorage mode |
 | `scripts/*.mjs` | live checks and screenshot helpers (see below) |
 
 ## Data model
@@ -80,6 +80,17 @@ released in `firestore.rules` so the first write is not a 403; `erpState()` read
 `sys` what the imported sheet says the system holds. **`sys` is absent when the sheet never
 listed that product** — writing 0 would claim the system said zero. No `type`: a count is
 not a kind of shipment.
+
+`print_jobs/{auto}` — a saved label queue (مهام الطباعة): `name`, `createdBy`, `createdAt`,
+`items: [{barcode, name, price, copies}]` (`price` the typed string, may be empty), and two
+optional stamp pairs — `readyBy`/`readyAt` («جاهزة للطباعة») and `printedBy`/`printedAt`
+(«تمت طباعتها»). **Absence is the state**, exactly like «تم تحميلها»: no pair means «جديدة»,
+and `jobState()` in `app.js` is the only place the three names are decided. Jobs are saved
+from the label screen («حفظ كمهمة طباعة»), listed behind the «مهام الطباعة» home card (the
+`label` permission gates both), and printing from the job screen goes through the same
+`printRows()` path as the label screen — the tap IS the receipt, a reprint overwrites the
+pair, and the job stays after printing on purpose. `listJobs()` is one unbounded read:
+a shop holds dozens of jobs, not years of them.
 
 `expiry/{auto}` — one row per product **and date** (الصلاحيات): `barcode`, `name`, `qty`,
 `day`, `month`, `year`, `branch`, `createdBy`, `createdAt`. **A month is never stored.**
@@ -143,6 +154,9 @@ Rules in force (all live-tested):
   `createdBy`, `createdAt` and **`branch` are immutable** (403 on any attempt). A re-load is an
   ordinary overwrite of the two loaded keys — the audit trail, not the doc, is what keeps the history.
 - delete: allowed on both collections (the owner asked for it).
+- `print_jobs`: create with the four keys only (a new job is always «جديدة»), `items` ≤ 200,
+  `name` ≤ 100; update may add the two stamp pairs and change name/items — `createdBy` and
+  `createdAt` immutable; delete allowed. Deployed 2026-08-01.
 - `counts`: the same shape as `shipments` minus `type`, `items` ≤ 500; `createdBy`,
   `createdAt` and `branch` immutable on update; delete allowed.
 - `expiry`: create/delete open; `qty > 0`, `day` 1–31, `month` 1–12, `year` 2000–2100;
@@ -292,7 +306,12 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   sheet said nothing and **`null`** when it gave a code outside 1–5; the catalog import drops the
   `null` rows, says how many and names the first three barcodes. Telling the two apart is the whole
   point: a missing column must leave the unit alone.
-- **A stock sheet must never wipe the price, and a catalog sheet must never wipe the stock.**
+- **A stock sheet writes the quantity and nothing else, and a catalog sheet must never wipe the
+  stock.** The catalog file is the reference for names, units and prices (the owner, 2026-08-01:
+  «ملف الأصناف هو المرجع الأساسي») — `db.saveProductRow` takes barcode + qty + branch only, and a
+  barcode the catalog does not know is **reported, never created**: the stock importer does one
+  `listAllProducts()` read, writes the known rows, downloads «جرد ‹الفرع› — مش في الأصناف.csv» for
+  the rest and says so in a `warn` toast. The owner updates ملف الأصناف first, then imports again.
   `saveProductName` only writes the keys it was given and `writeProduct` merges, so an import that
   has no price column leaves the price alone.
 - **A header-driven catalog import is a REPLACE, and the diff is what makes it affordable.**
@@ -597,7 +616,7 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
 ## Commands
 
 ```bash
-npx playwright test                 # 88 tests, localStorage mode, ~40s
+npx playwright test                 # 102 tests, localStorage mode, ~45s
 node scripts/desktop-check.cjs      # 18 checks of desktop/main.js with electron stubbed out — the
                                     # path guards and the local server, no 200 MB download needed
 npx playwright test -g "catalog"    # one group

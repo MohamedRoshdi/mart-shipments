@@ -1176,6 +1176,9 @@ const NO_COUNT = { name: 'سيد', pin: '2233', branches: ['فرع قويسنا'
 
 test('stocktake sheet import writes the quantity under the branch it was imported for', async ({ page }) => {
   await openManagerPage(page);
+  // the catalog is the reference: only barcodes it already knows take a quantity
+  await page.evaluate(() => localStorage.setItem('test-products', JSON.stringify(
+    { '6221031250057': 'لبن المراعي', '6224000123456': 'جبنة بيضاء' })));
   const names = await page.evaluate(() => window.APP_CONFIG.branches.map(b => b.name));
   await page.click(`#stock-branch button[data-stockbranch="${names[0]}"]`);
   await page.setInputFiles('#stock-file', 'tests/fixtures/stock.csv');
@@ -1208,6 +1211,33 @@ test('stocktake sheet import writes the quantity under the branch it was importe
   const csv = require('fs').readFileSync(await exp.path(), 'utf8');
   expect(csv).toContain(`"الكمية في ${names[1]}"`);
   expect(csv).toContain('"6221031250057","لبن المراعي 1 لتر","3"');
+});
+
+// The catalog file is the reference (the owner, 2026-08-01): a stock sheet must never create a
+// product. An unknown barcode lands in a downloaded report instead, so the owner updates ملف
+// الأصناف first and imports again — and the known rows still take their quantities.
+test('stocktake import: a barcode the catalog does not know is reported, never created', async ({ page }) => {
+  await openManagerPage(page);
+  await page.evaluate(() => localStorage.setItem('test-products', JSON.stringify({ '111': 'لحمة بلدي' })));
+  await page.click('#stock-branch button');
+  const [dl] = await Promise.all([
+    page.waitForEvent('download'),
+    page.setInputFiles('#stock-file', {
+      name: 'stock.csv',
+      mimeType: 'text/csv',
+      buffer: Buffer.from(
+        'الرصيد,كود الصنف,الوحدة,اسم الصنف\n'
+        + '7,111,2,لحمة بلدي\n'
+        + '9,999888777,1,صنف مش في الأصناف\n', 'utf8'),
+    }),
+  ]);
+  await expect(page.locator('#toast')).toContainText('اتسجل كميات 1 صنف · 1 مش في الأصناف');
+  const report = require('fs').readFileSync(await dl.path(), 'utf8');
+  expect(report).toContain('"999888777","صنف مش في الأصناف","9"');
+  const products = await page.evaluate(() => JSON.parse(localStorage.getItem('test-products')));
+  expect(products['999888777']).toBeUndefined();                     // reported, not created
+  const branch = await page.evaluate(() => window.APP_CONFIG.branches[0].name);
+  expect(products['111']).toEqual({ name: 'لحمة بلدي', stock: { [branch]: 7 } });
 });
 
 test('the same barcode shows each branch its own quantity', async ({ page }) => {
