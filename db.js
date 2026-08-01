@@ -554,7 +554,9 @@ export async function saveJob(job) {
 export async function listJobs() {
   if (TEST_MODE) return lsMonth("test-jobs", null);
   await live();
-  const snap = await fs.getDocs(fs.query(fs.collection(dbRef, "print_jobs"), fs.orderBy("createdAt", "desc")));
+  // newest 200: jobs persist for reprint, so without a cap this read grows for ever. 200 is months
+  // of shop work; anything older is archive nobody reprints, and حذف exists for real cleanup.
+  const snap = await fs.getDocs(fs.query(fs.collection(dbRef, "print_jobs"), fs.orderBy("createdAt", "desc"), fs.limit(200)));
   return snap.docs.map((d) => ({ ...d.data(), _id: d.id }));
 }
 
