@@ -12,7 +12,6 @@ const $ = (id) => document.getElementById(id);
 const esc = (t) => { const d = document.createElement("div"); d.textContent = t; return d.innerHTML; };
 const escAttr = (t) => esc(t).replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 const branches = () => window.APP_CONFIG.branches;
-const branchByName = (n) => branches().find(b => b.name === n);
 const myName = () => localStorage.getItem("employeeName");
 const myBranch = () => localStorage.getItem("employeeBranch") || branches()[0].name;
 const fmtDate = (ts) => new Date(ts).toLocaleDateString("ar-EG");
@@ -30,7 +29,6 @@ $("version-line").textContent = versionLine();
 
 const TITLES = {
   "screen-login": "العائلة مارت",
-  "screen-name": "بيانات الموظف",
   "screen-home": "شغل النهارده",   // the home shows today only, and the title says so
   "screen-new": "شحنة جديدة",
   "screen-expiry": "الصلاحيات",
@@ -70,7 +68,7 @@ function render(id) {
   if (slot) $(slot).append($("scan-block"));       // move, never copy: one camera, one set of controls
   $("scan-block").hidden = !slot;
   $("screen-title").textContent = (id === "screen-new" && counting()) ? "جرد" : (TITLES[id] || "شحنات المحل");
-  $("btn-back").hidden = id === "screen-home" || id === "screen-login" || (id === "screen-name" && !myName());
+  $("btn-back").hidden = id === "screen-home" || id === "screen-login";
   $("btn-cam").hidden = !(id === "screen-home" || id === "screen-new" || id === "screen-expiry" || id === "screen-label");
   $("who").hidden = !myName() || id !== "screen-home";
   if (myName()) $("who").textContent = `${myName()} · ${myBranch()}`;
@@ -98,6 +96,11 @@ const thisMonth = () => {
 
 async function goHome() {
   await stopScan();
+  if (!auth.session()) {          // expired mid-use: back to the door, not a home with no buttons
+    history.replaceState({ screen: "screen-login" }, "");
+    render("screen-login");
+    return;
+  }
   state.editingId = null;
   state.mode = "ship";
   render("screen-home");
@@ -131,8 +134,9 @@ async function renderMyCounts() {
     </li>`).join("") || `<li class="empty">مفيش جرد النهارده — ابدأ بـ «جرد»</li>`;
 }
 
-// no session at all = the old single-PIN setup, where everything was allowed
-const canDo = (perm) => !auth.session() || auth.can(perm);
+// signing in is mandatory now, so no session means an EXPIRED one — deny, never grant.
+// (the old `!session || can` was the pre-users fallback, and it handed a dead session everything)
+const canDo = (perm) => auth.can(perm);
 
 function renderHomeLinks() {
   const s = auth.session();
@@ -148,7 +152,6 @@ function renderHomeLinks() {
   $("btn-label").hidden = !canDo("label");
   $("btn-jobs").hidden = !canDo("label");
   $("counts-block").hidden = !canDo("count");
-  $("who").disabled = !!s;                 // a signed-in user changes their name from the admin page
 }
 
 $("btn-logout").onclick = () => {
@@ -161,27 +164,15 @@ $("btn-logout").onclick = () => {
 
 addEventListener("popstate", (ev) => {
   const id = (ev.state && ev.state.screen) || "screen-home";
-  if (id === "screen-home") goHome(); else render(id);
+  // a history entry can name a screen an older version had (screen-name died in 1.0.74) — home, not a crash
+  if (id === "screen-home" || !document.getElementById(id)) goHome(); else render(id);
 });
 
 $("btn-back").onclick = () => history.back();
-$("who").onclick = () => navTo("screen-name");
 
-/* ---------- employee + branch setup ---------- */
+/* ---------- signing in ---------- */
 
 const shortBranch = (b) => b.replace(/^فرع\s+/, ""); // chips stay one line; stored value keeps "فرع"
-
-function renderBranchPicker() {
-  $("branch-picker").innerHTML = branches().map(b =>
-    `<button type="button" data-branch="${esc(b.name)}" aria-pressed="${b.name === state.branch}">${esc(shortBranch(b.name))}</button>`).join("");
-}
-
-$("branch-picker").onclick = (e) => {
-  const btn = e.target.closest("button[data-branch]");
-  if (!btn) return;
-  state.branch = btn.dataset.branch;
-  renderBranchPicker();
-};
 
 const CODE_ADMIN_PIN = window.APP_CONFIG.adminPin;   // captured before the stored config wins
 
@@ -214,17 +205,6 @@ $("btn-login").onclick = async () => {
   const page = auth.landingPage(who.perms);
   if (!page) { toast("المستخدم ده مالوش شاشة يفتحها — كلّم الأدمن"); return; }
   auth.goTo(page);                           // manager or admin, per their permissions
-};
-
-$("save-name").onclick = () => {
-  const n = $("employee-name").value.trim();
-  if (!n) { toast("اكتب اسمك الأول"); return; }
-  const branch = branchByName(state.branch);
-  if (!branch) { toast("اختار الفرع الأول"); return; }
-  localStorage.setItem("employeeName", n);
-  localStorage.setItem("employeeBranch", branch.name);
-  history.replaceState({ screen: "screen-home" }, "");
-  goHome();
 };
 
 /* ---------- building a shipment ---------- */
@@ -778,9 +758,9 @@ function openLabel(barcode) {
 $("btn-label").onclick = () => openLabel();
 
 // #label=<barcode> is the link the manager's catalog row points at. It is read from goHome, so
-// it works whether the app booted straight into the home screen or asked for a name first, and
-// it is consumed once: the hash goes before the screen opens, otherwise every later trip home
-// would jump back to the label.
+// it survives the login screen (the hash stays put while the PIN is typed), and it is consumed
+// once: the hash goes before the screen opens, otherwise every later trip home would jump back
+// to the label.
 function openDeepLabel() {
   const deep = location.hash.match(/^#label=(.+)$/);
   if (!deep) return;
@@ -1299,7 +1279,6 @@ function beep() {
 
 const ENTER = {
   "login-pin": "btn-login",
-  "employee-name": "save-name",
   "barcode-input": "btn-lookup",
   "item-qty": "btn-add-item",
   "item-date": "btn-add-item",
@@ -1333,16 +1312,11 @@ cfgReady = (async () => {
   const ok = await db.initDb().then(() => true).catch((e) => { console.error(e); return false; });
   dbBroken = !ok;
   updateSync();
-  // branches, PINs, types and users the admin edited win over the ones shipped in the code.
-  // cfgRead is what tells «the shop has no users» apart from «the read failed»: a failed read
-  // used to fall back to the code config, see zero users, and open the no-PIN name screen —
-  // which is exactly the «بيانات الموظف» door the owner asked to close (2026-08-01).
-  let cfgRead = false;
-  Object.assign(window.APP_CONFIG, await db.getConfig().then((c) => { cfgRead = true; return c; }).catch(() => ({})));
+  // branches, PINs, types and users the admin edited win over the ones shipped in the code
+  Object.assign(window.APP_CONFIG, await db.getConfig().catch(() => ({})));
   applyBrand(window.APP_CONFIG);
   state.branch = myBranch();
   if (!types().includes(state.type)) state.type = types()[0];
-  renderBranchPicker();
 
   /* From here the settings are live: a permission, a branch or a supplier the admin changes on
      another machine reaches this phone in seconds instead of at the next reload. Only what is
@@ -1356,16 +1330,12 @@ cfgReady = (async () => {
     const cat = (cfg.filesMeta || {})["الأصناف"];
     if (cat && cat.at) db.dropCatalogIndexIfOlder(cat.at);
     if (!allowedBranches().includes(state.branch)) state.branch = allowedBranches()[0];
-    renderBranchPicker();
+    renderNewBranch();
     renderSuppliers();
     $("supplier-dl").innerHTML = "";     // the expiry datalist refills from the fresh list next open
   }).catch(console.error);
 
   const s = auth.session();
-  // the name screen exists only for a shop that has truly never created a user — a config that
-  // could not be read does not count as that shop, it gets the PIN screen (the admin PIN in the
-  // code still works there, so a broken read can never lock anyone out)
-  const needPin = (window.APP_CONFIG.users || []).length > 0 || !cfgRead;
   if (s && s.user && s.perms.includes("emp") && !myName()) {
     // signed in on another page and sent here: don't ask for the PIN a second time
     localStorage.setItem("employeeName", s.name);
@@ -1377,16 +1347,16 @@ cfgReady = (async () => {
     const page = auth.landingPage(s.perms);
     if (page && page !== "index.html") { auth.goTo(page); return; }
   }
-  if ((s || !needPin) && myName()) {
+  /* One door (the owner, 2026-08-01: «اللينك الرئيسي يفتح دائمًا على صفحة تسجيل الدخول»):
+     the PIN screen, always. The old «بيانات الموظف» name screen is gone — it resurfaced every
+     time the users list was lost (measured twice in production), because «no users» used to
+     mean «no PIN». A shop with no users signs in with the admin PIN and creates them. */
+  if (s && myName()) {
     history.replaceState({ screen: "screen-home" }, "");
     await goHome();
-  } else if (needPin) {                       // users configured → the PIN decides who you are
+  } else {
     history.replaceState({ screen: "screen-login" }, "");
     render("screen-login");
-  } else {
-    history.replaceState({ screen: "screen-name" }, "");
-    render("screen-name");
-    openDeepLabel();     // printing a label needs no employee name — and nothing guards this path
   }
 })();
 

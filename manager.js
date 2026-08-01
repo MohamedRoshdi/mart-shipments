@@ -109,8 +109,8 @@ function enterManager() {
   openManager();
 }
 
-// no session = the old single-PIN manager, where everything was allowed
-const canDo = (perm) => !auth.session() || auth.can(perm);
+// signing in is mandatory now, so no session means an EXPIRED one — deny, never grant
+const canDo = (perm) => auth.can(perm);
 
 function applyPerms() {
   $("tool-import").hidden = !canDo("import");
@@ -1059,7 +1059,7 @@ function stockLine(p) {
 
 // the printing screen lives in the employee app; the link keeps ?test=1 and names the product,
 // and it only shows for someone who may open that screen at all
-const canLabel = () => canDo("label") && (!auth.session() || auth.session().perms.includes("emp"));
+const canLabel = () => canDo("label") && (auth.session()?.perms || []).includes("emp");
 const labelHref = (barcode) => `${auth.withQuery("index.html")}#label=${encodeURIComponent(barcode)}`;
 
 function renderProducts() {

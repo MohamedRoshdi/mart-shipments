@@ -1,28 +1,38 @@
 const { test, expect } = require('@playwright/test');
 
-// with no users configured the first screen is name + branch — no branch PIN any more
+// the front door is the PIN screen, always — the old name screen is gone. Seeding the session
+// directly stands in for a signed-in employee, so every flow test skips the login round-trip.
 async function setUp(page, name = 'أحمد', branchIndex = 0) {
   const b = (await page.evaluate(() => window.APP_CONFIG.branches))[branchIndex];
-  // only catalog barcodes can be added now, so every flow needs a catalog
-  await page.evaluate(() => localStorage.getItem('test-products')
-    || localStorage.setItem('test-products', JSON.stringify({ '111': 'لبن', '222': 'جبنة' })));
-  await page.fill('#employee-name', name);
-  await page.click(`button[data-branch="${b.name}"]`);
-  await page.click('#save-name');
+  await page.evaluate(([n, br]) => {
+    // only catalog barcodes can be added now, so every flow needs a catalog
+    localStorage.getItem('test-products')
+      || localStorage.setItem('test-products', JSON.stringify({ '111': 'لبن', '222': 'جبنة' }));
+    localStorage.setItem('session', JSON.stringify({
+      name: n, branches: [], perms: ['emp', 'create', 'count', 'expiry', 'label', 'edit', 'del', 'download'], user: true, at: Date.now(),
+    }));
+    localStorage.setItem('employeeName', n);
+    localStorage.setItem('employeeBranch', br);
+  }, [name, b.name]);
+  await page.reload();
+  await expect(page.locator('#screen-home')).toBeVisible();
   return b;
 }
 
-test('first open asks name and branch, and nothing else', async ({ page }) => {
+test('first open is the PIN screen, and the old name screen is gone for good', async ({ page }) => {
   await page.goto('/?test=1');
-  await expect(page.locator('#screen-name')).toBeVisible();
-  await expect(page.locator('#branch-pin')).toHaveCount(0);   // the branch PIN is gone
-  await page.click('#save-name');                             // no name yet
-  await expect(page.locator('#screen-name')).toBeVisible();
-  await expect(page.locator('#toast')).toContainText('اكتب اسمك الأول');
-  await setUp(page);
+  await expect(page.locator('#screen-login')).toBeVisible();
+  await expect(page.locator('#screen-name')).toHaveCount(0);   // «بيانات الموظف» no longer exists
+  await page.fill('#login-pin', '0000');                       // a wrong PIN stays on the door
+  await page.click('#btn-login');
+  await expect(page.locator('#toast')).toContainText('الرقم السري غلط');
+  await expect(page.locator('#screen-login')).toBeVisible();
+  // with no users at all, the admin PIN is the way in (it always works, even offline)
+  await page.fill('#login-pin', await page.evaluate(() => window.APP_CONFIG.adminPin));
+  await page.click('#btn-login');
   await expect(page.locator('#screen-home')).toBeVisible();
   await page.reload();
-  await expect(page.locator('#screen-home')).toBeVisible();
+  await expect(page.locator('#screen-home')).toBeVisible();    // the session survives a reload
 });
 
 test('db test mode roundtrip', async ({ page }) => {
@@ -41,7 +51,7 @@ test('db test mode roundtrip', async ({ page }) => {
 test('search by name: the middle of the name counts, and so does a loose hamza', async ({ page }) => {
   await page.goto('/?test=1');
   await page.evaluate(() => {
-    localStorage.setItem('employeeName', 'أحمد');
+    localStorage.setItem('employeeName', 'أحمد'); localStorage.setItem('session', JSON.stringify({ name: 'أحمد', branches: [], perms: ['emp', 'create', 'count', 'expiry', 'label', 'edit', 'del', 'download'], user: true, at: Date.now() }));
     localStorage.setItem('test-products', JSON.stringify({
       '111': 'جهينة لبن كامل الدسم', '222': 'سكر أبيض ناعم', '333': 'شاي العروسة',
     }));
@@ -75,7 +85,7 @@ test('search by name: the middle of the name counts, and so does a loose hamza',
 test('create shipment: name shown from catalog as a label, duplicate merge', async ({ page }) => {
   await page.goto('/?test=1');
   await page.evaluate(() => {
-    localStorage.setItem('employeeName', 'أحمد');
+    localStorage.setItem('employeeName', 'أحمد'); localStorage.setItem('session', JSON.stringify({ name: 'أحمد', branches: [], perms: ['emp', 'create', 'count', 'expiry', 'label', 'edit', 'del', 'download'], user: true, at: Date.now() }));
     localStorage.setItem('test-products', JSON.stringify({ '6221031250057': 'لبن كامل الدسم' }));
   });
   await page.reload();
@@ -99,7 +109,7 @@ test('create shipment: name shown from catalog as a label, duplicate merge', asy
 
 test('a barcode outside the catalog is refused, with the reason spelled out', async ({ page }) => {
   await page.goto('/?test=1');
-  await page.evaluate(() => { localStorage.setItem('employeeName', 'أحمد'); localStorage.setItem('test-products', JSON.stringify({ '111': 'لبن', '222': 'جبنة' })); });
+  await page.evaluate(() => { localStorage.setItem('employeeName', 'أحمد'); localStorage.setItem('session', JSON.stringify({ name: 'أحمد', branches: [], perms: ['emp', 'create', 'count', 'expiry', 'label', 'edit', 'del', 'download'], user: true, at: Date.now() })); localStorage.setItem('test-products', JSON.stringify({ '111': 'لبن', '222': 'جبنة' })); });
   await page.reload();
   await page.click('#btn-new');
   await page.fill('#shipment-name', 'شحنة');
@@ -181,7 +191,7 @@ test('manager page: edit name, change qty, delete item', async ({ page }) => {
 
 test('employee: remove scanned item before saving', async ({ page }) => {
   await page.goto('/?test=1');
-  await page.evaluate(() => { localStorage.setItem('employeeName', 'أحمد'); localStorage.setItem('test-products', JSON.stringify({ '111': 'لبن', '222': 'جبنة' })); });
+  await page.evaluate(() => { localStorage.setItem('employeeName', 'أحمد'); localStorage.setItem('session', JSON.stringify({ name: 'أحمد', branches: [], perms: ['emp', 'create', 'count', 'expiry', 'label', 'edit', 'del', 'download'], user: true, at: Date.now() })); localStorage.setItem('test-products', JSON.stringify({ '111': 'لبن', '222': 'جبنة' })); });
   await page.reload();
   await page.click('#btn-new');
   await page.fill('#shipment-name', 'شحنة');
@@ -197,7 +207,7 @@ test('employee: remove scanned item before saving', async ({ page }) => {
 test('employee: edit own saved shipment', async ({ page }) => {
   await page.goto('/?test=1');
   await page.evaluate(() => {
-    localStorage.setItem('employeeName', 'أحمد');
+    localStorage.setItem('employeeName', 'أحمد'); localStorage.setItem('session', JSON.stringify({ name: 'أحمد', branches: [], perms: ['emp', 'create', 'count', 'expiry', 'label', 'edit', 'del', 'download'], user: true, at: Date.now() }));
     localStorage.setItem('test-shipments', JSON.stringify([
       // stamped today: the employee home now shows today only, and editing is part of today
       { name: 'شحنة قديمة', createdBy: 'أحمد', createdAt: Date.now(),
@@ -242,6 +252,7 @@ test('branch: picked at setup, stamped on shipment, filters manager list', async
   const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('test-shipments'))[0]);
   expect(saved.branch).toBe(b2);
 
+  await signOut(page);                            // the employee session would bounce the manager door
   await page.goto('/manager.html?test=1');
   await page.fill('#pin-input', await page.evaluate(() => window.APP_CONFIG.managerPin));
   await page.click('#btn-pin');
@@ -261,10 +272,11 @@ test('Enter key submits: manager PIN, employee setup, barcode lookup', async ({ 
   await page.press('#pin-input', 'Enter');                     // no button tap
   await expect(page.locator('#screen-manager')).toBeVisible();
 
+  await signOut(page);                                         // the manager session would skip the door
   await page.goto('/?test=1');
   await page.evaluate(() => localStorage.setItem('test-products', JSON.stringify({ '111': 'لبن' })));
-  await page.fill('#employee-name', 'أحمد');
-  await page.press('#employee-name', 'Enter');
+  await page.fill('#login-pin', await page.evaluate(() => window.APP_CONFIG.adminPin));
+  await page.press('#login-pin', 'Enter');
   await expect(page.locator('#screen-home')).toBeVisible();
 
   await page.click('#btn-new');
@@ -292,6 +304,7 @@ test('shipment type: picked under the branch, saved, filtered and editable', asy
   await expect(page.locator('#my-shipments li')).toContainText(t2);
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem('test-shipments'))[0].type)).toBe(t2);
 
+  await signOut(page);                            // the employee session would bounce the manager door
   await page.goto('/manager.html?test=1');
   await page.fill('#pin-input', await page.evaluate(() => window.APP_CONFIG.managerPin));
   await page.click('#btn-pin');
@@ -462,7 +475,7 @@ test('catalog screen: a quote in a product name cannot break the row markup', as
 
 test('back button and phone back return to the previous screen', async ({ page }) => {
   await page.goto('/?test=1');
-  await page.evaluate(() => { localStorage.setItem('employeeName', 'أحمد'); localStorage.setItem('test-products', JSON.stringify({ '111': 'لبن', '222': 'جبنة' })); });
+  await page.evaluate(() => { localStorage.setItem('employeeName', 'أحمد'); localStorage.setItem('session', JSON.stringify({ name: 'أحمد', branches: [], perms: ['emp', 'create', 'count', 'expiry', 'label', 'edit', 'del', 'download'], user: true, at: Date.now() })); localStorage.setItem('test-products', JSON.stringify({ '111': 'لبن', '222': 'جبنة' })); });
   await page.reload();
   await expect(page.locator('#btn-back')).toBeHidden();       // nothing to go back to on home
   await page.click('#btn-new');
@@ -574,7 +587,7 @@ test('admin: the supplier list can be imported from a sheet, header row dropped'
 test('supplier code: found by code, stamped on the shipment, searchable and in Excel', async ({ page }) => {
   await page.goto('/?test=1');
   await page.evaluate(() => {
-    localStorage.setItem('employeeName', 'أحمد');
+    localStorage.setItem('employeeName', 'أحمد'); localStorage.setItem('session', JSON.stringify({ name: 'أحمد', branches: [], perms: ['emp', 'create', 'count', 'expiry', 'label', 'edit', 'del', 'download'], user: true, at: Date.now() }));
     localStorage.setItem('test-products', JSON.stringify({ '111': 'لبن' }));
   });
   await seedSuppliers(page, [{ code: '1042', name: 'المراعي' }, { code: '1088', name: 'جهينة' }]);
@@ -595,6 +608,7 @@ test('supplier code: found by code, stamped on the shipment, searchable and in E
   expect(saved.name).toBe('المراعي');
   expect(saved.supplierCode).toBe('1042');                          // looked up, never typed
 
+  await signOut(page);                            // the employee session would bounce the manager door
   await page.goto('/manager.html?test=1');                          // keep the shipment just saved
   await page.fill('#pin-input', await page.evaluate(() => window.APP_CONFIG.managerPin));
   await page.click('#btn-pin');
@@ -613,7 +627,7 @@ test('supplier code: found by code, stamped on the shipment, searchable and in E
 test('supplier suggestions: loose Arabic, free text still allowed, none during a stocktake', async ({ page }) => {
   await page.goto('/?test=1');
   await page.evaluate(() => {
-    localStorage.setItem('employeeName', 'أحمد');
+    localStorage.setItem('employeeName', 'أحمد'); localStorage.setItem('session', JSON.stringify({ name: 'أحمد', branches: [], perms: ['emp', 'create', 'count', 'expiry', 'label', 'edit', 'del', 'download'], user: true, at: Date.now() }));
     localStorage.setItem('test-products', JSON.stringify({ '111': 'لبن' }));
   });
   await seedSuppliers(page, ['المراعي', 'جهينة للألبان', 'بيبسي']);
@@ -667,7 +681,7 @@ test("catalog CSV import on manager page autofills names in employee app", async
   await page.setInputFiles("#import-file", "tests/fixtures/catalog.csv");
   await expect(page.locator("#toast")).toContainText("تم استيراد 2 صنف");
   await page.goto("/?test=1");
-  await page.evaluate(() => localStorage.setItem('employeeName', 'أحمد'));   // keep the imported catalog
+  await page.evaluate(() => { localStorage.setItem('employeeName', 'أحمد'); localStorage.setItem('session', JSON.stringify({ name: 'أحمد', branches: [], perms: ['emp', 'create', 'count', 'expiry', 'label', 'edit', 'del', 'download'], user: true, at: Date.now() })); });   // keep the imported catalog
   await page.reload();
   await page.click("#btn-new");
   await page.fill("#barcode-input", "6221031250057");
@@ -686,7 +700,7 @@ test("الوحدة: the third column rides from the sheet to the item sheet and 
   expect(saved["6229000111222"]).toEqual({ name: "أرز" });                      // no unit given, none written
 
   await page.goto("/?test=1");
-  await page.evaluate(() => localStorage.setItem("employeeName", "أحمد"));
+  await page.evaluate(() => { localStorage.setItem("employeeName", "أحمد"); localStorage.setItem('session', JSON.stringify({ name: 'أحمد', branches: [], perms: ['emp', 'create', 'count', 'expiry', 'label', 'edit', 'del', 'download'], user: true, at: Date.now() })); });
   await page.reload();
   await page.click("#btn-new");
   await page.fill("#shipment-name", "شحنة الوحدات");
@@ -757,13 +771,12 @@ test('admin: a saved branch and type reach the employee app and the manager', as
   await page.click('#btn-save-config');
   await expect(page.locator('#toast')).toContainText('تم حفظ الإعدادات');
 
-  await page.goto('/?test=1');                                  // employee: the new branch is offered
-  await expect(page.locator('button[data-branch="فرع بنها"]')).toBeVisible();
-  await page.fill('#employee-name', 'سيد');
-  await page.click('button[data-branch="فرع بنها"]');
-  await page.click('#save-name');
-  await expect(page.locator('#who')).toContainText('فرع بنها');
+  await page.goto('/?test=1');                                  // employee side: PIN in, and the new
+  await page.fill('#login-pin', await page.evaluate(() => window.APP_CONFIG.adminPin));
+  await page.click('#btn-login');                               // branch and type are offered
+  await expect(page.locator('#screen-home')).toBeVisible();
   await page.click('#btn-new');
+  await expect(page.locator('#new-branch-picker button[data-newbranch="فرع بنها"]')).toBeVisible();
   await expect(page.locator('#type-picker button[data-type="إذن تحويل مخزن"]')).toBeVisible();
 
   await signOut(page);                                          // the admin session would skip the PIN
@@ -915,7 +928,7 @@ test('manager: الجرد zips into a folder per day, and الصلاحيات int
 
 test('camera settings: reachable from the app bar and the choices stick', async ({ page }) => {
   await page.goto('/?test=1');
-  await page.evaluate(() => localStorage.setItem('employeeName', 'أحمد'));
+  await page.evaluate(() => { localStorage.setItem('employeeName', 'أحمد'); localStorage.setItem('session', JSON.stringify({ name: 'أحمد', branches: [], perms: ['emp', 'create', 'count', 'expiry', 'label', 'edit', 'del', 'download'], user: true, at: Date.now() })); });
   await page.reload();
   await expect(page.locator('#btn-cam')).toBeVisible();          // in the app bar, not buried
   await page.click('#btn-cam');
@@ -938,7 +951,7 @@ test('camera settings: reachable from the app bar and the choices stick', async 
 
 test('camera settings: the scanner screen keeps its controls hidden until a camera runs', async ({ page }) => {
   await page.goto('/?test=1');
-  await page.evaluate(() => { localStorage.setItem('employeeName', 'أحمد'); localStorage.setItem('test-products', JSON.stringify({ '111': 'لبن' })); });
+  await page.evaluate(() => { localStorage.setItem('employeeName', 'أحمد'); localStorage.setItem('session', JSON.stringify({ name: 'أحمد', branches: [], perms: ['emp', 'create', 'count', 'expiry', 'label', 'edit', 'del', 'download'], user: true, at: Date.now() })); localStorage.setItem('test-products', JSON.stringify({ '111': 'لبن' })); });
   await page.reload();
   await page.click('#btn-new');
   await expect(page.locator('#cam-live')).toBeHidden();          // no torch/zoom bar without a track
@@ -1079,6 +1092,45 @@ test('a user account sticks to the first phone, and only the admin frees it', as
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem('test-config')).users[0].device)).toBe('phone-2');
 });
 
+// A session that dies mid-use must land on the door, not on a home with every button hidden
+// (review 2026-08-01: canDo now denies without a session, so a bare home would be a dead end).
+test('an expired session goes back to the PIN screen, not to an empty home', async ({ page }) => {
+  await page.goto('/?test=1');
+  await setUp(page);
+  await page.click('#btn-cam');                                   // any screen away from home
+  await page.evaluate(() => {
+    const s = JSON.parse(localStorage.getItem('session'));
+    s.at = Date.now() - 13 * 60 * 60 * 1000;                      // 13h old: past the 12h shift
+    localStorage.setItem('session', JSON.stringify(s));
+  });
+  await page.click('#btn-back');                                  // the trip home notices the death
+  await expect(page.locator('#screen-login')).toBeVisible();
+  await expect(page.locator('#screen-home')).toBeHidden();
+});
+
+// «إلا المديرين اللي أنا أحددهم» (the owner, 2026-08-01): a user the admin frees from the
+// one-phone rule signs in from anywhere, and no phone ever claims the account.
+test('a multi-device user signs in from any phone, and the flag survives the save', async ({ page }) => {
+  await page.goto('/?test=1');
+  await seedUsers(page, [{ ...EMP, multi: true, device: 'phone-1' }]);
+  await page.evaluate(() => localStorage.setItem('deviceId', 'phone-2'));   // NOT the bound phone
+  await page.reload();
+  await page.fill('#login-pin', EMP.pin);
+  await page.click('#btn-login');
+  await expect(page.locator('#screen-home')).toBeVisible();                 // in — no «مربوط بموبايل تاني»
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('test-config')).users[0].device))
+    .toBe('phone-1');                                                       // and nothing was claimed
+
+  await openAdmin(page, 'screen-data');
+  await expect(page.locator('#users-list')).toContainText('مسموح له يدخل من أي جهاز');
+  await page.click('button[data-umulti="0"]');            // back to one phone: the binding restarts clean
+  await page.click('#btn-save-config');
+  await expect(page.locator('#toast')).toContainText('تم حفظ الإعدادات');
+  const u = await page.evaluate(() => JSON.parse(localStorage.getItem('test-config')).users[0]);
+  expect(u.multi).toBeUndefined();
+  expect(u.device).toBeUndefined();
+});
+
 test('login: one PIN box sends each user to the screen they are allowed', async ({ page }) => {
   await page.goto('/?test=1');
   await seedUsers(page, [EMP, MGR, ADM]);
@@ -1156,7 +1208,7 @@ test('the old PINs keep working after users exist', async ({ page }) => {
 
 test("draft survives reload", async ({ page }) => {
   await page.goto("/?test=1");
-  await page.evaluate(() => { localStorage.setItem('employeeName', 'أحمد'); localStorage.setItem('test-products', JSON.stringify({ '111': 'لبن', '222': 'جبنة' })); });
+  await page.evaluate(() => { localStorage.setItem('employeeName', 'أحمد'); localStorage.setItem('session', JSON.stringify({ name: 'أحمد', branches: [], perms: ['emp', 'create', 'count', 'expiry', 'label', 'edit', 'del', 'download'], user: true, at: Date.now() })); localStorage.setItem('test-products', JSON.stringify({ '111': 'لبن', '222': 'جبنة' })); });
   await page.reload();
   await page.click("#btn-new");
   await page.fill("#shipment-name", "مسودة");
@@ -1340,7 +1392,6 @@ test('the same barcode shows each branch its own quantity', async ({ page }) => 
   await page.goto('/?test=1');
   const names = await page.evaluate(() => window.APP_CONFIG.branches.map(b => b.name));
   await page.evaluate((b) => {
-    localStorage.setItem('employeeName', 'أحمد');
     localStorage.setItem('test-products', JSON.stringify({
       '111': { name: 'لبن', stock: { [b[0]]: 10, [b[1]]: 4 } },
       '222': { name: 'جبنة', qty: 7 },                 // only the old shop-wide sheet
@@ -1374,7 +1425,7 @@ test('stocktake: a catalog code missing from the branch جرد sheet is a sub-co
   await page.goto('/?test=1');
   const branch = await page.evaluate(() => window.APP_CONFIG.branches[0].name);
   await page.evaluate((b) => {
-    localStorage.setItem('employeeName', 'أحمد');
+    localStorage.setItem('employeeName', 'أحمد'); localStorage.setItem('session', JSON.stringify({ name: 'أحمد', branches: [], perms: ['emp', 'create', 'count', 'expiry', 'label', 'edit', 'del', 'download'], user: true, at: Date.now() }));
     localStorage.setItem('test-products', JSON.stringify({
       '111': { name: 'لبن', stock: { [b]: 10 } },
       '222': { name: 'جبنة وزن', qty: 7 },            // in the catalog, NOT in the branch sheet
@@ -1401,7 +1452,7 @@ test('stocktake: a catalog code missing from the branch جرد sheet is a sub-co
 test('employee stocktake: the sheet shows what the system says, the save keeps both numbers', async ({ page }) => {
   await page.goto('/?test=1');
   await page.evaluate(() => {
-    localStorage.setItem('employeeName', 'أحمد');
+    localStorage.setItem('employeeName', 'أحمد'); localStorage.setItem('session', JSON.stringify({ name: 'أحمد', branches: [], perms: ['emp', 'create', 'count', 'expiry', 'label', 'edit', 'del', 'download'], user: true, at: Date.now() }));
     localStorage.setItem('test-products', JSON.stringify({ '111': { name: 'لبن', qty: 10 }, '222': 'جبنة' }));
   });
   await page.reload();
@@ -1438,7 +1489,7 @@ test('employee stocktake: the sheet shows what the system says, the save keeps b
 test('a stocktake reopens for editing and the difference follows the new quantity', async ({ page }) => {
   await page.goto('/?test=1');
   await page.evaluate(() => {
-    localStorage.setItem('employeeName', 'أحمد');
+    localStorage.setItem('employeeName', 'أحمد'); localStorage.setItem('session', JSON.stringify({ name: 'أحمد', branches: [], perms: ['emp', 'create', 'count', 'expiry', 'label', 'edit', 'del', 'download'], user: true, at: Date.now() }));
     localStorage.setItem('test-products', JSON.stringify({ '111': { name: 'لبن', qty: 10 } }));
     localStorage.setItem('test-counts', JSON.stringify([
       // stamped today: the employee home shows today only, and editing is part of today
@@ -1531,7 +1582,7 @@ test('manager: the stocktake tab lists a count with its difference, exports it a
 
 test('camera settings: resolution and continuous focus stick per phone', async ({ page }) => {
   await page.goto('/?test=1');
-  await page.evaluate(() => localStorage.setItem('employeeName', 'أحمد'));
+  await page.evaluate(() => { localStorage.setItem('employeeName', 'أحمد'); localStorage.setItem('session', JSON.stringify({ name: 'أحمد', branches: [], perms: ['emp', 'create', 'count', 'expiry', 'label', 'edit', 'del', 'download'], user: true, at: Date.now() })); });
   await page.reload();
   await page.click('#btn-cam');
   await expect(page.locator('#res-picker button[data-res="hd"]')).toHaveAttribute('aria-pressed', 'true');
@@ -1562,7 +1613,7 @@ const EXP_ROWS = [
 async function openExpiry(page, rows = []) {
   await page.goto('/?test=1');
   await page.evaluate((r) => {
-    localStorage.setItem('employeeName', 'أحمد');
+    localStorage.setItem('employeeName', 'أحمد'); localStorage.setItem('session', JSON.stringify({ name: 'أحمد', branches: [], perms: ['emp', 'create', 'count', 'expiry', 'label', 'edit', 'del', 'download'], user: true, at: Date.now() }));
     localStorage.setItem('test-products', JSON.stringify({ '111': 'لبن', '222': 'جبنة' }));
     localStorage.setItem('test-expiry', JSON.stringify(r));
   }, rows);
@@ -1781,7 +1832,7 @@ test('label: the printed barcode decodes back to the barcode it came from', asyn
 test('label: pick a product, preview it, print the copies asked for', async ({ page }) => {
   await page.goto('/?test=1');
   await page.evaluate(() => {
-    localStorage.setItem('employeeName', 'أحمد');
+    localStorage.setItem('employeeName', 'أحمد'); localStorage.setItem('session', JSON.stringify({ name: 'أحمد', branches: [], perms: ['emp', 'create', 'count', 'expiry', 'label', 'edit', 'del', 'download'], user: true, at: Date.now() }));
     localStorage.setItem('test-products', JSON.stringify({ '6223001234562': 'زيت عافية' }));
   });
   await page.reload();
@@ -1830,6 +1881,7 @@ test("print jobs: save from the label screen, mark ready, print, reprint, delete
   await page.goto("/?test=1");
   await page.evaluate(() => {
     localStorage.setItem("employeeName", "أحمد");
+    localStorage.setItem('session', JSON.stringify({ name: 'أحمد', branches: [], perms: ['emp', 'create', 'count', 'expiry', 'label', 'edit', 'del', 'download'], user: true, at: Date.now() }));
     localStorage.setItem("test-products", JSON.stringify({ "6223001234562": "زيت عافية" }));
   });
   await page.reload();
@@ -1928,7 +1980,7 @@ test("import: the shop's own column order, unit codes and last selling price", a
 
   // and the label fills its own price in
   await page.goto('/?test=1');
-  await page.evaluate(() => localStorage.setItem('employeeName', 'أحمد'));
+  await page.evaluate(() => { localStorage.setItem('employeeName', 'أحمد'); localStorage.setItem('session', JSON.stringify({ name: 'أحمد', branches: [], perms: ['emp', 'create', 'count', 'expiry', 'label', 'edit', 'del', 'download'], user: true, at: Date.now() })); });
   await page.reload();
   await page.click('#btn-label');
   await page.fill('#barcode-input', '111');
@@ -1940,7 +1992,7 @@ test("import: the shop's own column order, unit codes and last selling price", a
 test('label: several items queue up and print in one go', async ({ page }) => {
   await page.goto('/?test=1');
   await page.evaluate(() => {
-    localStorage.setItem('employeeName', 'أحمد');
+    localStorage.setItem('employeeName', 'أحمد'); localStorage.setItem('session', JSON.stringify({ name: 'أحمد', branches: [], perms: ['emp', 'create', 'count', 'expiry', 'label', 'edit', 'del', 'download'], user: true, at: Date.now() }));
     localStorage.setItem('test-products', JSON.stringify({ '111': 'لبن', '222': 'جبنة', '333': 'زيت' }));
   });
   await page.reload();
@@ -1980,7 +2032,7 @@ test('label: several items queue up and print in one go', async ({ page }) => {
 test('label: a gap between products prints one job each, and stops when told', async ({ page }) => {
   await page.goto('/?test=1');
   await page.evaluate(() => {
-    localStorage.setItem('employeeName', 'أحمد');
+    localStorage.setItem('employeeName', 'أحمد'); localStorage.setItem('session', JSON.stringify({ name: 'أحمد', branches: [], perms: ['emp', 'create', 'count', 'expiry', 'label', 'edit', 'del', 'download'], user: true, at: Date.now() }));
     localStorage.setItem('test-products', JSON.stringify({ '111': 'لبن', '222': 'جبنة', '333': 'زيت' }));
     const cfg = JSON.parse(localStorage.getItem('test-config') || '{}');
     // one second, so the test is a test and not a nap
@@ -2047,7 +2099,7 @@ test('label: the admin sets the size, the paper and the logo, and the screen use
 
   await page.goto('/?test=1');
   await page.evaluate(() => {
-    localStorage.setItem('employeeName', 'أحمد');
+    localStorage.setItem('employeeName', 'أحمد'); localStorage.setItem('session', JSON.stringify({ name: 'أحمد', branches: [], perms: ['emp', 'create', 'count', 'expiry', 'label', 'edit', 'del', 'download'], user: true, at: Date.now() }));
     localStorage.setItem('test-products', JSON.stringify({ '111': 'لبن' }));
   });
   await page.reload();
@@ -2070,6 +2122,9 @@ test('label: the catalog row links straight to the label of that barcode', async
   const href = await page.locator('#products-list a.lbl-link').first().getAttribute('href');
   expect(href).toBe('index.html?test=1#label=111');                  // ?test=1 must survive the hop
   await page.goto(href);
+  // a legacy-PIN session carries no employee name, so the door asks once — and the hash survives it
+  await page.fill('#login-pin', await page.evaluate(() => window.APP_CONFIG.managerPin));
+  await page.click('#btn-login');
   await expect(page.locator('#screen-label')).toBeVisible();
   await expect(page.locator('#label-preview .lbl-name')).toHaveText('لبن');
 });
@@ -2102,7 +2157,7 @@ test('import: a real .xlsx, with a numeric barcode and a shared-string one', asy
 
   // معامل التحويل rides to the item sheet, and a factor of 1 never shows up at all
   await page.goto('/?test=1');
-  await page.evaluate(() => localStorage.setItem('employeeName', 'أحمد'));
+  await page.evaluate(() => { localStorage.setItem('employeeName', 'أحمد'); localStorage.setItem('session', JSON.stringify({ name: 'أحمد', branches: [], perms: ['emp', 'create', 'count', 'expiry', 'label', 'edit', 'del', 'download'], user: true, at: Date.now() })); });
   await page.reload();
   await page.click('#btn-new');
   await page.fill('#barcode-input', '6221031492105');
@@ -2281,7 +2336,7 @@ test('BarTender: a job goes out as a CSV named after the template, and that coun
   });
   await page.goto('/?test=1');
   await page.evaluate(() => {
-    localStorage.setItem('employeeName', 'أحمد');
+    localStorage.setItem('employeeName', 'أحمد'); localStorage.setItem('session', JSON.stringify({ name: 'أحمد', branches: [], perms: ['emp', 'create', 'count', 'expiry', 'label', 'edit', 'del', 'download'], user: true, at: Date.now() }));
     localStorage.setItem('test-jobs', JSON.stringify([
       { name: 'ليبلات الزيوت', createdBy: 'أحمد', createdAt: 1234, items: [{ barcode: '111', name: 'زيت عافية', price: '45', copies: 2 }] },
     ]));
@@ -2453,6 +2508,7 @@ test('الصلاحيات: the supplier rides the row and the manager filters by 
     { _id: 's2', barcode: '222', name: 'جبنة', qty: 1, day: 3, month: 12, year: 2026,
       supplier: 'جهينة', createdBy: 'أحمد', createdAt: 2 },
   ])));
+  await signOut(page);                            // the employee session would bounce the manager door
   await page.goto('/manager.html?test=1');
   await page.fill('#pin-input', await page.evaluate(() => window.APP_CONFIG.managerPin));
   await page.click('#btn-pin');
@@ -2492,7 +2548,7 @@ test('الصلاحيات: an employee account sees only its own rows', async ({ 
 test('a code typed without its leading zeros still saves the catalog spelling', async ({ page }) => {
   await page.goto('/?test=1');
   await page.evaluate(() => {
-    localStorage.setItem('employeeName', 'أحمد');
+    localStorage.setItem('employeeName', 'أحمد'); localStorage.setItem('session', JSON.stringify({ name: 'أحمد', branches: [], perms: ['emp', 'create', 'count', 'expiry', 'label', 'edit', 'del', 'download'], user: true, at: Date.now() }));
     localStorage.setItem('test-products', JSON.stringify({
       '000045': { name: 'سكر ١ كجم' },   // the catalog kept its zeros
       '77': { name: 'ملح' },             // and this one lost them at import
@@ -2589,7 +2645,7 @@ test('the employee home shows today only, and a loaded shipment leaves it', asyn
   await page.goto('/?test=1');
   await page.evaluate(() => {
     const day = 86400000;
-    localStorage.setItem('employeeName', 'أحمد');
+    localStorage.setItem('employeeName', 'أحمد'); localStorage.setItem('session', JSON.stringify({ name: 'أحمد', branches: [], perms: ['emp', 'create', 'count', 'expiry', 'label', 'edit', 'del', 'download'], user: true, at: Date.now() }));
     const row = (name, extra) => ({
       name, createdBy: 'أحمد', branch: 'فرع قويسنا', type: 'إذن استلام',
       items: [{ barcode: '111', name: 'لبن', qty: 1 }], ...extra,

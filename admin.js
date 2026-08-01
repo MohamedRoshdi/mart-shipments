@@ -126,8 +126,8 @@ async function enterAdmin() {
   renderBulk();
 }
 
-// no session = the old single-PIN admin, where everything was allowed
-const canDo = (perm) => !auth.session() || auth.can(perm);
+// signing in is mandatory now, so no session means an EXPIRED one — deny, never grant
+const canDo = (perm) => auth.can(perm);
 
 $("btn-logout").onclick = () => {
   auth.endSession();
@@ -410,8 +410,11 @@ function renderUsers() {
           <button class="del" data-deluser="${i}" aria-label="حذف المستخدم">×</button>
         </div>
         <div class="user-row">
-          <span class="meta">${u.device ? "مربوط بموبايل واحد" : "مش مربوط بموبايل — أول موبايل يدخل بيه هيتربط"}</span>
-          ${u.device ? `<button type="button" class="ghost" data-unbind="${i}">فك الارتباط</button>` : ""}
+          <span class="meta">${u.multi ? "مسموح له يدخل من أي جهاز" : (u.device ? "مربوط بموبايل واحد" : "مش مربوط بموبايل — أول موبايل يدخل بيه هيتربط")}</span>
+          ${!u.multi && u.device ? `<button type="button" class="ghost" data-unbind="${i}">فك الارتباط</button>` : ""}
+        </div>
+        <div class="user-row">
+          <button type="button" class="ghost" data-umulti="${i}" aria-pressed="${!!u.multi}">${u.multi ? "رجّعه لجهاز واحد" : "اسمح له بأكتر من جهاز"}</button>
         </div>
       </div>
       <div class="seg" data-ubranch="${i}">
@@ -441,6 +444,18 @@ $("users-list").onclick = (e) => {
     renderUsers();
     markDirty();
     toast(`«${u.name || "المستخدم"}» يقدر يدخل من موبايل جديد — اضغط «حفظ الإعدادات»`);
+    return;
+  }
+  const multi = e.target.closest("button[data-umulti]");
+  if (multi) {
+    readInputs();
+    const u = cfg.users[+multi.dataset.umulti];
+    // «ماينفعش نفس المستخدم يفتح من جهاز تاني إلا المديرين اللي أنا أحددهم» (the owner, 2026-08-01):
+    // multi frees this one account from the one-phone rule; turning it back on drops any old binding
+    // so the NEXT phone to sign in becomes the bound one, not a phone from before the exception.
+    if (u.multi) { delete u.multi; delete u.device; } else u.multi = true;
+    renderUsers();
+    markDirty();
     return;
   }
   const perm = e.target.closest("button[data-perm]");
@@ -574,6 +589,10 @@ $("btn-save-config").onclick = async () => {
   }
   const pins = [...cfg.users.map(u => u.pin), cfg.managerPin, cfg.adminPin];
   if (new Set(pins).size !== pins.length) { toast("في رقم سري متكرر — كل واحد لازم يكون لوحده"); return; }
+  // 2026-08-01: the production users list was emptied by two saves that carried 0 users (the audit
+  // trail shows the counts). A save that wipes every account gets one loud question first.
+  if (!cfg.users.length && (window.APP_CONFIG.users || []).length
+    && !confirm("الحفظ ده هيمسح كل المستخدمين، وكلهم هيدخلوا بالأرقام القديمة.\nمتأكد؟")) return;
   if (cfg.suppliers.length > SUPPLIER_CAP) { toast(`الموردين أكتر من ${SUPPLIER_CAP} — شيل اللي مش شغال معاك`); return; }
 
   const payload = {
@@ -588,6 +607,7 @@ $("btn-save-config").onclick = async () => {
     users: cfg.users.map(u => ({
       name: u.name, pin: u.pin, branches: auth.branchesOf(u), perms: u.perms.slice(),
       ...(u.device ? { device: u.device } : {}),
+      ...(u.multi ? { multi: true } : {}),   // the one-phone exception must survive a save, like device
     })),
     // same trap as `device`: saveConfig replaces the whole doc, so the import stamps have to be
     // carried through or every settings save silently erases «آخر تحديث» on every phone

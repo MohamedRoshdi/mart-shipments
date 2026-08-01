@@ -41,7 +41,7 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 
 | File | Role |
 |---|---|
-| `index.html` / `app.js` | employee app: setup, home, new/edit shipment **or stocktake**, **الصلاحيات** (months + one month), **ليبل الرف**, camera, item sheet |
+| `index.html` / `app.js` | employee app: PIN login (the only door), home, new/edit shipment **or stocktake**, **الصلاحيات** (months + one month), **ليبل الرف**, camera, item sheet |
 | `manager.html` / `manager.js` | manager app: PIN, shipments tab, stocktake tab, **expiry tab**, a **month picker** that decides what is read, one search box over the list, filters behind `#btn-filters`, cards that open (no row buttons, but a **«تم تحميلها»** tag), edit, **«تم التحميل»** on the card screen, catalog screen (with a **ليبل** link per row), import/export (Excel, TXT, **ZIP by day**) |
 | `admin.html` / `admin.js` | admin app: users + permissions + phone binding, settings (branches, types, **suppliers**, **label size/paper/logo**, PINs), audit trail, bulk delete by kind/branch/type/day-range, catalog wipe |
 | `auth.js` | permission list, PIN → identity, the 12-hour session shared by all three pages |
@@ -132,7 +132,7 @@ on the roll (0 = one job for the lot).
 `db.supplierList`), typed one per line as «كود، اسم» in the admin page — or imported from a sheet —
 and offered as the shipment name — **a suggestion, never a constraint**: a name that is not on the
 list still saves, with an empty code.
-Each user is `{ name, pin, branches: [], perms: [], device? }`; `perms` holds ids from `auth.js` `PERMS`
+Each user is `{ name, pin, branches: [], perms: [], device?, multi? }`; `perms` holds ids from `auth.js` `PERMS`
 (`emp`/`mgr`/`adm` are screens, the rest are actions). **`branches: []` means every branch**, one
 name means locked to it, several means the user works across them. `auth.branchesOf()` also reads
 the old single `branch` string, so users saved before this still work.
@@ -421,9 +421,16 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   field on an account, not a password, and `config/app.branches` is now `[{name}]`. Anything
   that still carries a `pin` key on a branch is old data and is ignored — the next settings
   save strips it. The result goes into `localStorage.session` for 12 hours and every page
-  reads it, so signing in once covers all three. **`canDo(perm)` returns true when there is no
-  session at all** — that is what keeps the pre-users behaviour intact for a shop that never
-  creates a user.
+  reads it, so signing in once covers all three. **`canDo(perm)` denies when there is no
+  session** — signing in is mandatory since 2026-08-01, so a missing session is an expired
+  one, and the old grant-everything fallback would have handed a dead session the whole app.
+- **A user account belongs to one phone — unless the admin frees it.** `multi: true` on a user
+  («اسمح له بأكتر من جهاز» on the admin's user card) makes `authenticate` skip the device check
+  entirely: no claim, no refusal, sign in anywhere — the owner's exception for the managers he
+  chooses. Turning it back off also drops `device`, so the binding restarts with the next phone
+  to sign in, not with a phone from before the exception. Like `device`, the flag is rebuilt
+  into the save payload key by key — forget it there and every save silently revokes the
+  exception.
 - **A user account belongs to one phone.** `auth.deviceId()` writes a random id into
   `localStorage.deviceId` once per phone. The first sign-in with a user PIN claims the account
   (`db.claimDevice` patches only `users` on `config/app`, and never touches an account that
@@ -644,17 +651,16 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   `.row-actions button.primary` when a row button must be amber.
 - **The item sheet owns the screen while open** (scrim + `body.sheet-open` hides
   the bottom bar). Anything behind it is unclickable — dismiss with `#btn-cancel-item`.
-- **Two ways in — but the no-PIN one needs a successfully-read config with zero users.**
-  With users configured, the PIN alone identifies the person and the branch comes from their
-  account. `#screen-name` (titled «بيانات الموظف») survives only for a shop that has truly never
-  created a user — and «truly» is the point: `needPin` in the boot IIFE is
-  `users.length > 0 || !cfgRead`, because a FAILED config read used to fall back to the code
-  config, see zero users, and open the name screen with no PIN at all. That is the door the
-  owner asked to close (2026-08-01: «عايز الصفحة دي تتشال») — with 3 real users in production it
-  is now unreachable on every device, even one that boots offline or during quota exhaustion
-  (the code admin PIN still opens the PIN screen there, so a broken read cannot lock anyone
-  out). Shipments always carry a branch and the manager can never move one between branches
-  (the rules forbid it).
+- **One door: the PIN screen, always.** The legacy «بيانات الموظف» name screen is DELETED
+  (2026-08-01, the owner: «عايز الصفحة دي تتشال نهائيًا») — it resurfaced every time the users
+  list was lost (twice in production: the quota wipe of 07-31 and two «0 مستخدم» saves on
+  08-01, both visible in the audit trail), because «no users» used to mean «no PIN». Now a
+  shop with zero users signs in with the admin PIN and creates them; the code admin PIN works
+  even when the config read fails, so nothing can lock the shop out. `canDo` in all three
+  pages is plain `auth.can(perm)` — a missing session means an EXPIRED one and denies, never
+  grants (the old `!session || can` was the pre-users fallback and handed a dead session
+  everything). Shipments always carry a branch and the manager can never move one between
+  branches (the rules forbid it).
 - **Manager scope filters before render**, never after: `openManager()` drops other branches
   out of `all`, so a scoped user's page never holds data they may not see.
 - Catalog screen loads `PRODUCT_CAP = 300` rows; `countProducts()` gives the honest total.
@@ -755,15 +761,16 @@ debounce, or it reports false negatives.
 - App: https://mohamedroshdi.github.io/mart-shipments/
 - Manager: https://mohamedroshdi.github.io/mart-shipments/manager.html
 - Admin: https://mohamedroshdi.github.io/mart-shipments/admin.html (PIN `7007` in the code)
-- Production has **3 real users** (measured 2026-07-30, still 3 on 2026-08-01), all on
-  `فرع قويسنا`, created by the owner from the admin page. Any live script that saves the
-  settings rewrites that list — read it back before assuming a run was harmless.
-- **`config/app` measured 2026-08-01 ~07:10 UTC: `suppliers` is EMPTY (was 425) and
-  `label.logo` is empty.** Both casualties of the 2026-07-31 quota exhaustion: the admin page
-  read nothing, painted defaults, and a save overwrote the doc (guarded since `bb75ba3` — a
-  failed boot read now locks the save button). The owner re-imports the supplier file and
-  re-uploads the logo; until then supplier suggestions and the brand/label logo are absent in
-  production, and that is data, not a bug.
+- Production had 3 real users — **the list is EMPTY since 2026-08-01T12:55Z**: the audit trail
+  shows two «تغيير الإعدادات … 0 مستخدم» saves by «الأدمن» right after the suppliers/logo
+  re-upload, so the accounts were deleted in the admin working copy and saved (not a quota
+  ghost). PINs were never stored anywhere; the owner re-creates the users from the admin page.
+  A save that would empty a non-empty users list now gets a `confirm` first. Any live script
+  that saves the settings rewrites that list — read it back before assuming a run was harmless.
+- **`config/app` measured 2026-08-01T12:55Z (REST read): suppliers 427 ✓, logo ✓, users [].**
+  The suppliers/logo wipe of 07-31 (quota exhaustion; guarded since `bb75ba3`) was repaired by
+  the owner the same day he lost the users list. The REST read that measured this is one curl:
+  `https://firestore.googleapis.com/v1/projects/shipments-alaela-mart/databases/(default)/documents/config/app`.
 - Repo: https://github.com/MohamedRoshdi/mart-shipments (public — the URL is the
   only real protection; PINs are client-side gates, not security)
 - Firebase project `shipments-alaela-mart`, Firestore `(default)` in `eur3`,

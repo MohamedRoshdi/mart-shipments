@@ -68,13 +68,14 @@ export function can(perm) {
 export function authenticate(pin, cfg, codeAdminPin) {
   const user = (cfg.users || []).find((u) => u.pin === pin);
   if (user) {
+    const who = { name: user.name, branches: branchesOf(user), perms: (user.perms || []).slice(), user: true };
+    // the admin may free chosen people (his managers) from the one-phone rule: no claim, no refusal
+    if (user.multi) return who;
     const dev = deviceId();
     // bound to another phone → refused here; only the admin may unbind it
     if (user.device && user.device !== dev) return { blocked: true, name: user.name, branches: [], perms: [] };
-    return {
-      name: user.name, branches: branchesOf(user), perms: (user.perms || []).slice(), user: true,
-      claim: user.device ? null : dev,     // first phone to use this account claims it
-    };
+    who.claim = user.device ? null : dev;  // first phone to use this account claims it
+    return who;
   }
   if (pin && (pin === cfg.adminPin || pin === codeAdminPin)) {
     return { name: "الأدمن", branches: [], perms: ALL_PERMS.slice() };
