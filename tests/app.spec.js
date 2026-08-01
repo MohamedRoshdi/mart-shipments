@@ -1945,6 +1945,23 @@ test('import: a sheet with no header row still reads positionally', async ({ pag
   expect(products['6223001234562']).toEqual({ name: 'زيت عافية', unit: 'كرتونة' });
 });
 
+// A tab-separated .txt goes down the same path as a CSV: sheetRows reads bytes, not extensions,
+// and sepOf sniffs the tab from the first line. The accept attributes offering .txt only mean
+// something because of this — nothing else in the import path is extension-aware.
+test('import: a tab-separated .txt reads like any sheet', async ({ page }) => {
+  await openManagerPage(page);
+  await page.setInputFiles('#import-file', {
+    name: 'items.txt',
+    mimeType: 'text/plain',
+    buffer: Buffer.from(
+      'كود الصنف\tالوحدة\tاسم الصنف\n'
+      + '6223001234562\t4\tزيت عافية\n', 'utf8'),
+  });
+  await expect(page.locator('#toast')).toContainText('تم استيراد 1 صنف');
+  const products = await page.evaluate(() => JSON.parse(localStorage.getItem('test-products')));
+  expect(products['6223001234562']).toEqual({ name: 'زيت عافية', unit: 'كرتونة', unitCode: 4 });
+});
+
 // Excel quotes any cell holding the separator. Splitting on the separator alone shifted every
 // column after it — invisible while the readers swallowed the middle cells, wrong once they do not.
 test('import: a quoted field keeps its comma and its column', async ({ page }) => {
