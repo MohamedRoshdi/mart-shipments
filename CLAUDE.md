@@ -48,6 +48,7 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 | `label.js` | the whole of ليبل الرف that is not a screen: EAN-13 + Code 128 encoding, the barcode SVG, the label's HTML, and the settings guard. No db, no DOM, no session — that is what makes the price (or any other field) a one-line change later |
 | `erp.js` | what PowerTech leaves behind after an import, pure: `pulledRows`, `isImported` (the «1» flag in field 5 of every row), `permitOf` (`store 1_4552.txt` → `4552`), `sameGoods`. Built from a measured pulled file, never guessed. Nothing wires it to `erpAt` yet — blocked on where the pulled file lives |
 | `brand.js` | the uploaded logo (config `label.logo`) as the app-bar image and the tab icon on all three pages; no logo in the config = the pages look exactly as before |
+| `fresh.js` | the page's half of the SW update dance: `reg.update()` on every return to the foreground, reload on `controllerchange` (silent when just-opened or hidden, a toast mid-work — a reload would eat an unfinished count), once per page life. **Cannot run under `?test=1`** — proven only by a deploy reaching a real phone |
 | `db.js` | data layer; `?test=1` switches the whole app to localStorage |
 | `zip.js` | store-only ZIP writer, ~80 lines, no dependency; used by the folder export |
 | `sheet.js` | everything about reading a spreadsheet: `sheetRows` (**a real `.xlsx`** — zip walk + `DecompressionStream` — or CSV read field by field, quotes and all, and the only place that knows Excel writes Arabic as windows-1256), `headerMap` (columns by Arabic heading, so the shop's own export order works), **`requireColumns`** (the guard: no headings → positional, headings with a column missing → **throws in Arabic naming it**), `unitName` (unit **code** → word, `null` for a code the table does not know) and `unitCode` (the number itself, kept only when it is 1–5). Used by the catalog/stock import (manager) and the supplier import (admin) |
@@ -103,7 +104,14 @@ fields key by key, so importing شبين الكوم never touches what قويس�
 from the catalog screen drops neither.
 
 `config/app` — `{ managerPin, adminPin, branches: [{name}], shipmentTypes: [], users: [], suppliers: [],
-label: { w, h, sheet, logo, gap } }`. `label` is the shelf label: millimetres (66 × 35 by default —
+label: { w, h, sheet, logo, gap }, filesMeta: { "<kind>": { at, rows, by } } }`. `filesMeta` is one
+stamp per imported file (`الأصناف`, `جرد <الفرع>`, `الموردين`) — written by `db.stampFile` with a
+**merge**, carried to every phone by the existing config listener, and what
+`db.dropCatalogIndexIfOlder(at)` compares against the local search copy's build time, so a stale
+index dies in seconds instead of at the 7-day TTL. **The admin save must carry `filesMeta`
+through** (same trap as `device`: `saveConfig` replaces the whole doc). The importing machine also
+merges its own stamp into `window.APP_CONFIG` locally — the server echo is not what its screen
+waits for. `label` is the shelf label: millimetres (66 × 35 by default —
 the sheet the shop already buys), `sheet` is `"label"` (one label per page, thermal roll) or
 `"a4"` (tiled on a sheet), `logo` is the shop logo as a data URL, redrawn to 360 px before
 it is stored because **every page reads this doc at boot**, and `gap` is seconds between products
@@ -123,7 +131,7 @@ shipped `firebase-config.js` is only a fallback. A missing doc changes nothing.
 mutations write a row, `update`/`delete` are denied by the rules.
 
 Rules in force (all live-tested):
-- `config`: only the doc id `app`, only those seven keys, PINs ≤ 8 chars, lists ≤ 10, users ≤ 40,
+- `config`: only the doc id `app`, only those eight keys (`filesMeta` a map ≤ 20 entries), PINs ≤ 8 chars, lists ≤ 10, users ≤ 40,
   suppliers ≤ 1000 (the shop's real list is 425 — 300 was refusing their save), `label` a map of
   ≤ 6 keys whose `logo` is a string ≤ 200,000 chars.
 - `logs`: create-only with the four keys; `update`/`delete` always denied.
@@ -287,6 +295,15 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
 - **A stock sheet must never wipe the price, and a catalog sheet must never wipe the stock.**
   `saveProductName` only writes the keys it was given and `writeProduct` merges, so an import that
   has no price column leaves the price alone.
+- **A header-driven catalog import is a REPLACE, and the diff is what makes it affordable.**
+  One `listAllProducts()` read per import (the owner's files are daily, 2026-08-01): rows
+  identical to what is stored are **skipped** — a 10k-row daily file used to be 10k writes
+  against the 20k/day quota, now it is only what changed — and barcodes the file no longer
+  carries are offered for deletion behind a `confirm` that states the counts, with a louder
+  wording when more than half the catalog would go (that is a partial file, not the catalog).
+  The positional path (no headings) keeps the old merge-only behaviour: a file whose shape is
+  guessed must never delete. The toast reports the three numbers; equal-to-stored is judged by
+  `sameStored` in `manager.js`, which is why `db.js row()` carries `unitCode`.
 - **One chip drives both directions.** `stockBranch` in `manager.js` feeds the import *and* the
   catalog export, so the file that comes out (`الباركود، الاسم، الكمية في <الفرع>`) is exactly
   the file that goes back in. The import reads the **last** column as the quantity — which is
