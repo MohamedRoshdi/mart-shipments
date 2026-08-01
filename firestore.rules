@@ -104,6 +104,29 @@ service cloud.firestore {
         && request.resource.data.year is number && request.resource.data.year >= 2000 && request.resource.data.year <= 2100;
       allow delete: if true;
     }
+    // مهام الطباعة: a saved label queue. readyAt/printedAt absent IS the state (like «تم تحميلها»),
+    // and jobs stay after printing so a reprint is one tap.
+    match /print_jobs/{id} {
+      allow read: if true;
+      allow create: if request.resource.data.keys().hasOnly(["name", "createdBy", "createdAt", "items"])
+        && request.resource.data.name is string && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 100
+        && request.resource.data.createdBy is string && request.resource.data.createdBy.size() <= 50
+        && request.resource.data.createdAt is number
+        && request.resource.data.items is list && request.resource.data.items.size() <= 200;
+      // the two stamp pairs may be added; who made the job and when never change
+      allow update: if request.resource.data.keys().hasOnly(["name", "createdBy", "createdAt", "items", "readyBy", "readyAt", "printedBy", "printedAt"])
+        && request.resource.data.createdBy == resource.data.createdBy
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.name is string && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 100
+        && request.resource.data.items is list && request.resource.data.items.size() <= 200
+        && (!("readyBy" in request.resource.data) || (request.resource.data.readyBy is string && request.resource.data.readyBy.size() <= 50))
+        && (!("readyAt" in request.resource.data) || request.resource.data.readyAt is number)
+        && (!("printedBy" in request.resource.data) || (request.resource.data.printedBy is string && request.resource.data.printedBy.size() <= 50))
+        && (!("printedAt" in request.resource.data) || request.resource.data.printedAt is number);
+      allow delete: if true;
+    }
     // admin settings: one doc, fixed key set, short PINs, small lists
     match /config/{doc} {
       allow read: if true;

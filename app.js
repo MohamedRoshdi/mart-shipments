@@ -35,6 +35,8 @@ const TITLES = {
   "screen-expiry": "الصلاحيات",
   "screen-month": "الصلاحيات",
   "screen-label": "ليبل الرف",
+  "screen-jobs": "مهام الطباعة",
+  "screen-job": "مهام الطباعة",
   "screen-cam": "إعدادات الكاميرا",
 };
 
@@ -143,6 +145,7 @@ function renderHomeLinks() {
   $("btn-count").hidden = !canDo("count");
   $("btn-expiry").hidden = !canDo("expiry");
   $("btn-label").hidden = !canDo("label");
+  $("btn-jobs").hidden = !canDo("label");
   $("counts-block").hidden = !canDo("count");
   $("who").disabled = !!s;                 // a signed-in user changes their name from the admin page
 }
@@ -844,6 +847,7 @@ function renderQueue() {
     </li>`).join("");
   $("label-count").textContent = labels ? `${labels} ليبل` : "";
   $("btn-print-label").disabled = !labels;
+  $("btn-save-job").hidden = !labels;
 }
 
 $("label-queue").onclick = (e) => {
@@ -860,25 +864,23 @@ let printing = null;
 
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 
-async function printByProduct(rows, gap) {
+async function printByProduct(rows, gap, ui) {
   printing = { stop: false };
-  $("btn-print-label").textContent = "إيقاف الطباعة";
+  ui.btn.textContent = "إيقاف الطباعة";
   for (let i = 0; i < rows.length && !printing.stop; i++) {
     $("print-area").innerHTML = lbl.sheetHtml([rows[i]], window.APP_CONFIG);
-    $("label-count").textContent = `بنطبع ${i + 1} من ${rows.length}`;
+    ui.count.textContent = `بنطبع ${i + 1} من ${rows.length}`;
     print();
     // the wait is checked in slices so «إيقاف» does not have to sit through it
     for (let left = gap * 10; left > 0 && !printing.stop; left--) await sleep(100);
   }
   printing = null;
-  $("btn-print-label").textContent = "طباعة";
-  renderQueue();
+  ui.btn.textContent = "طباعة";
+  ui.after();
 }
 
-$("btn-print-label").onclick = () => {
-  if (printing) { printing.stop = true; toast("وقفنا الطباعة"); return; }
-  const rows = toPrint();
-  if (!rows.length) return;
+// one print path for the label screen and a saved job: the @page, the A4/roll split and the gap
+function printRows(rows, ui) {
   const cfg = lbl.labelCfg(window.APP_CONFIG);
   // a roll printer wants one label per page at the label's own size; an A4 sheet wants them
   // tiled on one page, which is a different @page and a different flow
@@ -887,9 +889,113 @@ $("btn-print-label").onclick = () => {
     : `@page { size: ${cfg.w}mm ${cfg.h}mm; margin: 0; }`;
   document.body.classList.toggle("print-a4", cfg.sheet === "a4");
   // the gap is a roll thing: an A4 sheet is one piece of paper, there is nothing to pace
-  if (cfg.sheet !== "a4" && cfg.gap > 0 && rows.length > 1) { printByProduct(rows, cfg.gap); return; }
+  if (cfg.sheet !== "a4" && cfg.gap > 0 && rows.length > 1) { printByProduct(rows, cfg.gap, ui); return; }
   $("print-area").innerHTML = lbl.sheetHtml(rows, window.APP_CONFIG);
   print();
+}
+
+$("btn-print-label").onclick = () => {
+  if (printing) { printing.stop = true; toast("وقفنا الطباعة"); return; }
+  const rows = toPrint();
+  if (!rows.length) return;
+  printRows(rows, { btn: $("btn-print-label"), count: $("label-count"), after: renderQueue });
+};
+
+/* ---------- مهام الطباعة: the label queue, saved so any other device can print it ---------- */
+
+$("btn-save-job").onclick = () => {
+  const rows = toPrint();
+  if (!rows.length) return;
+  const name = (prompt("اسم المهمة؟ (مثلاً: ليبلات رف الزيوت)") || "").trim();
+  if (!name) return;
+  db.saveJob({
+    name: name.slice(0, 100), createdBy: myName(),
+    items: rows.map((r) => ({ barcode: r.barcode, name: r.name, price: r.price || "", copies: r.copies })),
+  });
+  labelQueue = [];
+  clearLabel();
+  toast(`اتحفظت مهمة «${name}» — تلاقيها في مهام الطباعة`, "ok");
+};
+
+let jobs = [];
+let job = null;
+
+// جديدة ← جاهزة للطباعة ← تمت طباعتها: the timestamps ARE the state, the same shape as erpState()
+const jobState = (j) => (j.printedAt ? "تمت طباعتها" : j.readyAt ? "جاهزة للطباعة" : "جديدة");
+const jobLabels = (j) => j.items.reduce((n, r) => n + (Number(r.copies) || 1), 0);
+
+async function openJobs() {
+  jobs = await db.listJobs();
+  renderJobs();
+  navTo("screen-jobs");
+}
+
+$("btn-jobs").onclick = () => { openJobs().catch(() => toast("حصلت مشكلة — جرّب تاني")); };
+
+function renderJobs() {
+  $("jobs-list").innerHTML = jobs.length ? jobs.map((j) => `<li>
+      <button class="card-open" data-job="${escAttr(j._id)}">
+        <div class="card-main">
+          <div class="card-title">${esc(j.name)}</div>
+          <div class="meta">${esc(j.createdBy)} · ${new Date(j.createdAt).toLocaleDateString("ar-EG")} · ${jobLabels(j)} ليبل</div>
+        </div>
+        <span class="stamp">${jobState(j)}</span>
+      </button>
+    </li>`).join("") : `<li class="empty">مفيش مهام محفوظة. جهّز الأصناف في شاشة ليبل الرف ودوس «حفظ كمهمة طباعة».</li>`;
+}
+
+function renderJob() {
+  $("job-head").textContent = job.name;
+  $("job-meta").textContent = `${jobState(job)} · ${job.createdBy} · ${new Date(job.createdAt).toLocaleDateString("ar-EG")}`;
+  $("job-items").innerHTML = job.items.map((r) => `<li>
+      <div class="card-main">
+        <div class="card-title">${esc(r.name)}</div>
+        <div class="meta"><span class="code">${esc(r.barcode)}</span>${r.price ? ` · ${esc(r.price)} ج` : ""}</div>
+      </div>
+      <span class="stamp">${esc(r.copies)}</span>
+    </li>`).join("");
+  $("job-ready").hidden = !!job.readyAt || !!job.printedAt;
+  $("job-count").textContent = `${jobLabels(job)} ليبل`;
+}
+
+$("jobs-list").onclick = (e) => {
+  const b = e.target.closest("button[data-job]");
+  if (!b) return;
+  job = jobs.find((j) => j._id === b.dataset.job);
+  if (!job) return;
+  renderJob();
+  navTo("screen-job");
+};
+
+$("job-ready").onclick = () => {
+  const patch = { readyBy: myName(), readyAt: Date.now() };
+  db.updateJob(job._id, patch);            // fire-and-forget, like every stamp in the app
+  Object.assign(job, patch);
+  renderJob();
+  renderJobs();                            // the list behind this screen shows the state too
+  toast("اتعلّمت جاهزة للطباعة", "ok");
+};
+
+$("job-del").onclick = () => {
+  if (!confirm(`نمسح مهمة «${job.name}»؟`)) return;
+  db.deleteJob(job._id);
+  jobs = jobs.filter((j) => j._id !== job._id);
+  renderJobs();
+  history.back();
+  toast("اتمسحت المهمة");
+};
+
+// the tap on «طباعة» is the receipt, the same idea as «تم تحميلها»: printing writes who and
+// when, and a reprint simply overwrites the pair with the newer print
+$("btn-print-job").onclick = () => {
+  if (printing) { printing.stop = true; toast("وقفنا الطباعة"); return; }
+  const rows = job.items.map((r) => ({ ...r, copies: Math.min(200, Math.max(1, parseInt(r.copies, 10) || 1)) }));
+  printRows(rows, { btn: $("btn-print-job"), count: $("job-count"), after: renderJob });
+  const patch = { printedBy: myName(), printedAt: Date.now() };
+  db.updateJob(job._id, patch);
+  Object.assign(job, patch);
+  renderJob();
+  renderJobs();
 };
 
 /* --- adding by name: the barcode field stays numeric, the search is its own box. It lives

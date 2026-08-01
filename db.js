@@ -539,6 +539,52 @@ export async function deleteCount(id) {
   await fs.deleteDoc(fs.doc(dbRef, 'counts', id));
 }
 
+/* ---------- print jobs (مهام الطباعة): a saved label queue. The state is derived the same way
+   as «تم تحميلها» and the ERP pair — readyAt absent means جديدة, printedAt absent means not
+   printed yet — so there is no status column to keep in step with the timestamps. Jobs stay
+   after printing on purpose: reprint is the whole point of saving one. The list is one
+   unbounded read because a shop holds dozens of jobs, not years of them. ---------- */
+
+export async function saveJob(job) {
+  job.createdAt = Date.now();
+  if (TEST_MODE) {
+    const all = lsArr("test-jobs");
+    all.push(job);
+    localStorage.setItem("test-jobs", JSON.stringify(all));
+    return;
+  }
+  await live();
+  fs.addDoc(fs.collection(dbRef, "print_jobs"), job).catch((e) => dispatchEvent(new CustomEvent("db-error", { detail: e })));
+}
+
+export async function listJobs() {
+  if (TEST_MODE) return lsMonth("test-jobs", null);
+  await live();
+  const snap = await fs.getDocs(fs.query(fs.collection(dbRef, "print_jobs"), fs.orderBy("createdAt", "desc")));
+  return snap.docs.map((d) => ({ ...d.data(), _id: d.id }));
+}
+
+// marking ready/printed is fire-and-forget, like every stamp in the app
+export async function updateJob(id, patch) {
+  if (TEST_MODE) {
+    const all = lsArr("test-jobs").map((j) => (String(j.createdAt) === id ? { ...j, ...patch } : j));
+    localStorage.setItem("test-jobs", JSON.stringify(all));
+    return;
+  }
+  await live();
+  fs.updateDoc(fs.doc(dbRef, "print_jobs", id), patch).catch((e) => dispatchEvent(new CustomEvent("db-error", { detail: e })));
+}
+
+export async function deleteJob(id) {
+  if (TEST_MODE) {
+    const keep = lsArr("test-jobs").filter((j) => String(j.createdAt) !== id);
+    localStorage.setItem("test-jobs", JSON.stringify(keep));
+    return;
+  }
+  await live();
+  await fs.deleteDoc(fs.doc(dbRef, "print_jobs", id));
+}
+
 /* ---------- expiry (الصلاحيات): one row per product and date; months are derived, never stored ---------- */
 
 // the id has to survive two rows added in the same millisecond, which counts/shipments never risk

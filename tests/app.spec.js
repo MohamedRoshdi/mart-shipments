@@ -1665,6 +1665,56 @@ test('label: pick a product, preview it, print the copies asked for', async ({ p
   await expect(page.locator('#label-price-note')).toBeVisible();
 });
 
+// A saved label queue becomes a print job: another device lists it, walks جديدة ← جاهزة للطباعة
+// ← تمت طباعتها, prints it (the tap stamps who and when), reprints it, and can delete it.
+test("print jobs: save from the label screen, mark ready, print, reprint, delete", async ({ page }) => {
+  await page.goto("/?test=1");
+  await page.evaluate(() => {
+    localStorage.setItem("employeeName", "أحمد");
+    localStorage.setItem("test-products", JSON.stringify({ "6223001234562": "زيت عافية" }));
+  });
+  await page.reload();
+  await page.evaluate(() => { window.printed = 0; window.print = () => { window.printed++; }; });
+  page.on("dialog", (d) => d.accept("ليبلات رف الزيوت"));           // the prompt AND the confirm
+
+  await page.click("#btn-label");
+  await page.fill("#barcode-input", "6223001234562");
+  await page.click("#btn-lookup");
+  await page.fill("#label-copies", "2");
+  await page.click("#btn-save-job");
+  await expect(page.locator("#toast")).toContainText("اتحفظت مهمة");
+  await expect(page.locator("#label-empty")).toBeVisible();          // the queue died with the save
+
+  await page.click("#btn-back");
+  await page.click("#btn-jobs");
+  const card = page.locator("#jobs-list button[data-job]");
+  await expect(card).toHaveCount(1);
+  await expect(card).toContainText("ليبلات رف الزيوت");
+  await expect(card.locator(".stamp")).toHaveText("جديدة");
+
+  await card.click();
+  await expect(page.locator("#job-head")).toHaveText("ليبلات رف الزيوت");
+  await page.click("#job-ready");
+  await expect(page.locator("#job-meta")).toContainText("جاهزة للطباعة");
+  await expect(page.locator("#job-ready")).toBeHidden();
+
+  await page.click("#btn-print-job");
+  await expect(page.locator("#print-area .lbl")).toHaveCount(2);     // copies expand into pages
+  expect(await page.evaluate(() => window.printed)).toBe(1);
+  await expect(page.locator("#job-meta")).toContainText("تمت طباعتها");
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("test-jobs"))[0]);
+  expect(saved.printedBy).toBe("أحمد");
+  expect(saved.readyBy).toBe("أحمد");
+  expect(saved.items[0]).toEqual({ barcode: "6223001234562", name: "زيت عافية", price: "", copies: 2 });
+
+  await page.click("#btn-print-job");                                // a reprint is one tap
+  expect(await page.evaluate(() => window.printed)).toBe(2);
+
+  await page.click("#job-del");
+  await expect(page.locator("#jobs-list li.empty")).toBeVisible();   // back on the empty list
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem("test-jobs")))).toEqual([]);
+});
+
 test('import: the two templates the app itself hands out still import', async ({ page }) => {
   await page.goto('/manager.html?test=1');
   await page.fill('#pin-input', await page.evaluate(() => window.APP_CONFIG.managerPin));

@@ -54,6 +54,10 @@
           <span class="action-title">ليبل الرف</span>
           <span class="action-sub">اطبع ليبل الصنف بالباركود</span>
         </button>
+        <button id="btn-jobs" class="action" hidden>
+          <span class="action-title">مهام الطباعة</span>
+          <span class="action-sub">المهام المحفوظة — تتطبع من أي جهاز</span>
+        </button>
       </div>
       <div id="home-links" class="row-actions" hidden>
         <a id="link-manager" href="manager.html" hidden>صفحة المدير</a>
@@ -130,9 +134,29 @@
         <h2>الأصناف اللي هتتطبع</h2>
         <ul id="label-queue"></ul>
       </div>
+      <button id="btn-save-job" class="ghost big" hidden>حفظ كمهمة طباعة — تتطبع بعدين من أي جهاز</button>
       <div class="bottombar">
         <span id="label-count" class="count"></span>
         <button id="btn-print-label" class="primary grow" disabled>طباعة</button>
+      </div>
+    </section>
+
+    <section id="screen-jobs" hidden>
+      <ul id="jobs-list"></ul>
+      <p class="meta">المهمة بتتحفظ من شاشة ليبل الرف — جهّز الأصناف ودوس «حفظ كمهمة طباعة».</p>
+    </section>
+
+    <section id="screen-job" hidden>
+      <p id="job-head" class="month-head"></p>
+      <p id="job-meta" class="meta"></p>
+      <ul id="job-items"></ul>
+      <div class="row-actions">
+        <button id="job-ready" class="ghost">جاهزة للطباعة</button>
+        <button id="job-del" class="ghost">حذف المهمة</button>
+      </div>
+      <div class="bottombar">
+        <span id="job-count" class="count"></span>
+        <button id="btn-print-job" class="primary grow">طباعة</button>
       </div>
     </section>
 
