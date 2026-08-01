@@ -30,7 +30,7 @@ $("version-line").textContent = versionLine();
 const TITLES = {
   "screen-login": "العائلة مارت",
   "screen-name": "بيانات الموظف",
-  "screen-home": "شحناتي",
+  "screen-home": "شغل النهارده",   // the home shows today only, and the title says so
   "screen-new": "شحنة جديدة",
   "screen-expiry": "الصلاحيات",
   "screen-month": "الصلاحيات",
