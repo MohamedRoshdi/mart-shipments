@@ -1283,7 +1283,7 @@ test('stocktake import: a barcode the catalog does not know is reported, never c
         + '9,999888777,1,صنف مش في الأصناف\n', 'utf8'),
     }),
   ]);
-  await expect(page.locator('#toast')).toContainText('اتسجل كميات 1 صنف · 1 مش في الأصناف');
+  await expect(page.locator('#toast')).toContainText('تم استيراد كميات 1 صنف لـفرع قويسنا · 1 مش في الأصناف');
   const report = require('fs').readFileSync(await dl.path(), 'utf8');
   expect(report).toContain('"999888777","صنف مش في الأصناف","9"');
   const products = await page.evaluate(() => JSON.parse(localStorage.getItem('test-products')));
@@ -1312,6 +1312,18 @@ test('stocktake import reads the ERP\'s real file: hamza headings, ! columns, fr
   const products = await page.evaluate(() => JSON.parse(localStorage.getItem('test-products')));
   expect(products['111'].stock[branch]).toBe(0.034);   // parseInt used to make this 0
   expect(products['222'].stock[branch]).toBe(0);       // a zero balance is still a listed row
+
+  // the same file again: a write per document is what Firestore bills, so an unchanged
+  // balance is skipped, not rewritten — the daily import costs what actually moved
+  await page.setInputFiles('#stock-file', {
+    name: 'بيانات جرد فرع قويسنا.txt', mimeType: 'text/plain',
+    buffer: Buffer.from(
+      'الرصيد \tكود الصنف\tأسم الصنف\t!\t!\t!\r\n'
+      + '0.03400\t111\tحلاوة وزن\t0\t0\t0\r\n'
+      + '0\t222\tرز\t5\t0\t0\r\n', 'utf8'),
+  });
+  await expect(page.locator('#toast')).toContainText('اتحدثت كميات 0 صنف');
+  await expect(page.locator('#toast')).toContainText('2 زي ما هي');
 });
 
 // The real catalog export spells it «أخر سعر بيع» — the price has to survive that hamza too

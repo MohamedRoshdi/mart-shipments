@@ -1352,26 +1352,39 @@ async function importStockFile(file, branch, auto = false) {
   // otherwise the stock sheet becomes a second catalog nobody curated. One full read per
   // import, the same price the catalog diff already pays on a daily file.
   let known;
-  try { known = new Set((await db.listAllProducts()).map(p => p.barcode)); }
+  try { known = new Map((await db.listAllProducts()).map(p => [String(p.barcode), p])); }
   catch (err) { console.error(err); toast("مقدرناش نقرا الأصناف — جرّب تاني", "bad"); return; }
   const missing = rows.filter(r => !known.has(r.barcode));
   const found = rows.filter(r => known.has(r.barcode));
-  let n = 0;
+  let n = 0, same = 0;
   try {
-    for (const r of found) { await db.saveProductRow(r.barcode, r.qty, branch); n++; }
-    const stamp = { at: Date.now(), rows: n, by: identity };
+    /* Firestore bills per DOCUMENT written, so the only way to make a daily import cheap is to
+       not write what did not move — the same diff the catalog import already does (the owner,
+       2026-08-02: «لو فيه طريقة تقلل عدد عمليات الحفظ»). Half a real جرد file is zero balances
+       that stay zero; those now cost nothing. Only the branch's own key is compared — the
+       legacy shop-wide qty is not what this write would touch. */
+    for (const r of found) {
+      const p = known.get(r.barcode);
+      if (p && p.stock && p.stock[branch] === r.qty) { same++; continue; }
+      await db.saveProductRow(r.barcode, r.qty, branch);
+      n++;
+    }
+    const stamp = { at: Date.now(), rows: found.length, by: identity };
     window.APP_CONFIG.filesMeta = { ...(window.APP_CONFIG.filesMeta || {}), [`جرد ${branch}`]: stamp };
     db.stampFile(`جرد ${branch}`, stamp).catch(console.error);
     db.logAction(identity, "استيراد كميات الجرد",
-      `${n} صنف · ${branch}${missing.length ? ` · ${missing.length} مش في الأصناف` : ""}`);
+      `${n} اتحدث · ${same} زي ما هي · ${branch}${missing.length ? ` · ${missing.length} مش في الأصناف` : ""}`);
+    const sum = same
+      ? `اتحدثت كميات ${n} صنف لـ${branch} · ${same} زي ما هي`
+      : `تم استيراد كميات ${n} صنف لـ${branch}`;
     if (missing.length) {
       // the report the owner asked for: he updates ملف الأصناف first, then imports again
       download(`جرد ${branch} — مش في الأصناف.csv`,
         csvText([["الباركود", "اسم الصنف", "الكمية"], ...missing.map(r => [r.barcode, r.name, r.qty])]),
         "text/csv");
-      toast(`اتسجل كميات ${n} صنف · ${missing.length} مش في الأصناف — التقرير اتحمّل`, "warn");
+      toast(`${sum} · ${missing.length} مش في الأصناف — التقرير اتحمّل`, "warn");
     } else {
-      toast(`تم استيراد كميات ${n} صنف لـ${branch}`, "ok");
+      toast(sum, "ok");
     }
   } catch (err) {
     console.error(err);

@@ -334,6 +334,11 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   the rest and says so in a `warn` toast. The owner updates ملف الأصناف first, then imports again.
   `saveProductName` only writes the keys it was given and `writeProduct` merges, so an import that
   has no price column leaves the price alone.
+  **And it diffs, exactly like the catalog import** (2026-08-02, the owner's «قلل عدد عمليات
+  الحفظ»): Firestore bills per document written — batching changes speed, never the bill — so a
+  balance equal to the stored `stock[branch]` is skipped, not rewritten. Half a real جرد file is
+  zeros that stay zero; a daily re-import of an unchanged file is ~0 writes. Only the branch's own
+  key is compared: the legacy shop-wide `qty` fallback is not what this write would touch.
 - **BarTender never runs in the browser, and the app never opens a `.btw`** (feasibility closed
   with the owner 2026-08-01: «التطبيق يجهز بيانات الطباعة ويسلمها لـ BarTender»). The folder IS
   the registry: templates are the `.btw` files in «قوالب الطباعة» under the picked root —
