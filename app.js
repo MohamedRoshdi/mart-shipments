@@ -436,8 +436,7 @@ async function onBarcode(code) {
   $("qty-hint").textContent = expiring()
     ? "اكتب عدد القطع اللي بتنتهي في التاريخ ده."
     : "اكتب الكمية اللي لقيتها فعلاً على الرف.";
-  // the date stays as it was between scans: a shelf is usually one batch with one date
-  $("item-date-row").hidden = !(known && expiring());
+  paintExpiryFields(known);
   $("qty-row").hidden = !known;                  // nothing to count if the item cannot be added
   $("btn-add-item").hidden = !known;             // only catalog items can enter a shipment
   $("btn-add-item").disabled = !known;
@@ -573,6 +572,10 @@ async function loadExpiry() {
   const rows = await db.listExpiry().catch(() => []);
   // a row with no branch is from before branches were stamped; it stays visible everywhere
   state.expRows = rows.filter(e => !e.branch || e.branch === state.branch);
+  /* «الموظف يشاهد فقط المنتجات التي أدخلها» (the owner, 2026-08-01) — a real account sees its
+     own rows; the manager page sees everything. Legacy PIN flows keep the old shared view. */
+  const s = auth.session();
+  if (s && s.user) state.expRows = state.expRows.filter(e => e.createdBy === myName());
   renderMonths();
 }
 
@@ -592,6 +595,18 @@ $("exp-months").onclick = (e) => {
   if (btn) openMonth(btn.dataset.month);
 };
 
+/* The two fields only الصلاحيات asks for. Both stay as they were between scans — a shelf sweep
+   is usually one batch from one delivery — and the supplier is optional, never a constraint. */
+function paintExpiryFields(known) {
+  const on = known && expiring();
+  $("item-date-row").hidden = !on;
+  $("item-supplier-row").hidden = !on;
+  if (on && !$("supplier-dl").children.length) {
+    $("supplier-dl").innerHTML = db.supplierList(window.APP_CONFIG)
+      .map(s => `<option value="${escAttr(s.name)}">`).join("");
+  }
+}
+
 async function addExpiry(barcode, name, qty) {
   const d = ex.fromIso($("item-date").value);
   if (!d) {
@@ -599,12 +614,15 @@ async function addExpiry(barcode, name, qty) {
     toast($("item-date").value ? "التاريخ مش مظبوط — السنة لازم بين ٢٠٠٠ و٢١٠٠" : "حدّد تاريخ انتهاء الصلاحية الأول");
     return;
   }
+  const supplier = $("item-supplier").value.trim().slice(0, 50);
   // the same product with the same date is more of the same batch, not a second row
   const dup = state.expRows.find(e => e.barcode === barcode
     && e.year === d.year && e.month === d.month && e.day === d.day);
   try {
-    if (dup) await db.updateExpiry(dup._id, { ...dup, qty: (Number(dup.qty) || 0) + qty });
-    else await db.saveExpiry({ barcode, name, qty, ...d, branch: state.branch, createdBy: myName() });
+    if (dup) await db.updateExpiry(dup._id, { ...dup, qty: (Number(dup.qty) || 0) + qty,
+      supplier: supplier || dup.supplier || "" });
+    else await db.saveExpiry({ barcode, name, qty, ...d, branch: state.branch, createdBy: myName(),
+      ...(supplier ? { supplier } : {}) });
   } catch (err) {
     console.error(err);
     toast("الحفظ ما نفعش — حاول تاني", "bad");
@@ -648,7 +666,7 @@ function renderMonthItems() {
         <div class="card-title">${esc(e.name || "بدون اسم")}</div>
         <div class="code">${esc(e.barcode)}</div>
         <!-- who recorded it: two employees on one shelf need to know whose row this is -->
-        <div class="meta">${esc(ex.daysWord(days))}${e.createdBy ? ` · ${esc(e.createdBy)}` : ""}</div>
+        <div class="meta">${esc(ex.daysWord(days))}${e.supplier ? ` · ${esc(e.supplier)}` : ""}${e.createdBy ? ` · ${esc(e.createdBy)}` : ""}</div>
         <input class="date-cell" type="date" dir="ltr" min="2000-01-01" max="2100-12-31" data-edate="${escAttr(e._id)}"
           value="${escAttr(ex.isoOf(e))}" ${canDo("edit") ? "" : "disabled"}>
       </div>
@@ -1178,6 +1196,7 @@ cfgReady = (async () => {
     if (!allowedBranches().includes(state.branch)) state.branch = allowedBranches()[0];
     renderBranchPicker();
     renderSuppliers();
+    $("supplier-dl").innerHTML = "";     // the expiry datalist refills from the fresh list next open
   }).catch(console.error);
 
   const s = auth.session();

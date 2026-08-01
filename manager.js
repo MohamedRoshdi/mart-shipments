@@ -437,9 +437,31 @@ $("all-counts").onclick = (e) => {
 
 /* ---------- الصلاحيات (expiry): months are derived from the rows, never stored ---------- */
 
-const expInScope = () => expRows.filter(e => filter === ALL || !e.branch || e.branch === filter);
+let expSupplier = ALL;   // «فلترة بالمورد» — the supplier stamped on the rows, not the config list
+
+const expInScope = () => expRows.filter(e =>
+  (filter === ALL || !e.branch || e.branch === filter)
+  && (expSupplier === ALL || (e.supplier || "") === expSupplier));
+
+/* The options are the suppliers actually ON the rows in branch scope: a 425-name config list in
+   a select would bury the three that matter, and a row typed with a free-hand supplier still
+   has to be findable. The row hides itself while no row carries a supplier at all. */
+function renderExpSupplier() {
+  const inBranch = expRows.filter(e => filter === ALL || !e.branch || e.branch === filter);
+  const names = [...new Set(inBranch.map(e => e.supplier).filter(Boolean))].sort();
+  $("exp-supplier-row").hidden = !names.length;
+  if (!names.includes(expSupplier)) expSupplier = ALL;
+  $("exp-supplier").innerHTML = [ALL, ...names].map(n =>
+    `<option value="${escAttr(n)}"${n === expSupplier ? " selected" : ""}>${esc(n)}</option>`).join("");
+}
+
+$("exp-supplier").onchange = () => {
+  expSupplier = $("exp-supplier").value;
+  renderMonths();
+};
 
 function renderMonths() {
+  renderExpSupplier();
   const ms = ex.months(expInScope());
   $("all-months").innerHTML = ms.map(m => `<li class="exp exp-${m.status}">
       <button class="card-open" data-month="${escAttr(m.key)}">
@@ -482,7 +504,7 @@ function renderMonthItems() {
     return `<li class="exp exp-${ex.statusOf(days)}">
       <div class="card-main">
         <div class="card-title">${esc(e.name || "بدون اسم")}</div>
-        <div class="meta"><span class="code">${esc(e.barcode)}</span>${e.branch ? ` · ${esc(shortBranch(e.branch))}` : ""}</div>
+        <div class="meta"><span class="code">${esc(e.barcode)}</span>${e.branch ? ` · ${esc(shortBranch(e.branch))}` : ""}${e.supplier ? ` · ${esc(e.supplier)}` : ""}</div>
         <!-- who recorded it, on the row itself: the owner asked to know that without opening Excel -->
         <div class="meta">${esc(ex.daysWord(days))}${e.createdBy ? ` · ${esc(e.createdBy)}` : ""}</div>
         <input class="date-cell" type="date" dir="ltr" min="2000-01-01" max="2100-12-31" data-edate="${escAttr(e._id)}"

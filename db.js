@@ -571,7 +571,8 @@ export async function listExpiry() {
 // offline (or behind a write backoff), and awaiting the server ack would leave the item sheet
 // open with nothing happening. The local cache applies the change straight away.
 export async function updateExpiry(id, data) {
-  const patch = { qty: data.qty, day: data.day, month: data.month, year: data.year };
+  const patch = { qty: data.qty, day: data.day, month: data.month, year: data.year,
+    ...(data.supplier !== undefined ? { supplier: String(data.supplier).slice(0, 50) } : {}) };
   if (TEST_MODE) {
     const all = lsArr('test-expiry').map((e) => (e._id === id ? { ...e, ...patch } : e));
     localStorage.setItem('test-expiry', JSON.stringify(all));

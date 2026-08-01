@@ -74,7 +74,9 @@ service cloud.firestore {
     // so an empty month simply has no rows — nothing to create and nothing to clean up.
     match /expiry/{id} {
       allow read: if true;
-      allow create: if request.resource.data.keys().hasOnly(['barcode', 'name', 'qty', 'day', 'month', 'year', 'branch', 'createdBy', 'createdAt'])
+      allow create: if request.resource.data.keys().hasOnly(['barcode', 'name', 'qty', 'day', 'month', 'year', 'branch', 'createdBy', 'createdAt', 'supplier'])
+        && (!('supplier' in request.resource.data)
+            || (request.resource.data.supplier is string && request.resource.data.supplier.size() <= 50))
         && request.resource.data.barcode is string && request.resource.data.barcode.size() <= 32
         && request.resource.data.name is string && request.resource.data.name.size() > 0
         && request.resource.data.name.size() <= 100
@@ -87,7 +89,9 @@ service cloud.firestore {
         && request.resource.data.createdBy is string && request.resource.data.createdBy.size() <= 50
         && request.resource.data.createdAt is number;
       // a row moves month by changing its date; the product, the branch and who wrote it never move
-      allow update: if request.resource.data.keys().hasOnly(['barcode', 'name', 'qty', 'day', 'month', 'year', 'branch', 'createdBy', 'createdAt'])
+      allow update: if request.resource.data.keys().hasOnly(['barcode', 'name', 'qty', 'day', 'month', 'year', 'branch', 'createdBy', 'createdAt', 'supplier'])
+        && (!('supplier' in request.resource.data)
+            || (request.resource.data.supplier is string && request.resource.data.supplier.size() <= 50))
         && request.resource.data.barcode == resource.data.barcode
         && request.resource.data.createdBy == resource.data.createdBy
         && request.resource.data.createdAt == resource.data.createdAt

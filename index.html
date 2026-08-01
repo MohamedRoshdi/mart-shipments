@@ -207,6 +207,11 @@
       <h2>تاريخ انتهاء الصلاحية</h2>
       <input id="item-date" type="date" dir="ltr" min="2000-01-01" max="2100-12-31">
     </div>
+    <div id="item-supplier-row" hidden>
+      <h2>المورد</h2>
+      <input id="item-supplier" list="supplier-dl" maxlength="50" placeholder="اختياري — اكتب أو اختار من القايمة">
+      <datalist id="supplier-dl"></datalist>
+    </div>
     <div id="qty-row" class="qty-row">
       <button id="qty-minus" aria-label="كمية أقل">−</button>
       <input id="item-qty" type="number" value="1" min="1" dir="ltr" aria-label="الكمية">

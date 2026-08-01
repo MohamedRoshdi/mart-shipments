@@ -2115,6 +2115,77 @@ test('erp: the pulled file reads as imported, and our own file never does', asyn
     permit: '4552', noPermit: '', match: true, short: false });
 });
 
+/* الصلاحيات + المورد (the owner, 2026-08-01): the entry sheet offers the supplier list, the row
+   carries what was picked, a same-batch merge keeps it, and the manager can filter by it. */
+test('الصلاحيات: the supplier rides the row and the manager filters by it', async ({ page }) => {
+  await openExpiry(page, []);
+  await page.evaluate(() => {
+    const cfg = JSON.parse(localStorage.getItem('test-config') || '{}');
+    cfg.suppliers = [{ code: '1042', name: 'المراعي' }, { code: '1088', name: 'جهينة' }];
+    localStorage.setItem('test-config', JSON.stringify(cfg));
+  });
+  await page.reload();
+  await page.click('#btn-expiry');
+
+  await page.fill('#barcode-input', '111');
+  await page.click('#btn-lookup');
+  await expect(page.locator('#item-supplier-row')).toBeVisible();
+  const options = await page.locator('#supplier-dl option').count();
+  expect(options).toBe(2);                                    // the config list, offered not forced
+  await page.fill('#item-date', '2026-10-15');
+  await page.fill('#item-supplier', 'المراعي');
+  await page.click('#btn-add-item');
+
+  // more of the same batch, no supplier typed: the row keeps the one it had
+  await page.fill('#barcode-input', '111');
+  await page.click('#btn-lookup');
+  await page.fill('#item-supplier', '');
+  await page.click('#btn-add-item');
+
+  const rows = await page.evaluate(() => JSON.parse(localStorage.getItem('test-expiry')));
+  expect(rows).toHaveLength(1);
+  expect(rows[0]).toMatchObject({ supplier: 'المراعي', qty: 2 });
+
+  // the manager side: rows from two suppliers, the select narrows the months
+  await page.evaluate(() => localStorage.setItem('test-expiry', JSON.stringify([
+    { _id: 's1', barcode: '111', name: 'لبن', qty: 2, day: 15, month: 10, year: 2026,
+      supplier: 'المراعي', createdBy: 'أحمد', createdAt: 1 },
+    { _id: 's2', barcode: '222', name: 'جبنة', qty: 1, day: 3, month: 12, year: 2026,
+      supplier: 'جهينة', createdBy: 'أحمد', createdAt: 2 },
+  ])));
+  await page.goto('/manager.html?test=1');
+  await page.fill('#pin-input', await page.evaluate(() => window.APP_CONFIG.managerPin));
+  await page.click('#btn-pin');
+  await page.click('#list-tabs button[data-tab="expiry"]');
+  await expect(page.locator('#all-months li')).toHaveCount(2);
+  await expect(page.locator('#exp-supplier-row')).toBeVisible();
+  await page.selectOption('#exp-supplier', 'جهينة');
+  await expect(page.locator('#all-months li')).toHaveCount(1);
+  await expect(page.locator('#all-months li')).toContainText('ديسمبر');
+});
+
+/* «الموظف يشاهد فقط المنتجات التي أدخلها» — a real account sees its own rows; the manager page
+   still sees everything. */
+test('الصلاحيات: an employee account sees only its own rows', async ({ page }) => {
+  await page.goto('/?test=1');
+  const KARIM = { name: 'كريم', pin: '6161', branches: ['فرع قويسنا'], perms: ['emp', 'create', 'expiry'] };
+  await seedUsers(page, [KARIM]);
+  await page.evaluate(() => {
+    localStorage.setItem('test-products', JSON.stringify({ '111': 'لبن' }));
+    localStorage.setItem('test-expiry', JSON.stringify([
+      { _id: 'a1', barcode: '111', name: 'لبن', qty: 2, day: 15, month: 10, year: 2026,
+        createdBy: 'كريم', createdAt: 1 },
+      { _id: 'a2', barcode: '111', name: 'لبن', qty: 5, day: 3, month: 12, year: 2026,
+        createdBy: 'حد تاني', createdAt: 2 },
+    ]));
+  });
+  await page.fill('#login-pin', KARIM.pin);
+  await page.click('#btn-login');
+  await page.click('#btn-expiry');
+  await expect(page.locator('#exp-months li:not(.empty)')).toHaveCount(1);   // only كريم's month
+  await expect(page.locator('#exp-months li')).toContainText('أكتوبر');
+});
+
 /* كود الصنف and its leading zeros (the owner, 2026-08-01): an Excel numeric cell stores 000045
    as 45, so the catalog and the person can spell one code two ways. Whichever comes in, the item
    must carry the CATALOG's own spelling — that is the code the ERP gets back in the TXT. */
