@@ -13,6 +13,13 @@ export function keepFresh(toast) {
     addEventListener("visibilitychange", () => {
       if (!document.hidden) reg.update().catch(() => {});
     });
+    /* The shop laptop keeps the manager page open and VISIBLE all day, so visibilitychange
+       never fires there — without this line that machine hears about a deploy only on a real
+       navigation, which an all-day page never makes (the owner's stale screens, 2026-08-01).
+       Ten minutes matches the server's max-age=600 (measured the same day), and update()
+       fetches sw.js past the HTTP cache, so a deploy reaches an open page within ~10 minutes.
+       The cost is one conditional GET to GitHub Pages — no Firestore, no quota. */
+    setInterval(() => reg.update().catch(() => {}), 10 * 60 * 1000);
   }).catch(console.error);
 
   const born = Date.now();
@@ -22,8 +29,16 @@ export function keepFresh(toast) {
     done = true;
     /* Freshly opened, or parked in the background: swap silently — the person never sees the
        old version at all. Mid-work a reload would eat an unfinished count (a count has no
-       draft), so there it only says the update is waiting. */
-    if (Date.now() - born < 20000 || document.hidden) location.reload();
-    else toast("فيه تحديث جديد — اقفل الشاشة وافتحها تاني وهيتفعّل لوحده");
+       draft), so the reload ARMS instead: it fires the moment the page next goes hidden —
+       leaving for another app, locking the screen, minimising — which is exactly the moment
+       nothing on the screen can be lost. Nobody presses anything (the owner, 2026-08-01:
+       updates must land with no Ctrl+F5, no cache clearing, on every device). */
+    if (Date.now() - born < 20000 || document.hidden) { location.reload(); return; }
+    toast("فيه تحديث جديد — هيتفعّل لوحده أول ما تسيب الشاشة");
+    addEventListener("visibilitychange", function armed() {
+      if (!document.hidden) return;
+      removeEventListener("visibilitychange", armed);
+      location.reload();
+    });
   });
 }
