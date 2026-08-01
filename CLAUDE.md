@@ -321,10 +321,16 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
 - **The manager page reads one month.** `db.listShipments(month)` / `listCounts(month)` take a
   `"YYYY-MM"`; `monthRange()` turns it into a `createdAt` range on the field the query is already
   ordered by, so no composite index is needed, and `null` still means everything (the «كل الشهور»
-  option, `app.js`, and the admin bulk delete all rely on that). The picker defaults to the current
-  month — **and `openManager()` falls back to «كل الشهور» once when that month is empty**, or the
-  shop would open the app on the first of the month and see nothing. الصلاحيات is not month-scoped
-  here: its rows are filed by the expiry date, not by the day they were typed.
+  option and the admin bulk delete rely on that). An empty view falls back **to the current month
+  first** and only then to «كل الشهور» («ثبتها على الشهر الحالي», the owner 2026-08-01) — and
+  "empty" is judged on what the view will SHOW, because the daily view loads finished shipments
+  it then hides. الصلاحيات is not month-scoped here: its rows are filed by the expiry date, not
+  by the day they were typed.
+- **The employee home is today only, and that is display, not deletion** (the owner, 2026-08-01).
+  `goHome()`/`renderMyCounts()` read the current month (the last unbounded reads in the app) and
+  show rows that are `isToday(createdAt)` — and for shipments also **not yet loaded**: the moment
+  the manager writes «تم تحميلها», the row leaves the employee's list. Yesterday's work leaves at
+  midnight regardless of its state. The manager page and the database keep everything.
 - **The supplier code is derived, never entered.** `db.supplierCodeOf(cfg, name)` resolves it from
   the saved name at save time, in `app.js` and in the manager's edit screen alike, so a shipment can
   never carry another supplier's code and renaming one moves the code with it. Old shipments keep
