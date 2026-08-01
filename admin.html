@@ -22,7 +22,40 @@
       <button id="btn-pin" class="primary big">دخول</button>
     </section>
 
+    <!-- the front page is a menu, not a wall of settings (the owner, 2026-08-01): every area is
+         one card, the work happens on its own screen, and the back arrow brings you home -->
     <section id="screen-admin" hidden>
+      <div class="actions">
+        <button class="action" data-goto="screen-data">
+          <span class="action-title">بيانات النظام</span>
+          <span class="action-sub">المستخدمين والفروع وأنواع الشحنات والموردين</span>
+        </button>
+        <button class="action" data-goto="screen-label">
+          <span class="action-title">ليبل الرف</span>
+          <span class="action-sub">المقاس والورق وشعار المحل</span>
+        </button>
+        <button class="action" data-goto="screen-folder">
+          <span class="action-title">مجلد الاستيراد</span>
+          <span class="action-sub">فين ملفات TXT بتتحفظ على الكمبيوتر</span>
+        </button>
+        <button class="action" data-goto="screen-pins">
+          <span class="action-title">الأرقام السرية</span>
+          <span class="action-sub">رقم المدير العام ورقم الأدمن</span>
+        </button>
+        <button class="action" data-goto="screen-danger">
+          <span class="action-title">أدوات خطرة</span>
+          <span class="action-sub">حذف بالجملة ومسح ملف الأصناف</span>
+        </button>
+        <button class="action" data-goto="screen-logs">
+          <span class="action-title">آخر العمليات</span>
+          <span class="action-sub">مين عمل إيه وامتى</span>
+        </button>
+      </div>
+      <h2>الجلسة</h2>
+      <button id="btn-logout" class="ghost">خروج</button>
+    </section>
+
+    <section id="screen-data" hidden>
       <h2>المستخدمين</h2>
       <p class="meta">كل مستخدم له رقم سري خاص بيه. لما يكتبه في الرابط الرئيسي، التطبيق
         بيوديه على طول للشاشة اللي من صلاحيته.</p>
@@ -48,7 +81,9 @@
       </div>
       <input id="suppliers-file" type="file" accept=".xlsx,.csv,text/csv" hidden>
       <p id="suppliers-count" class="meta"></p>
+    </section>
 
+    <section id="screen-label" hidden>
       <h2>ليبل الرف</h2>
       <p class="meta">مقاس الليبل بالمليمتر وشكل الورق وشعار المحل. المقاس الافتراضي ٦٦ × ٣٥ مم —
         نفس مقاس الليبل اللي بتشتريه. لو غيّرت المقاس، الطباعة كلها بتتظبط عليه من غير أي تعديل تاني.</p>
@@ -69,7 +104,9 @@
       </div>
       <input id="cfg-label-logo" type="file" accept="image/*" hidden>
       <div id="label-logo-preview" class="logo-preview"></div>
+    </section>
 
+    <section id="screen-folder" hidden>
       <h2>مجلد الاستيراد</h2>
       <p class="meta" id="folder-note">ده للكمبيوتر اللي بيستورد في نظام المحل: اختار عليه مجلد الاستيراد (زي <span class="code" dir="ltr">D:\import</span>) مرة واحدة، وبعدها كل ملف TXT هيتحفظ فيه لوحده من غير نافذة حفظ. الموبايل مش محتاجه — الملفات فيه بتتحمّل عادي.</p>
       <p class="meta" id="folder-now" hidden></p>
@@ -77,7 +114,9 @@
         <button id="btn-folder-pick" type="button" class="ghost">اختار مجلد الاستيراد</button>
         <button id="btn-folder-clear" type="button" class="ghost" hidden>شيل المجلد</button>
       </div>
+    </section>
 
+    <section id="screen-pins" hidden>
       <h2>الأرقام السرية</h2>
       <ul>
         <li>
@@ -96,7 +135,9 @@
         </li>
       </ul>
       <p class="meta">رقم الأدمن المكتوب جوه ملف الإعدادات في الكود بيفضل شغال دايمًا كصمام أمان — يعني لو حد غيّر الأرقام من هنا، لسه بتقدر تدخل بالرقم الأصلي وتصلّح.</p>
+    </section>
 
+    <section id="screen-danger" hidden>
       <h2>أدوات خطرة</h2>
       <ul id="danger-tools">
         <li>
@@ -125,14 +166,6 @@
           </div>
         </li>
       </ul>
-
-      <h2>الجلسة</h2>
-      <button id="btn-logout" class="ghost">خروج</button>
-
-      <div class="bottombar">
-        <span id="cfg-dirty" class="count"></span>
-        <button id="btn-save-config" class="primary grow">حفظ الإعدادات</button>
-      </div>
     </section>
 
     <section id="screen-logs" hidden>
@@ -140,6 +173,13 @@
       <ul id="logs-list"></ul>
     </section>
   </main>
+
+  <!-- one save bar for the one working copy: it follows every screen that edits the settings,
+       and shows up on the menu too while there is an unsaved change, so «حفظ» is never far -->
+  <div class="bottombar" id="cfg-savebar" hidden>
+    <span id="cfg-dirty" class="count"></span>
+    <button id="btn-save-config" class="primary grow">حفظ الإعدادات</button>
+  </div>
 
   <p class="version" id="version-line"></p>
   <div id="toast"></div>

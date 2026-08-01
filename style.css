@@ -755,6 +755,7 @@ a.lbl-link {
 /* A bottom bar is fixed, so on a screen that has one the line would sit underneath it. :has() asks
    the question directly instead of adding a body class that every navTo would have to maintain —
    and if it ever fails, the line hides behind the bar rather than anything breaking. */
-body:has(section:not([hidden]) .bottombar) .version {
+body:has(section:not([hidden]) .bottombar) .version,
+body:has(#cfg-savebar:not([hidden])) .version {
   padding-block-end: calc(var(--bar) + 26px + env(safe-area-inset-bottom));
 }

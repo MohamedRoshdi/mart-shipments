@@ -518,7 +518,7 @@ async function seedSuppliers(page, list) {
 }
 
 test('admin: the supplier list is one line each, code optional, trimmed', async ({ page }) => {
-  await openAdmin(page);
+  await openAdmin(page, 'screen-data');
   await page.fill('#cfg-suppliers', '  1042، المراعي  \n\n1088,جهينة\nبيبسي\n   \n');
   await expect(page.locator('#suppliers-count')).toHaveText('3 مورد · 2 منهم بكود');
   await page.click('#btn-save-config');
@@ -542,7 +542,7 @@ test('a 5-digit PIN reaches the manager page: the box used to cut it at 4', asyn
 });
 
 test('admin: a supplier list bigger than 300 still saves — the shop has 425', async ({ page }) => {
-  await openAdmin(page);
+  await openAdmin(page, 'screen-data');
   const lines = Array.from({ length: 425 }, (_, i) => `${1000 + i}، مورد ${i + 1}`).join('\n');
   await page.fill('#cfg-suppliers', lines);
   await expect(page.locator('#suppliers-count')).toHaveText('425 مورد · 425 منهم بكود');
@@ -554,7 +554,7 @@ test('admin: a supplier list bigger than 300 still saves — the shop has 425', 
 });
 
 test('admin: the supplier list can be imported from a sheet, header row dropped', async ({ page }) => {
-  await openAdmin(page);
+  await openAdmin(page, 'screen-data');
   await page.setInputFiles('#suppliers-file', {
     name: 'suppliers.csv',
     mimeType: 'text/csv',
@@ -720,29 +720,36 @@ test("الوحدة: the third column rides from the sheet to the item sheet and 
   expect(txt).not.toContain("كرتونة");
 });
 
-async function openAdmin(page) {
+async function openAdmin(page, target) {
   await signOut(page);                                             // else the session skips the PIN screen
   await page.goto('/admin.html?test=1');
   await page.fill('#pin-input', await page.evaluate(() => window.APP_CONFIG.adminPin));
   await page.click('#btn-pin');
   await expect(page.locator('#screen-admin')).toBeVisible();
+  // the admin page became a menu (2026-08-01): the settings live on sub-screens now
+  if (target) await page.click(`#screen-admin [data-goto="${target}"]`);
 }
 
-test('admin page: PIN gate, then every setting on one screen', async ({ page }) => {
+test('admin page: PIN gate, then a menu whose cards open the settings', async ({ page }) => {
   await page.goto('/admin.html?test=1');
   await page.fill('#pin-input', '0000');
   await page.click('#btn-pin');
   await expect(page.locator('#screen-admin')).toBeHidden();
   await expect(page.locator('#toast')).toContainText('الرقم السري غلط');
   await openAdmin(page);
+  await expect(page.locator('#screen-admin .action')).toHaveCount(6);   // the menu, not a wall
+  await page.click('#screen-admin [data-goto="screen-data"]');
   await expect(page.locator('#branches-list li')).toHaveCount(2);
   await expect(page.locator('#types-list li')).toHaveCount(3);
+  await page.click('#btn-back');                                        // and back is one tap
+  await expect(page.locator('#screen-admin')).toBeVisible();
+  await page.click('#screen-admin [data-goto="screen-pins"]');
   await expect(page.locator('#cfg-manager-pin')).toHaveValue(
     await page.evaluate(() => window.APP_CONFIG.managerPin));
 });
 
 test('admin: a saved branch and type reach the employee app and the manager', async ({ page }) => {
-  await openAdmin(page);
+  await openAdmin(page, 'screen-data');
   await page.click('#btn-add-branch');
   await page.fill('input[data-bname="2"]', 'فرع بنها');
   await page.click('#btn-add-type');
@@ -793,6 +800,7 @@ test('admin: bulk delete by type, and it is logged', async ({ page }) => {
   ])));
   await page.fill('#pin-input', await page.evaluate(() => window.APP_CONFIG.adminPin));
   await page.click('#btn-pin');
+  await page.click('#screen-admin [data-goto="screen-danger"]');
   await expect(page.locator('#btn-bulk-delete')).toHaveText('حذف المطابق (2)');
   await page.click('#bulk-type button[data-bulktype="إذن مرتجع"]');
   await expect(page.locator('#btn-bulk-delete')).toHaveText('حذف المطابق (1)');
@@ -802,6 +810,7 @@ test('admin: bulk delete by type, and it is logged', async ({ page }) => {
   await expect(page.locator('#toast')).toContainText('تم حذف 1 شحنة');
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem('test-shipments')).map(s => s.name)))
     .toEqual(['استلام 1']);
+  await page.click('#btn-back');                      // آخر العمليات opens from the menu
   await page.click('#btn-logs');
   await expect(page.locator('#logs-list li').first()).toContainText('حذف بالجملة');
 });
@@ -821,6 +830,7 @@ test('admin: bulk delete can take one day, a range of days, or a stocktake', asy
   });
   await page.fill('#pin-input', await page.evaluate(() => window.APP_CONFIG.adminPin));
   await page.click('#btn-pin');
+  await page.click('#screen-admin [data-goto="screen-danger"]');
   await expect(page.locator('#btn-bulk-delete')).toHaveText('حذف المطابق (3)');
 
   await page.fill('#bulk-from', '2026-07-21');                     // one day: both ends the same
@@ -957,7 +967,7 @@ const ADM = { name: 'الأدمن الجديد', pin: '5511', branches: [], perm
 const BOTH = { name: 'محمود', pin: '6622', branches: ['فرع قويسنا', 'فرع شبين الكوم'], perms: ['emp', 'create', 'mgr', 'download'] };
 
 test('admin: creating a user with a PIN and permissions', async ({ page }) => {
-  await openAdmin(page);
+  await openAdmin(page, 'screen-data');
   await page.click('#btn-add-user');
   await page.fill('input[data-uname="0"]', 'حسن');
   await page.fill('input[data-upin="0"]', '4411');
@@ -976,7 +986,7 @@ test('admin: creating a user with a PIN and permissions', async ({ page }) => {
 });
 
 test('admin: a user can cover both branches, or all of them', async ({ page }) => {
-  await openAdmin(page);
+  await openAdmin(page, 'screen-data');
   const names = await page.evaluate(() => window.APP_CONFIG.branches.map(b => b.name));
   await page.click('#btn-add-user');
   await page.fill('input[data-uname="0"]', 'محمود');
@@ -1024,7 +1034,7 @@ test('a two-branch user picks the branch per shipment, and the manager view span
 });
 
 test('admin: a repeated PIN is refused before it can hand over someone else\'s access', async ({ page }) => {
-  await openAdmin(page);
+  await openAdmin(page, 'screen-data');
   await page.click('#btn-add-user');
   await page.fill('input[data-uname="0"]', 'حسن');
   await page.fill('input[data-upin="0"]', await page.evaluate(() => window.APP_CONFIG.managerPin));
@@ -1051,7 +1061,7 @@ test('a user account sticks to the first phone, and only the admin frees it', as
   await expect(page.locator('#toast')).toContainText('مربوط بموبايل تاني');
   await expect(page.locator('#screen-login')).toBeVisible();
 
-  await openAdmin(page);
+  await openAdmin(page, 'screen-data');
   await page.click('#btn-save-config');                           // a plain save must not unbind anybody
   await expect(page.locator('#toast')).toContainText('تم حفظ الإعدادات');
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem('test-config')).users[0].device)).toBe(phone1);
@@ -1123,7 +1133,7 @@ test('a PIN typed on the wrong page is redirected to the right one', async ({ pa
   await expect(page.locator('#toast')).toContainText('مش من صلاحياتك');
   await page.waitForURL(/admin\.html/);
   await expect(page.locator('#screen-admin')).toBeVisible();
-  await expect(page.locator('#danger-tools')).toBeVisible();  // danger permission granted
+  await expect(page.locator('#screen-admin [data-goto="screen-danger"]')).toBeVisible();  // danger permission granted
 
   await page.click('#btn-logout');
   await page.goto('/admin.html?test=1');
@@ -1791,7 +1801,7 @@ test('label: a gap between products prints one job each, and stops when told', a
 });
 
 test('label: the admin sets the size, the paper and the logo, and the screen uses them', async ({ page }) => {
-  await openAdmin(page);
+  await openAdmin(page, 'screen-label');
   await page.fill('#cfg-label-w', '50');
   await page.fill('#cfg-label-h', '25');
   await page.click('#cfg-label-sheet button[data-sheet="a4"]');
@@ -1953,7 +1963,7 @@ test('import: a quoted field keeps its comma and its column', async ({ page }) =
 });
 
 test('suppliers: the file is read by its headings, in whatever order they come', async ({ page }) => {
-  await openAdmin(page);
+  await openAdmin(page, 'screen-data');
   // the ERP writes كود المورد first; this file writes it second, and both have to land the same
   await page.setInputFiles('#suppliers-file', {
     name: 'suppliers.csv',
@@ -2384,7 +2394,7 @@ test('the uploaded logo lands in the app bar and the tab icon', async ({ page })
 });
 
 test('admin: the folder section says what this browser can do', async ({ page }) => {
-  await openAdmin(page);
+  await openAdmin(page, 'screen-folder');
   const supported = await page.evaluate(async () => (await import('./files.js')).supported());
   // whichever way this browser goes, the screen must not lie about it: the button is live only
   // where a folder can actually be picked, and the note explains itself where it cannot

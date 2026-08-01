@@ -26,7 +26,19 @@ function toast(msg, kind) {
 
 $("version-line").textContent = versionLine();
 
-const TITLES = { "screen-pin": "العائلة مارت — النظام", "screen-admin": "إعدادات النظام", "screen-logs": "آخر العمليات" };
+const TITLES = {
+  "screen-pin": "العائلة مارت — النظام",
+  "screen-admin": "إعدادات النظام",
+  "screen-data": "بيانات النظام",
+  "screen-label": "ليبل الرف",
+  "screen-folder": "مجلد الاستيراد",
+  "screen-pins": "الأرقام السرية",
+  "screen-danger": "أدوات خطرة",
+  "screen-logs": "آخر العمليات",
+};
+// screens you can go back from, and the ones that edit the working copy (they carry the save bar)
+const DEEP = ["screen-data", "screen-label", "screen-folder", "screen-pins", "screen-danger", "screen-logs"];
+const EDITING = ["screen-data", "screen-label", "screen-pins"];
 
 let cfg = null;        // working copy of the settings
 let identity = "الأدمن";
@@ -40,21 +52,37 @@ let bulkType = ALL;
 
 const KIND_LABEL = { shipments: "الشحنات", counts: "الجرد" };
 
+let screen = "screen-pin";
+
 function render(id) {
+  screen = id;
   document.querySelectorAll("main > section").forEach(s => s.hidden = true);
   $(id).hidden = false;
   $("screen-title").textContent = TITLES[id] || "النظام";
-  $("btn-back").hidden = id !== "screen-logs";
+  $("btn-back").hidden = !DEEP.includes(id);
   $("btn-logs").hidden = id !== "screen-admin";
+  // the save bar follows the editing screens — and the menu too while a change is unsaved,
+  // so backing out of a screen never puts «حفظ» out of reach
+  $("cfg-savebar").hidden = !(EDITING.includes(id) || (dirty && id === "screen-admin"));
   scrollTo(0, 0);
 }
 
 addEventListener("popstate", (ev) => {
   const id = (ev.state && ev.state.screen) || "screen-admin";
-  render(id === "screen-logs" ? "screen-logs" : "screen-admin");
+  render(TITLES[id] && id !== "screen-pin" ? id : "screen-admin");
 });
 
 $("btn-back").onclick = () => history.back();
+
+// the menu: every card is one area, opened as its own screen
+document.querySelector("#screen-admin .actions").onclick = (e) => {
+  const btn = e.target.closest("button[data-goto]");
+  if (!btn) return;
+  const id = btn.dataset.goto;
+  history.pushState({ screen: id }, "");
+  render(id);
+  if (id === "screen-logs") loadLogs();
+};
 
 
 let cfgReady = null;
@@ -85,6 +113,8 @@ async function enterAdmin() {
   render("screen-admin");
   renderAll();
   $("danger-tools").hidden = !canDo("danger");
+  // the menu card too, or a no-permission admin opens an empty screen
+  document.querySelector('[data-goto="screen-danger"]').hidden = !canDo("danger");
   $("btn-logout").hidden = !auth.session();
   [shipments, counts] = await Promise.all([
     db.listShipments().catch(() => []),
@@ -106,6 +136,7 @@ $("btn-logout").onclick = () => {
 function markDirty() {
   dirty = true;
   $("cfg-dirty").textContent = "فيه تعديل مش محفوظ";
+  $("cfg-savebar").hidden = !(EDITING.includes(screen) || screen === "screen-admin");
 }
 
 function renderAll() {
@@ -538,6 +569,7 @@ $("btn-save-config").onclick = async () => {
   db.logAction(identity, "تغيير الإعدادات", `${payload.users.length} مستخدم · ${payload.branches.length} فرع · ${payload.shipmentTypes.length} نوع`);
   dirty = false;
   $("cfg-dirty").textContent = "";
+  $("cfg-savebar").hidden = !EDITING.includes(screen);   // a clean menu carries no save bar
   renderAll();
   toast("تم حفظ الإعدادات — الموبايلات هتشوفها مع أول فتح");
 };
@@ -649,9 +681,7 @@ $("btn-wipe-products").onclick = async () => {
 };
 
 
-$("btn-logs").onclick = async () => {
-  history.pushState({ screen: "screen-logs" }, "");
-  render("screen-logs");
+async function loadLogs() {
   $("logs-count").textContent = "بنجيب آخر العمليات...";
   $("logs-list").innerHTML = "";
   const rows = await db.listLogs().catch(() => []);
@@ -663,6 +693,12 @@ $("btn-logs").onclick = async () => {
         <div class="meta">${esc(r.who)} · ${esc(fmtWhen(r.at))}</div>
       </div>
     </li>`).join("") || `<li class="empty">مفيش عمليات مسجّلة لحد الآن</li>`;
+}
+
+$("btn-logs").onclick = () => {
+  history.pushState({ screen: "screen-logs" }, "");
+  render("screen-logs");
+  loadLogs();
 };
 
 
