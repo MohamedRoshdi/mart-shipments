@@ -680,9 +680,15 @@ debounce, or it reports false negatives.
 - App: https://mohamedroshdi.github.io/mart-shipments/
 - Manager: https://mohamedroshdi.github.io/mart-shipments/manager.html
 - Admin: https://mohamedroshdi.github.io/mart-shipments/admin.html (PIN `7007` in the code)
-- Production has **3 real users** (measured 2026-07-30), all on `فرع قويسنا`, created by the
-  owner from the admin page. Any live script that saves the settings rewrites that list —
-  read it back before assuming a run was harmless.
+- Production has **3 real users** (measured 2026-07-30, still 3 on 2026-08-01), all on
+  `فرع قويسنا`, created by the owner from the admin page. Any live script that saves the
+  settings rewrites that list — read it back before assuming a run was harmless.
+- **`config/app` measured 2026-08-01 ~07:10 UTC: `suppliers` is EMPTY (was 425) and
+  `label.logo` is empty.** Both casualties of the 2026-07-31 quota exhaustion: the admin page
+  read nothing, painted defaults, and a save overwrote the doc (guarded since `bb75ba3` — a
+  failed boot read now locks the save button). The owner re-imports the supplier file and
+  re-uploads the logo; until then supplier suggestions and the brand/label logo are absent in
+  production, and that is data, not a bug.
 - Repo: https://github.com/MohamedRoshdi/mart-shipments (public — the URL is the
   only real protection; PINs are client-side gates, not security)
 - Firebase project `shipments-alaela-mart`, Firestore `(default)` in `eur3`,
