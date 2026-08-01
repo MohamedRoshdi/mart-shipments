@@ -4,7 +4,8 @@ import * as ex from "./expiry.js";
 import { zipBlob } from "./zip.js";
 import { sheetRows, requireColumns, unitName, unitCode, clean as cell } from "./sheet.js";
 import { versionLine } from "./version.js";
-import { downloadBlob, saveText, listFolder, uniqueName, safeSegment } from "./files.js";
+import { downloadBlob, saveText, listFolder, readText, available as folderReady, uniqueName, safeSegment } from "./files.js";
+import * as erp from "./erp.js";
 import { applyBrand } from "./brand.js";
 import { keepFresh } from "./fresh.js";
 
@@ -305,6 +306,13 @@ async function openManager() {
   renderStockBranch();
   renderTabs();
   renderList();
+  /* the automatic half of «تم الاستيراد»: every visit to the list re-reads the TXT folders and
+     settles what the ERP has taken in since — quiet, so a machine with no folder says nothing */
+  folderReady().then((ok) => {
+    erpReady = ok && canDo("download");
+    renderTabs();
+    if (erpReady) checkErpFiles(true).catch(console.error);
+  }).catch(console.error);
 }
 
 function renderTabs() {
@@ -312,6 +320,7 @@ function renderTabs() {
     b.setAttribute("aria-pressed", String(b.dataset.tab === tab)));
   $("type-filter-row").hidden = tab !== "ship";   // a stocktake has no shipment type
   $("month-pick").hidden = tab === "expiry";      // a صلاحيات month is an expiry date, not a filter
+  $("btn-erp-check").hidden = tab !== "ship" || !erpReady;   // only where there are TXT files to check
   $("ships-block").hidden = tab !== "ship";
   $("counts-block").hidden = tab !== "count";
   $("expiry-block").hidden = tab !== "expiry";
@@ -698,6 +707,65 @@ const txtFolder = (type) => TXT_FOLDER[type] || safeSegment(type || "شحنات"
 
 // the fallback half of a unique name: two files for one supplier on one day are still two files
 const stampOf = (ts) => new Date(ts).toLocaleString("sv-SE").replace(/[: ]/g, "-").slice(0, 16);
+
+/* ---------- «تم الاستيراد»، لوحدها ----------
+   PowerTech leaves a rewritten TXT behind (six tab fields, «1» in the fifth of every row —
+   erp.js, measured from a real pulled file) and RENAMES it (store 1_4552.txt), so the file
+   name proves nothing and the CONTENT is the identity. This scans every folder the app can
+   reach — the four type folders and the root itself, because nobody has told us where the ERP
+   drops its copy — and matches each imported file against the shipments still waiting.
+   Two guards, both deliberate:
+   - a file that matches MORE than one waiting shipment marks nothing (two same-goods permits
+     exist — the duplicate dialog is proof) and says so, because a wrong «تم الاستيراد» is the
+     worst failure this feature has;
+   - a file already claimed by some shipment (erpFile) is never read twice. */
+const scanDirs = () => [...new Set([...Object.values(TXT_FOLDER), "اذن جرد", ""])];
+
+// one file against the waiting shipments: "hit", "double", or null (not imported / no match)
+async function claimErpFile(dir, name, waiting, used) {
+  const text = await readText(dir, name).catch(() => null);
+  if (!text || !erp.isImported(text)) return null;
+  const rows = erp.pulledRows(text);
+  const matches = waiting.filter(s => !s.erpAt && erp.sameGoods(rows, s.items));
+  if (matches.length > 1) return "double";
+  if (!matches.length) return null;
+  const s = matches[0];
+  s.erpAt = Date.now();
+  s.erpFile = name;
+  used.add(name);
+  db.markImported(s._id, s.erpAt, name);
+  db.logAction(identity, "تم الاستيراد في النظام", `${s.name} · ${name}`);
+  return "hit";
+}
+
+async function checkErpFiles(quiet) {
+  if (!(await folderReady())) {
+    if (!quiet) toast("مفيش مجلد استيراد متحدد على الجهاز ده — اختاره من صفحة النظام الأول");
+    return;
+  }
+  // oldest first, so when goods repeat the earlier permit is the one a file settles
+  const waiting = all.filter(s => s.loadedAt && !s.erpAt).sort((a, b) => a.createdAt - b.createdAt);
+  if (!waiting.length) { if (!quiet) toast("مفيش شحنات مستنية الاستيراد"); return; }
+  const used = new Set(all.map(s => s.erpFile).filter(Boolean));
+  let hits = 0, doubles = 0;
+  for (const dir of scanDirs()) {
+    for (const name of await listFolder(dir).catch(() => [])) {
+      if (!/\.txt$/i.test(name) || used.has(name)) continue;
+      const got = await claimErpFile(dir, name, waiting, used);
+      if (got === "hit") hits++;
+      else if (got === "double") doubles++;
+    }
+  }
+  if (hits) renderList();
+  if (!quiet || hits) {
+    toast(hits ? `اتأكدنا إن ${hits} شحنة اتستوردت في النظام ✓`
+      : doubles ? "فيه ملف مستورد طابق أكتر من شحنة بنفس الأصناف — حدد يدوي أنهي فيهم"
+      : "مفيش شحنات اتستوردت جديدة", hits ? "ok" : undefined);
+  }
+}
+
+$("btn-erp-check").onclick = () => checkErpFiles(false);
+let erpReady = false;      // this machine can reach the import folder (bridge or picked handle)
 
 /* Downloading the TXT is how a shipment reaches the shop's own system, so with a folder chosen it
    goes straight there — no Save dialog, folders created on the way, and never overwriting an

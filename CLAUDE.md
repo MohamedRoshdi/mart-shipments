@@ -392,14 +392,19 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
 - **The ERP state is derived, never stored.** `erpState(s)` reads `erpAt` → «تم الاستيراد»,
   `loadedAt` → «جاهزة للاستيراد», neither → «جديدة». The absence of a key IS a state, the same
   shape as «تم تحميلها»; there is no status column to keep in step with the two timestamps that
-  already say everything. **Nothing sets `erpAt` yet**, but the flag is no longer a guess:
-  `erp.js` reads it, built from a real pulled file (`store 1_4552.txt`, measured 2026-08-01) —
-  six tab fields per row, `barcode \t qty(5 decimals) \t \t \t 1 \t CRLF`, the «1» in the fifth
-  field of EVERY row is the success flag, and the ERP renames the file to `store <n>_<permit>.txt`
-  so the CONTENT (`sameGoods`) is the identity, never the name. The app's own two-field file can
-  never read as imported, and one unflagged row means not imported. What still blocks the
-  `erpAt` write: **where the pulled file lives** — whether PowerTech rewrites the file in
-  `D:\import\<folder>` in place, deletes it, or writes its copy somewhere else. Asked 2026-08-01.
+  already say everything. **`checkErpFiles()` in `manager.js` is what sets them**, from the flag
+  `erp.js` reads — built from a real pulled file (`store 1_4552.txt`, measured 2026-08-01): six
+  tab fields per row, `barcode \t qty(5 decimals) \t \t \t 1 \t CRLF`, the «1» in the fifth field
+  of EVERY row is the success flag, and the ERP renames the file to `store <n>_<permit>.txt` so
+  the CONTENT (`sameGoods`) is the identity, never the name. The scan runs quietly on every visit
+  to the manager list and loudly behind «تحديث الحالة», reads every `.txt` in the four type
+  folders **and the root** (nobody has said where the ERP drops its copy), skips files already
+  claimed (`erpFile`), and — the load-bearing guard — **a file matching more than one waiting
+  shipment marks nothing** and says so: two same-goods permits are real, and a wrong
+  «تم الاستيراد» is the worst failure this feature has. `db.markImported` is fire-and-forget.
+  **UNVERIFIED on the real machine**: if PowerTech keeps its rewritten copy OUTSIDE the chosen
+  import folder, the scan cannot see it — the shop then points the folder picker at wherever the
+  `store *.txt` files actually land, or tells us the path.
 - **The manager opens on «النهارده والمعلّق», and that is a filter, not a query.** `#month-pick`
   gained it as its first option and its default. It reads **this month and last** — two bounded
   reads, because an unfinished shipment must not vanish at midnight on the 1st — and then shows

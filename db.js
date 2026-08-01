@@ -87,6 +87,20 @@ export async function updateShipment(id, data) {
 /* A shipment is «تم تحميلها» once someone has taken it into the shop's own system. Two people
    doing that twice is a double stock entry, so who and when are written down and shown before a
    second one is allowed. Absent = nobody has loaded it yet. */
+/* «تم الاستيراد»: the two keys erpState() reads. Written when a pulled ERP file proves the
+   import (manager.js checkErpFiles); fire-and-forget like every shipment write. */
+export async function markImported(id, at, file) {
+  if (TEST_MODE) {
+    const all = lsArr('test-shipments')
+      .map((s) => (String(s.createdAt) === id ? { ...s, erpAt: at, erpFile: file } : s));
+    localStorage.setItem('test-shipments', JSON.stringify(all));
+    return;
+  }
+  await live();
+  fs.updateDoc(fs.doc(dbRef, 'shipments', id), { erpAt: at, erpFile: String(file).slice(0, 200) })
+    .catch((e) => dispatchEvent(new CustomEvent('db-error', { detail: e })));
+}
+
 export async function markLoaded(id, who, at) {
   if (TEST_MODE) {
     const all = lsArr('test-shipments')

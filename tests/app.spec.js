@@ -2115,6 +2115,53 @@ test('erp: the pulled file reads as imported, and our own file never does', asyn
     permit: '4552', noPermit: '', match: true, short: false });
 });
 
+/* «تم الاستيراد» happens on its own: the manager list scans the TXT folders, reads every file
+   the ERP has rewritten (the «1» flag), and settles it against the waiting shipments by CONTENT
+   — the ERP renames files, so goods are the identity. A file matching two same-goods shipments
+   marks neither: a wrong «تم الاستيراد» is the worst failure this feature has. */
+test('a pulled ERP file flips its shipment to تم الاستيراد, and an ambiguous one marks nothing', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.mart = {
+      root: async () => 'D:\\import',
+      saveText: async () => {},
+      listFolder: async (dir) => (dir === 'اذن استلام' ? ['store 1_4552.txt', 'store 1_4600.txt'] : []),
+      readText: async (dir, name) => (name === 'store 1_4552.txt'
+        ? '111\t2.00000\t\t\t1\t\r\n222\t5.00000\t\t\t1\t\r\n'   // imported: flag on every row
+        : '333\t4.00000\t\t\t1\t\r\n'),                          // imported, but matches the twins
+    };
+  });
+  await signOut(page);
+  await page.goto('/manager.html?test=1');
+  await page.evaluate(() => {
+    const row = (name, createdAt, items) => ({
+      name, createdBy: 'أحمد', branch: 'فرع قويسنا', type: 'إذن استلام', createdAt,
+      loadedBy: 'المدير', loadedAt: createdAt + 1, items,
+    });
+    localStorage.setItem('test-shipments', JSON.stringify([
+      row('المراعي', Date.now() - 3000, [{ barcode: '111', name: 'لبن', qty: 2 }, { barcode: '222', name: 'جبنة', qty: 5 }]),
+      // two waiting shipments with identical goods: the ambiguous file must settle neither
+      row('توأم أ', Date.now() - 2000, [{ barcode: '333', name: 'رز', qty: 4 }]),
+      row('توأم ب', Date.now() - 1000, [{ barcode: '333', name: 'رز', qty: 4 }]),
+    ]));
+  });
+  await page.fill('#pin-input', await page.evaluate(() => window.APP_CONFIG.managerPin));
+  await page.click('#btn-pin');
+
+  await expect(page.locator('#btn-erp-check')).toBeVisible();      // a folder is reachable here
+  const tagOf = (name) => page.locator('#all-shipments li', { hasText: name }).locator('.tag-erp');
+  await expect(tagOf('المراعي')).toHaveText('تم الاستيراد');       // settled automatically, no tap
+  await expect(tagOf('توأم أ')).toHaveText('جاهزة للاستيراد');
+  await expect(tagOf('توأم ب')).toHaveText('جاهزة للاستيراد');
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('test-shipments')));
+  expect(saved.find(s => s.name === 'المراعي').erpFile).toBe('store 1_4552.txt');
+  expect(typeof saved.find(s => s.name === 'المراعي').erpAt).toBe('number');
+  expect(saved.find(s => s.name === 'توأم أ').erpAt).toBeUndefined();
+
+  // the button is the manual re-check, and with nothing new it says so
+  await page.click('#btn-erp-check');
+  await expect(page.locator('#toast')).toContainText('طابق أكتر من شحنة');
+});
+
 /* «شاشة الموظف تعرض شحنات اليوم فقط» (the owner, 2026-08-01): yesterday's rows and anything the
    manager already took in («تم تحميلها») leave the employee's home — display only, the manager
    page and the database keep everything. */
