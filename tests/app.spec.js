@@ -2115,6 +2115,37 @@ test('erp: the pulled file reads as imported, and our own file never does', asyn
     permit: '4552', noPermit: '', match: true, short: false });
 });
 
+/* كود الصنف and its leading zeros (the owner, 2026-08-01): an Excel numeric cell stores 000045
+   as 45, so the catalog and the person can spell one code two ways. Whichever comes in, the item
+   must carry the CATALOG's own spelling — that is the code the ERP gets back in the TXT. */
+test('a code typed without its leading zeros still saves the catalog spelling', async ({ page }) => {
+  await page.goto('/?test=1');
+  await page.evaluate(() => {
+    localStorage.setItem('employeeName', 'أحمد');
+    localStorage.setItem('test-products', JSON.stringify({
+      '000045': { name: 'سكر ١ كجم' },   // the catalog kept its zeros
+      '77': { name: 'ملح' },             // and this one lost them at import
+    }));
+  });
+  await page.reload();
+  await page.click('#btn-new');
+  await page.fill('#shipment-name', 'تجربة الأصفار');
+
+  await page.fill('#barcode-input', '45');                 // typed short
+  await page.click('#btn-lookup');
+  await expect(page.locator('#item-barcode')).toHaveText('000045');   // shown as stored
+  await page.click('#btn-add-item');
+
+  await page.fill('#barcode-input', '000077');             // typed long
+  await page.click('#btn-lookup');
+  await expect(page.locator('#item-barcode')).toHaveText('77');
+  await page.click('#btn-add-item');
+
+  await page.click('#btn-save-shipment');
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('test-shipments')));
+  expect(saved[0].items.map(i => i.barcode).sort()).toEqual(['000045', '77']);
+});
+
 /* Found as REAL data loss 2026-08-01: the shop's 425-supplier list was wiped because the admin
    page swallowed a failed config read (quota exhaustion), showed the code defaults as if they
    were the saved settings, and «حفظ» wrote those defaults over the real doc. A page that could

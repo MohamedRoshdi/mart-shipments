@@ -406,16 +406,17 @@ const WARN = {
 };
 
 async function onBarcode(code) {
-  const p = await db.getProduct(code);
-  state.currentBarcode = code;
+  const p = await db.resolveProduct(code);
+  // the catalog's own spelling of the code is what the item carries — never the typed one
+  state.currentBarcode = (p && p.barcode) || code;
   state.currentName = (p && p.name) || "";
   // each branch has its own sheet, so the number depends on the branch this count is for
   state.currentSys = db.stockFor(p, state.branch);
   state.currentUnit = (p && p.unit) || "";     // information only: it is never counted or summed
   const known = state.currentName !== "";
   // a label needs a name and nothing else: no quantity, no sheet, straight to the preview
-  if (labeling() && known) { clearFind(); showLabel(code, state.currentName, p && p.price); return; }
-  $("item-barcode").textContent = code;
+  if (labeling() && known) { clearFind(); showLabel(state.currentBarcode, state.currentName, p && p.price); return; }
+  $("item-barcode").textContent = state.currentBarcode;   // the code as the catalog spells it
   $("item-name").textContent = known ? state.currentName : "صنف غير مسجّل في ملف الأصناف";
   $("item-name").classList.toggle("unknown", !known);
   $("item-unit").hidden = !(known && state.currentUnit);

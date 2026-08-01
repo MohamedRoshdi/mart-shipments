@@ -162,6 +162,22 @@ export async function getProductName(barcode) {
   return p ? p.name : null;
 }
 
+/* كود الصنف keeps its leading zeros in one of the ERP's exports and loses them in another — an
+   Excel NUMERIC cell stores 000045 as 45, a CSV keeps the zeros — so the catalog and the person
+   can spell the same code two ways. Whichever spelling comes in, the item must carry the
+   CATALOG's own spelling: that is the code the ERP gets back in the TXT (the owner, 2026-08-01).
+   Only short all-digit codes get the second look — an unknown EAN is a normal, frequent event
+   (the refusal sheet) and must not pull the whole catalog just to be refused. */
+const zeroless = (c) => String(c).replace(/^0+(?=\d)/, '');
+export async function resolveProduct(code) {
+  const c = String(code == null ? '' : code).trim();
+  const direct = await getProduct(c);
+  if (direct) return direct;                     // row() already carries the barcode
+  if (!/^\d{1,8}$/.test(c)) return null;
+  const rows = await catalogIndex().catch(() => []);
+  return rows.find((r) => zeroless(r.barcode) === zeroless(c)) || null;
+}
+
 // first page only for the default view; searching goes to the server
 export async function listProducts() {
   if (TEST_MODE) {
