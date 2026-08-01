@@ -2115,6 +2115,24 @@ test('erp: the pulled file reads as imported, and our own file never does', asyn
     permit: '4552', noPermit: '', match: true, short: false });
 });
 
+/* Found as REAL data loss 2026-08-01: the shop's 425-supplier list was wiped because the admin
+   page swallowed a failed config read (quota exhaustion), showed the code defaults as if they
+   were the saved settings, and «حفظ» wrote those defaults over the real doc. A page that could
+   not read must not be allowed to write. */
+test('admin: a failed settings read locks the save button', async ({ page }) => {
+  await page.addInitScript(() => {
+    const real = Storage.prototype.getItem;
+    Storage.prototype.getItem = function (k) {
+      if (k === 'test-config') throw new Error('quota exhausted');
+      return real.call(this, k);
+    };
+  });
+  await signOut(page);
+  await page.goto('/admin.html?test=1');
+  await expect(page.locator('#btn-save-config')).toBeDisabled();
+  await expect(page.locator('#toast')).toContainText('الحفظ متقفل');
+});
+
 /* «تم الاستيراد» happens on its own: the manager list scans the TXT folders, reads every file
    the ERP has rewritten (the «1» flag), and settles it against the waiting shipments by CONTENT
    — the ERP renames files, so goods are the identity. A file matching two same-goods shipments

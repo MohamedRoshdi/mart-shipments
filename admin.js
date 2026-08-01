@@ -477,6 +477,8 @@ const isPin = (p) => /^\d{4,8}$/.test(p);
 const SUPPLIER_CAP = 1000;
 
 $("btn-save-config").onclick = async () => {
+  // belt to the disabled-button braces: a click that races the boot must hit the same wall
+  if (!cfgFromServer) { toast("الإعدادات ما اتقرتش من السيرفر — ما ينفعش نحفظ فوقها", "bad"); return; }
   readInputs();
   if (!cfg.branches.length) { toast("لازم فرع واحد على الأقل"); return; }
   if (!cfg.shipmentTypes.filter(Boolean).length) { toast("لازم نوع شحنة واحد على الأقل"); return; }
@@ -687,10 +689,21 @@ updateSync();
 history.replaceState({ screen: "screen-pin" }, "");
 render("screen-pin");
 
+/* Whether the boot read of config/app actually ANSWERED. A swallowed failure here is how the
+   shop's supplier list got wiped (found 2026-08-01, quota exhaustion): the page showed the code
+   defaults as if they were the saved settings, and «حفظ» wrote those defaults over the real doc.
+   A page that could not read must not be allowed to write. */
+let cfgFromServer = false;
+
 cfgReady = (async () => {
   await db.initDb().catch(console.error);
-  const stored = await db.getConfig().catch(() => ({}));
-  Object.assign(window.APP_CONFIG, stored);
+  const stored = await db.getConfig().then((c) => { cfgFromServer = true; return c; })
+    .catch((e) => { console.error(e); return null; });
+  if (!stored) {
+    toast("مقدرناش نقرا الإعدادات من السيرفر — الحفظ متقفل عشان الإعدادات المحفوظة ما تتمسحش. اقفل الصفحة وجرّب تاني بعد شوية.", "bad");
+  }
+  $("btn-save-config").disabled = !cfgFromServer;
+  Object.assign(window.APP_CONFIG, stored || {});
   applyBrand(window.APP_CONFIG);
   cfg = {
     managerPin: window.APP_CONFIG.managerPin,
