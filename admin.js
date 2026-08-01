@@ -31,13 +31,14 @@ const TITLES = {
   "screen-admin": "إعدادات النظام",
   "screen-data": "بيانات النظام",
   "screen-label": "ليبل الرف",
+  "screen-btw": "قوالب الطباعة",
   "screen-folder": "مجلد الاستيراد",
   "screen-pins": "الأرقام السرية",
   "screen-danger": "أدوات خطرة",
   "screen-logs": "آخر العمليات",
 };
 // screens you can go back from, and the ones that edit the working copy (they carry the save bar)
-const DEEP = ["screen-data", "screen-label", "screen-folder", "screen-pins", "screen-danger", "screen-logs"];
+const DEEP = ["screen-data", "screen-label", "screen-btw", "screen-folder", "screen-pins", "screen-danger", "screen-logs"];
 const EDITING = ["screen-data", "screen-label", "screen-pins"];
 
 let cfg = null;        // working copy of the settings
@@ -82,6 +83,7 @@ document.querySelector("#screen-admin .actions").onclick = (e) => {
   history.pushState({ screen: id }, "");
   render(id);
   if (id === "screen-logs") loadLogs();
+  if (id === "screen-btw") renderBtw().catch(console.error);
 };
 
 
@@ -253,6 +255,46 @@ $("btn-folder-clear").onclick = async () => {
   await files.forgetFolder();
   toast("اتشال المجلد — الملفات هترجع تتحمّل زي الأول");
   renderFolder();
+};
+
+/* ---------- BarTender templates: .btw files in «قوالب الطباعة» under the picked root.
+   The folder IS the registry — nothing about a template lives in Firestore, because a .btw can
+   outgrow the 1MB doc cap and only the machine with BarTender can use it anyway. ---------- */
+
+const BT_TPL = "قوالب الطباعة";
+
+async function renderBtw() {
+  const ok = await files.available();
+  $("btw-none").hidden = ok;
+  $("btn-btw-add").disabled = !ok;
+  const tpls = ok ? (await files.listFiles(BT_TPL)).filter((f) => /\.btw$/i.test(f.name)) : [];
+  $("btw-list").innerHTML = tpls.length ? tpls.map((t) => `<li>
+      <div class="card-main"><div class="card-title">${esc(t.name)}</div></div>
+      <button type="button" class="ghost" data-btw-del="${escAttr(t.name)}">حذف</button>
+    </li>`).join("") : `<li class="empty">مفيش قوالب لسه — ارفع ملف btw وهيظهر هنا وفي شاشة مهام الطباعة.</li>`;
+}
+
+$("btn-btw-add").onclick = () => $("btw-file").click();
+$("btw-file").onchange = async (e) => {
+  const file = e.target.files[0];
+  e.target.value = "";
+  if (!file) return;
+  const out = await files.saveBytes(BT_TPL, file.name, await file.arrayBuffer());
+  if (!out) { toast("مفيش مجلد متاح على الجهاز ده — اختار مجلد الاستيراد الأول", "bad"); return; }
+  db.logAction(identity, "رفع قالب طباعة", file.name);
+  toast(`القالب اترفع: ${out.path}`, "ok");
+  renderBtw().catch(console.error);
+};
+
+$("btw-list").onclick = async (e) => {
+  const b = e.target.closest("button[data-btw-del]");
+  if (!b) return;
+  const name = b.dataset.btwDel;
+  if (!confirm(`نمسح قالب «${name}»؟`)) return;
+  if (!(await files.removeFile(BT_TPL, name))) { toast("مقدرناش نمسح الملف", "bad"); return; }
+  db.logAction(identity, "حذف قالب طباعة", name);
+  toast("اتمسح القالب");
+  renderBtw().catch(console.error);
 };
 
 $("btn-label-logo-clear").onclick = () => {

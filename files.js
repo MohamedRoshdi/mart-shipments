@@ -148,14 +148,19 @@ export async function listFolder(folder) {
   } catch { return []; }             // no such folder yet is not an error, it is "nothing there"
 }
 
+/* In test mode a folder is a localStorage fixture (`test-datafiles`: { "<folder>": [{name,
+   mtime, text}] }), because Playwright cannot grant a directory picker. Everything that walks
+   real folders reads and writes this shape instead under ?test=1. */
+const testMode = () => typeof location !== "undefined" && location.search.includes("test=1");
+const testFiles = () => JSON.parse(localStorage.getItem("test-datafiles") || "{}");
+const putTestFiles = (all) => localStorage.setItem("test-datafiles", JSON.stringify(all));
+
 /* Auto-import needs more than names: the newest file wins, so the entry carries the mtime and
    the File itself. File System Access only — the desktop bridge has no mtimes, and the machine
-   that runs this is Chrome on the website (the owner, 2026-08-01). In test mode the folder is a
-   localStorage fixture (`test-datafiles`), because Playwright cannot grant a directory picker. */
+   that runs this is Chrome on the website (the owner, 2026-08-01). */
 export async function listFiles(folder) {
-  if (typeof location !== "undefined" && location.search.includes("test=1")) {
-    const all = JSON.parse(localStorage.getItem("test-datafiles") || "{}")[folder] || [];
-    return all.map((f) => ({
+  if (testMode()) {
+    return (testFiles()[folder] || []).map((f) => ({
       name: f.name,
       lastModified: f.mtime,
       file: { name: f.name, lastModified: f.mtime,
@@ -174,6 +179,47 @@ export async function listFiles(folder) {
     }
     return out;
   } catch { return []; }             // no such folder yet is not an error, it is "nothing there"
+}
+
+/* A binary file into a folder — what the BarTender template upload writes. No download fallback
+   on purpose: a .btw outside the templates folder is a file BarTender will never see, so a
+   machine with no usable folder gets a null and the caller says so. */
+export async function saveBytes(folder, name, buf) {
+  const safe = safeSegment(name);
+  if (testMode()) {
+    const all = testFiles();
+    all[folder] = (all[folder] || []).filter((f) => f.name !== safe);
+    all[folder].push({ name: safe, mtime: Date.now(), text: new TextDecoder().decode(buf) });
+    putTestFiles(all);
+    return { how: "disk", path: `${folder}\\${safe}` };
+  }
+  const root = await usableRoot(false);
+  if (!root) return null;
+  try {
+    const dir = await folderHandle(root, folder, true);
+    const file = await dir.getFileHandle(safe, { create: true });
+    const w = await file.createWritable();
+    await w.write(buf);
+    await w.close();
+    return { how: "disk", path: `${root.name}\\${folder}\\${safe}` };
+  } catch (e) { console.error(e); return null; }
+}
+
+/** Delete one file from a folder. True when it is gone (or was never there). */
+export async function removeFile(folder, name) {
+  if (testMode()) {
+    const all = testFiles();
+    all[folder] = (all[folder] || []).filter((f) => f.name !== name);
+    putTestFiles(all);
+    return true;
+  }
+  const root = await usableRoot(false);
+  if (!root) return false;
+  try {
+    const dir = await folderHandle(root, folder, false);
+    await dir.removeEntry(name);
+    return true;
+  } catch { return false; }
 }
 
 /** One file's text, or null when it is not there. This is what the ERP check reads back. */

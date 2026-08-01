@@ -38,6 +38,10 @@
           <span class="action-title">مجلد الاستيراد</span>
           <span class="action-sub">فين ملفات TXT بتتحفظ على الكمبيوتر</span>
         </button>
+        <button class="action" data-goto="screen-btw">
+          <span class="action-title">قوالب الطباعة</span>
+          <span class="action-sub">ملفات BarTender اللي بتطبع بيها</span>
+        </button>
         <button class="action" data-goto="screen-pins">
           <span class="action-title">الأرقام السرية</span>
           <span class="action-sub">رقم المدير العام ورقم الأدمن</span>
@@ -104,6 +108,20 @@
       </div>
       <input id="cfg-label-logo" type="file" accept="image/*" hidden>
       <div id="label-logo-preview" class="logo-preview"></div>
+    </section>
+
+    <section id="screen-btw" hidden>
+      <h2>قوالب الطباعة</h2>
+      <p class="meta">القوالب دي ملفات BarTender (btw) بتتحط في مجلد «قوالب الطباعة» جوه مجلد
+        الاستيراد على الكمبيوتر. المتصفح مش بيعرف يفتح ملف btw بنفسه — التطبيق بيجهّز بيانات
+        الطباعة ويسيبها لـ BarTender على الجهاز، ونظام الطباعة الحالي جوه التطبيق شغال زي ما هو.</p>
+      <p class="meta" id="btw-none" hidden>مفيش مجلد مختار على الجهاز ده — اختار مجلد الاستيراد
+        الأول من صفحة «مجلد الاستيراد».</p>
+      <ul id="btw-list"></ul>
+      <div class="row-actions">
+        <button id="btn-btw-add" type="button" class="ghost">رفع قالب btw</button>
+      </div>
+      <input id="btw-file" type="file" accept=".btw" hidden>
     </section>
 
     <section id="screen-folder" hidden>

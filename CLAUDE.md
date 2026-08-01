@@ -54,7 +54,7 @@ destructive tools. Arabic-only UI, RTL, offline-capable, free to run.
 | `sheet.js` | everything about reading a spreadsheet: `sheetRows` (**a real `.xlsx`** — zip walk + `DecompressionStream` — or CSV read field by field, quotes and all, and the only place that knows Excel writes Arabic as windows-1256), `headerMap` (columns by Arabic heading, so the shop's own export order works), **`requireColumns`** (the guard: no headings → positional, headings with a column missing → **throws in Arabic naming it**), `unitName` (unit **code** → word, `null` for a code the table does not know) and `unitCode` (the number itself, kept only when it is 1–5). Used by the catalog/stock import (manager) and the supplier import (admin) |
 | `style.css` | one stylesheet for all three pages |
 | `desktop/` | the Windows build: `main.js` (serves the repo root over `http://127.0.0.1` on a random port, plus the three IPC handlers), `preload.js` (the whole `window.mart` contract), `package.json` (electron + electron-builder, kept entirely in here so the repo no-build rule still holds for the web target). **Never loaded by the web version** |
-| `files.js` | where a file goes when it leaves the app: `window.mart` bridge → File System Access folder handle (IndexedDB, chosen once) → the `<a download>` that has always happened. Also `listFolder`/`readText` (what the ERP check will read back), `listFiles` (names + mtimes + the `File`s themselves — what the auto-import scans; in `?test=1` it reads the `test-datafiles` localStorage fixture), `uniqueName`, `safeSegment`, and the single copy of `downloadBlob` |
+| `files.js` | where a file goes when it leaves the app: `window.mart` bridge → File System Access folder handle (IndexedDB, chosen once) → the `<a download>` that has always happened. Also `listFolder`/`readText` (what the ERP check will read back), `listFiles` (names + mtimes + the `File`s themselves — what the auto-import scans; in `?test=1` it reads the `test-datafiles` localStorage fixture), `uniqueName`, `safeSegment`, `saveBytes`/`removeFile` (the BarTender template upload/delete — binary, FSA-only, no download fallback on purpose), and the single copy of `downloadBlob` |
 | `version.js` | the release, in one place: `APP_NAME`, `VERSION`, `BUILD` and `versionLine()`. All three pages print it in a footer. `BUILD` is a literal on purpose — `new Date()` would print the day the page was *opened*, which looks like a build date and is not one |
 | `sw.js`, `manifest.json` | **one** installable PWA, on the main URL. `manager.html` and `admin.html` carry no manifest: the PIN routes people to their screen (`auth.landingPage`), and the home screen links to the other two. Dropped 2026-07-31 on the owner's call — a phone with three near-identical icons was the confusing part. |
 | `firebase-config.js` | Firebase keys **plus** `APP_CONFIG`: PINs (incl. `adminPin`), branches, shipment types, suppliers, label settings |
@@ -314,6 +314,19 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   the rest and says so in a `warn` toast. The owner updates ملف الأصناف first, then imports again.
   `saveProductName` only writes the keys it was given and `writeProduct` merges, so an import that
   has no price column leaves the price alone.
+- **BarTender never runs in the browser, and the app never opens a `.btw`** (feasibility closed
+  with the owner 2026-08-01: «التطبيق يجهز بيانات الطباعة ويسلمها لـ BarTender»). The folder IS
+  the registry: templates are the `.btw` files in «قوالب الطباعة» under the picked root —
+  uploaded/deleted from the admin's قوالب الطباعة screen (`saveBytes`/`removeFile`), never stored
+  in Firestore (a `.btw` can outgrow the 1MB doc cap, and only the machine with BarTender can use
+  it). On the job screen, `renderBtRow()` in `app.js` lists them at print time — a phone lists
+  nothing and the row stays hidden — and «طباعة BarTender» writes the job's rows to
+  «مهام BarTender» as a BOM'd CSV («القالب، الباركود، اسم الصنف، السعر، النسخ»), template name in
+  the file name AND in every row so his integration routes either way. A successful disk write IS
+  the print (the «تم تحميلها» receipt idea): it stamps `printedBy`/`printedAt`. The built-in HTML
+  «طباعة» is untouched — that is what keeps the owner free to adopt templates later. **His side,
+  unbuilt here**: BarTender Integration Builder watching «مهام BarTender» and applying the
+  template to the CSV.
 - **The nightly import is the manager page opening, not a service** (the owner's own shape,
   2026-08-01: «أول ما أفتح صفحة المدير يراجع المجلدات»). `autoImportFiles()` in `manager.js` runs
   once per page life from `openManager()`, gated on the `import` permission: it lists

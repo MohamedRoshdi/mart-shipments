@@ -4,6 +4,7 @@ import * as ex from "./expiry.js";
 import * as lbl from "./label.js";
 
 import { versionLine } from "./version.js";
+import { listFiles, saveText } from "./files.js";
 import { applyBrand } from "./brand.js";
 import { keepFresh } from "./fresh.js";
 
@@ -964,7 +965,45 @@ $("jobs-list").onclick = (e) => {
   job = jobs.find((j) => j._id === b.dataset.job);
   if (!job) return;
   renderJob();
+  renderBtRow().catch(console.error);
   navTo("screen-job");
+};
+
+/* --- BarTender (the owner's shape, 2026-08-01): the app never opens a .btw — it hands the DATA
+   over. The templates are the .btw files in «قوالب الطباعة» under the picked root, listed at
+   print time on the machine that has them (a phone lists nothing and the row stays hidden);
+   the job's rows go to «مهام BarTender» as a CSV BarTender watches, template name in the file
+   name AND in every row so his integration can route either way. The built-in «طباعة» above
+   is untouched — that is what keeps him free to adopt any template later. --- */
+
+const BT_TPL = "قوالب الطباعة", BT_OUT = "مهام BarTender";
+
+async function renderBtRow() {
+  $("job-bt-row").hidden = true;
+  const tpls = (await listFiles(BT_TPL)).filter((f) => /\.btw$/i.test(f.name));
+  if (!tpls.length) return;
+  $("job-bt-tpl").innerHTML = tpls.map((t) => `<option>${esc(t.name)}</option>`).join("");
+  $("job-bt-row").hidden = false;
+}
+
+$("job-bt-print").onclick = async () => {
+  const tpl = $("job-bt-tpl").value;
+  const rows = [["القالب", "الباركود", "اسم الصنف", "السعر", "النسخ"],
+    ...job.items.map((r) => [tpl, r.barcode, r.name, r.price || "",
+      Math.min(200, Math.max(1, parseInt(r.copies, 10) || 1))])];
+  const csv = "﻿" + rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\r\n");
+  const out = await saveText(BT_OUT, `${tpl.replace(/\.btw$/i, "")} - ${job.name} - ${Date.now()}.csv`, csv);
+  if (out.how !== "disk") {
+    toast("مفيش مجلد متاح دلوقتي — الملف اتحمّل، انقله لمجلد «مهام BarTender» بنفسك", "warn");
+    return;
+  }
+  // handing BarTender the file IS the print, the same receipt idea as «تم تحميلها»
+  const patch = { printedBy: myName(), printedAt: Date.now() };
+  db.updateJob(job._id, patch);
+  Object.assign(job, patch);
+  renderJob();
+  renderJobs();
+  toast(`اتبعت لـ BarTender: ${out.path}`, "ok");
 };
 
 $("job-ready").onclick = () => {

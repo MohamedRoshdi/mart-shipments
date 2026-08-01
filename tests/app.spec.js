@@ -737,7 +737,7 @@ test('admin page: PIN gate, then a menu whose cards open the settings', async ({
   await expect(page.locator('#screen-admin')).toBeHidden();
   await expect(page.locator('#toast')).toContainText('الرقم السري غلط');
   await openAdmin(page);
-  await expect(page.locator('#screen-admin .action')).toHaveCount(6);   // the menu, not a wall
+  await expect(page.locator('#screen-admin .action')).toHaveCount(7);   // the menu, not a wall
   await page.click('#screen-admin [data-goto="screen-data"]');
   await expect(page.locator('#branches-list li')).toHaveCount(2);
   await expect(page.locator('#types-list li')).toHaveCount(3);
@@ -2175,6 +2175,70 @@ test('files: the names are safe and unique, and no folder means the old download
 /* The desktop build's whole contract with the app is window.mart, and scripts/desktop-check.cjs
    proves the Electron side of it. This is the other side: that files.js actually prefers a bridge
    when one is there, and never falls back to a download or a picker in front of it. */
+/* BarTender (the owner's shape, 2026-08-01): the app never opens a .btw — it lists the templates
+   sitting in «قوالب الطباعة» and hands the job's DATA to «مهام BarTender» as a CSV. The bridge
+   fake stands in for the laptop's folder; the templates come from the test-datafiles fixture. */
+test('BarTender: a job goes out as a CSV named after the template, and that counts as printed', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.mart = {
+      root: async () => 'C:\\test',
+      saveText: async (folder, name, text) => { window.__bt = { folder, name, text }; },
+      readText: async () => null,
+      listFolder: async () => [],
+    };
+  });
+  await page.goto('/?test=1');
+  await page.evaluate(() => {
+    localStorage.setItem('employeeName', 'أحمد');
+    localStorage.setItem('test-jobs', JSON.stringify([
+      { name: 'ليبلات الزيوت', createdBy: 'أحمد', createdAt: 1234, items: [{ barcode: '111', name: 'زيت عافية', price: '45', copies: 2 }] },
+    ]));
+    localStorage.setItem('test-datafiles', JSON.stringify({
+      'قوالب الطباعة': [{ name: 'رف صغير.btw', mtime: 1, text: 'x' }],
+    }));
+  });
+  await page.reload();
+  await page.click('#btn-jobs');
+  await page.click('#jobs-list button[data-job]');
+  await expect(page.locator('#job-bt-row')).toBeVisible();
+  await expect(page.locator('#job-bt-tpl option')).toHaveText(['رف صغير.btw']);
+  await page.click('#job-bt-print');
+  await expect(page.locator('#toast')).toContainText('اتبعت لـ BarTender');
+  const sent = await page.evaluate(() => window.__bt);
+  expect(sent.folder).toBe('مهام BarTender');
+  expect(sent.name).toContain('رف صغير - ليبلات الزيوت');
+  expect(sent.text).toContain('"رف صغير.btw","111","زيت عافية","45","2"');
+  // handing BarTender the file IS the print — the stamp pair lands like the built-in «طباعة»
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('test-jobs'))[0]);
+  expect(saved.printedBy).toBe('أحمد');
+  await expect(page.locator('#job-meta')).toContainText('تمت طباعتها');
+});
+
+test('BarTender templates: the admin page uploads a .btw, lists it, deletes it', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.mart = {
+      root: async () => 'C:\\test',
+      saveText: async () => {},
+      readText: async () => null,
+      listFolder: async () => [],
+    };
+  });
+  await openAdmin(page, 'screen-btw');
+  await expect(page.locator('#btw-list li.empty')).toBeVisible();
+  await page.setInputFiles('#btw-file', {
+    name: 'رف كبير.btw',
+    mimeType: 'application/octet-stream',
+    buffer: Buffer.from('btw-bytes', 'utf8'),
+  });
+  await expect(page.locator('#toast')).toContainText('القالب اترفع');
+  await expect(page.locator('#btw-list .card-title')).toHaveText(['رف كبير.btw']);
+  page.on('dialog', (d) => d.accept());
+  await page.click('#btw-list button[data-btw-del]');
+  await expect(page.locator('#btw-list li.empty')).toBeVisible();
+  const left = await page.evaluate(() => JSON.parse(localStorage.getItem('test-datafiles'))['قوالب الطباعة']);
+  expect(left).toEqual([]);
+});
+
 test('files: a desktop bridge wins over the picker and the download', async ({ page }) => {
   await page.goto('/?test=1');
   const r = await page.evaluate(async () => {
