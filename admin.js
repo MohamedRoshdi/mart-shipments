@@ -798,6 +798,9 @@ render("screen-pin");
    A page that could not read must not be allowed to write. */
 let cfgFromServer = false;
 
+// a failed write or listener must say so, same as the other two pages
+addEventListener("db-error", () => toast("مشكلة في مزامنة البيانات — اتأكد من الاتصال والإعدادات", "bad"));
+
 cfgReady = (async () => {
   await db.initDb().catch(console.error);
   const stored = await db.getConfig().then((c) => { cfgFromServer = true; return c; })

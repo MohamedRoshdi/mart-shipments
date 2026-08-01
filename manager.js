@@ -172,7 +172,7 @@ function renderFilter() {
   // one branch = nothing to filter; the title already says which one, so the row is just noise
   $("branch-filter-row").hidden = locked;
   $("branch-filter").innerHTML = opts.map(b =>
-    `<button type="button" data-branch="${esc(b)}" aria-pressed="${b === filter}" ${locked ? "disabled" : ""}>${esc(shortBranch(b))}</button>`).join("");
+    `<button type="button" data-branch="${escAttr(b)}" aria-pressed="${b === filter}" ${locked ? "disabled" : ""}>${esc(shortBranch(b))}</button>`).join("");
 }
 
 $("branch-filter").onclick = (e) => {
@@ -185,7 +185,7 @@ $("branch-filter").onclick = (e) => {
 
 function renderTypeFilter() {
   $("type-filter").innerHTML = [ALL, ...window.APP_CONFIG.shipmentTypes].map(t =>
-    `<button type="button" data-typefilter="${esc(t)}" aria-pressed="${t === typeFilter}">${esc(t)}</button>`).join("");
+    `<button type="button" data-typefilter="${escAttr(t)}" aria-pressed="${t === typeFilter}">${esc(t)}</button>`).join("");
 }
 
 $("type-filter").onclick = (e) => {
@@ -896,7 +896,7 @@ function openDetail(s, kind = "ship") {
 
 function renderDetailType() {
   $("detail-type").innerHTML = window.APP_CONFIG.shipmentTypes.map(t =>
-    `<button type="button" data-detailtype="${esc(t)}" aria-pressed="${t === current.type}">${esc(t)}</button>`).join("");
+    `<button type="button" data-detailtype="${escAttr(t)}" aria-pressed="${t === current.type}">${esc(t)}</button>`).join("");
 }
 
 $("detail-type").onclick = (e) => {
@@ -1267,7 +1267,10 @@ async function importCatalogFile(file, auto = false) {
       await db.saveProductName(r.barcode, r.name, r);
       n++;
     }
-    if (existingBy && !auto) removed = await offerDeletions(existingBy, rows);   // deletions belong to a human on the button
+    // deletions belong to a human on the button — and «in the file» means every row the file
+    // CARRIES, including one refused for its unit code: refusing to import a row must never
+    // turn into deleting the product it names (review 2026-08-02)
+    if (existingBy && !auto) removed = await offerDeletions(existingBy, usable);
     const stamp = { at: Date.now(), rows: rows.length, by: identity };
     // merged locally too: the importing machine must show its own stamp even before (or without)
     // the server echoing it back through the config listener
@@ -1296,10 +1299,16 @@ async function offerDeletions(existingBy, rows) {
   const inFile = new Set(rows.map(r => r.barcode));
   const gone = [...existingBy.values()].filter(p => !inFile.has(String(p.barcode)));
   if (!gone.length) return 0;
-  const scary = gone.length > existingBy.size / 2;
+  /* «ملف ناقص» means the FILE holds much less than the system — not the other way round. The old
+     test (`gone > system/2`) fired backwards on a small or half-written system: importing the full
+     10k catalog into a 5-row system said «ده شكله ملف ناقص», which is exactly the message the owner
+     read as «العدد مش مطابق» on his quota-starved first day (measured 2026-08-02). */
+  const scary = rows.length < existingBy.size / 2;
+  // the first few codes make the number checkable: the owner can look one up in his own ERP
+  const sample = gone.slice(0, 3).map(p => p.barcode).join("، ");
   const q = scary
     ? `تحذير: الملف فيه ${rows.length} صنف بس، والنظام فيه ${existingBy.size}.\nلو كملت هيتشال ${gone.length} صنف — ده شكله ملف ناقص مش ملف الأصناف الكامل.\nمتأكد إنك عايز تشيلهم؟`
-    : `فيه ${gone.length} صنف موجودين في النظام ومش موجودين في الملف الجديد.\nنشيلهم عشان النظام يبقى مطابق للملف؟`;
+    : `فيه ${gone.length} صنف متخزنين في النظام من استيرادات قديمة ومش موجودين في الملف الجديد (مثلًا: ${sample}).\nنشيلهم عشان النظام يبقى مطابق للملف؟`;
   if (!confirm(q)) return 0;
   let removed = 0;
   for (const p of gone) { await db.deleteProduct(p.barcode); removed++; }
@@ -1443,6 +1452,9 @@ function watchSettings() {
     renderTypeFilter();
   }).catch(console.error);
 }
+
+// a live listener that errors (quota, offline, bad rules) must say so, same as the employee app
+addEventListener("db-error", () => toast("مشكلة في مزامنة البيانات — اتأكد من الاتصال والإعدادات", "bad"));
 
 // PIN screen paints straight away; the PIN check waits for this instead
 cfgReady = (async () => {

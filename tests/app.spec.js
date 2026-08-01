@@ -2689,7 +2689,8 @@ test('catalog import: replaces, skips the unchanged, and stamps the file', async
     buffer: Buffer.from('كود الصنف,اسم الصنف\n111,لبن\n222,جبنة\n', 'utf8'),
   };
   page.once('dialog', d => {
-    expect(d.message()).toContain('1 صنف موجودين في النظام ومش موجودين');
+    expect(d.message()).toContain('1 صنف متخزنين في النظام من استيرادات قديمة');
+    expect(d.message()).toContain('999');            // the sample code makes the number checkable
     d.accept();
   });
   await page.setInputFiles('#import-file', file);
@@ -2707,6 +2708,25 @@ test('catalog import: replaces, skips the unchanged, and stamps the file', async
   expect(meta['الأصناف'].rows).toBe(2);
   await page.click('#btn-products');
   await expect(page.locator('#products-updated')).toContainText('آخر ملف أصناف');
+});
+
+// a row REFUSED for its unit code is still IN the file — refusing to import it must never turn
+// into offering to delete the product it names (review 2026-08-02)
+test('catalog import: a unit-refused row is not offered for deletion', async ({ page }) => {
+  await openManagerPage(page);
+  await page.evaluate(() => localStorage.setItem('test-products', JSON.stringify({
+    111: { name: 'لبن' }, 777: { name: 'صنف وحدته غريبة' },
+  })));
+  let dialogs = 0;
+  page.on('dialog', d => { dialogs++; d.accept(); });
+  await page.setInputFiles('#import-file', {
+    name: 'items.csv', mimeType: 'text/csv',
+    buffer: Buffer.from('كود الصنف,الوحدة,اسم الصنف\n111,1,لبن\n777,9,صنف وحدته غريبة\n', 'utf8'),
+  });
+  await expect(page.locator('#toast')).toContainText('اترفض 1');
+  const after = await page.evaluate(() => JSON.parse(localStorage.getItem('test-products')));
+  expect(after['777']).toEqual({ name: 'صنف وحدته غريبة' });   // refused ≠ deleted
+  expect(dialogs).toBe(0);                                      // and no deletion confirm popped
 });
 
 /* The other phones' half of data freshness: the stamp rides the live config, and a local search

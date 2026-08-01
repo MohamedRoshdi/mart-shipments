@@ -252,7 +252,7 @@ for (const id of ["new-branch-picker", "exp-branch-picker"]) {
 function renderTypePicker() {
   renderNewBranch();
   $("type-picker").innerHTML = types().map(t =>
-    `<button type="button" data-type="${esc(t)}" aria-pressed="${t === state.type}">${esc(t)}</button>`).join("");
+    `<button type="button" data-type="${escAttr(t)}" aria-pressed="${t === state.type}">${esc(t)}</button>`).join("");
 }
 
 $("type-picker").onclick = (e) => {
