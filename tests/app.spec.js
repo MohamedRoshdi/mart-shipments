@@ -1240,6 +1240,42 @@ test('stocktake import: a barcode the catalog does not know is reported, never c
   expect(products['111']).toEqual({ name: 'لحمة بلدي', stock: { [branch]: 7 } });
 });
 
+/* The ERP's real جرد export (measured on the owner's own files 2026-08-01): tab-separated,
+   «أسم الصنف» with a hamza, three «!» filler columns, and fractional balances on weight items.
+   It used to be refused whole — «الملف ناقصه عمود اسم الصنف» — because the header patterns knew
+   only the dictionary spelling, and parseInt read «0.034» of a kilo as zero. */
+test('stocktake import reads the ERP\'s real file: hamza headings, ! columns, fractional stock', async ({ page }) => {
+  await openManagerPage(page);
+  await page.evaluate(() => localStorage.setItem('test-products', JSON.stringify({ '111': 'حلاوة وزن', '222': 'رز' })));
+  await page.click('#stock-branch button');
+  await page.setInputFiles('#stock-file', {
+    name: 'بيانات جرد فرع قويسنا.txt', mimeType: 'text/plain',
+    buffer: Buffer.from(
+      'الرصيد \tكود الصنف\tأسم الصنف\t!\t!\t!\r\n'
+      + '0.03400\t111\tحلاوة وزن\t0\t0\t0\r\n'
+      + '0\t222\tرز\t5\t0\t0\r\n', 'utf8'),
+  });
+  await expect(page.locator('#toast')).toContainText('تم استيراد كميات 2 صنف');
+  const branch = await page.evaluate(() => window.APP_CONFIG.branches[0].name);
+  const products = await page.evaluate(() => JSON.parse(localStorage.getItem('test-products')));
+  expect(products['111'].stock[branch]).toBe(0.034);   // parseInt used to make this 0
+  expect(products['222'].stock[branch]).toBe(0);       // a zero balance is still a listed row
+});
+
+// The real catalog export spells it «أخر سعر بيع» — the price has to survive that hamza too
+test('catalog import reads «أخر سعر بيع», the ERP\'s own spelling of the price column', async ({ page }) => {
+  await openManagerPage(page);
+  await page.setInputFiles('#import-file', {
+    name: 'بيانات الاصناف.txt', mimeType: 'text/plain',
+    buffer: Buffer.from(
+      'كود الصنف\tالوحدة\tاسم الصنف\tمعامل التحويل\tأخر سعر بيع\r\n'
+      + '111\t1\tمربى فراولة\t1.00000\t34.95000\r\n', 'utf8'),
+  });
+  await expect(page.locator('#toast')).toContainText('تم استيراد 1 صنف');
+  const products = await page.evaluate(() => JSON.parse(localStorage.getItem('test-products')));
+  expect(products['111']).toEqual({ name: 'مربى فراولة', unit: 'قطعة', unitCode: 1, price: 34.95 });
+});
+
 /* The owner's chosen shape for the nightly import (2026-08-01): no service — opening the manager
    page checks the data folders and imports anything newer than the last import's stamp. The
    folders are a localStorage fixture here because Playwright cannot grant a directory picker;
@@ -1327,6 +1363,39 @@ test('the same barcode shows each branch its own quantity', async ({ page }) => 
   await page.fill('#barcode-input', '222');                           // no branch sheet yet
   await page.click('#btn-lookup');
   await expect(page.locator('#item-stock-qty')).toHaveText('7');      // falls back to the old one
+});
+
+/* «هذا الصنف كود فرعي، برجاء جرد الكود الأساسي» (the owner, 2026-08-01): the catalog file holds
+   main AND sub codes, the branch جرد sheet holds main codes only. A code the catalog knows but
+   the branch sheet never listed is a sub-code — the sheet says so and refuses the row. Judged
+   only after that branch's sheet was imported (the filesMeta stamp), on the branch key itself:
+   the legacy shop-wide qty must not hide the absence. */
+test('stocktake: a catalog code missing from the branch جرد sheet is a sub-code and is refused', async ({ page }) => {
+  await page.goto('/?test=1');
+  const branch = await page.evaluate(() => window.APP_CONFIG.branches[0].name);
+  await page.evaluate((b) => {
+    localStorage.setItem('employeeName', 'أحمد');
+    localStorage.setItem('test-products', JSON.stringify({
+      '111': { name: 'لبن', stock: { [b]: 10 } },
+      '222': { name: 'جبنة وزن', qty: 7 },            // in the catalog, NOT in the branch sheet
+    }));
+    localStorage.setItem('test-config', JSON.stringify({
+      filesMeta: { ['جرد ' + b]: { at: 1000, rows: 1, by: 'مدير' } },
+    }));
+  }, branch);
+  await page.reload();
+  await page.click('#btn-count');
+  await page.fill('#barcode-input', '222');
+  await page.click('#btn-lookup');
+  await expect(page.locator('#item-warn-line')).toContainText('كود فرعي');
+  await expect(page.locator('#btn-add-item')).toBeHidden();
+  await expect(page.locator('#item-stock')).toBeHidden();   // the legacy shop-wide 7 must not show
+  await page.click('#btn-cancel-item');
+  // the main code still counts exactly as before
+  await page.fill('#barcode-input', '111');
+  await page.click('#btn-lookup');
+  await expect(page.locator('#item-stock-qty')).toHaveText('10');
+  await expect(page.locator('#btn-add-item')).toBeVisible();
 });
 
 test('employee stocktake: the sheet shows what the system says, the save keeps both numbers', async ({ page }) => {

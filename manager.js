@@ -1312,10 +1312,12 @@ async function importStockFile(file, branch, auto = false) {
     .map(c => (map
       // the name is read for the report only — the catalog file owns names, units and prices,
       // and a stock sheet writes nothing but the quantity (the owner, 2026-08-01)
+      // parseFloat, not parseInt: weight items carry fractional balances («0.034» of a kilo is a
+      // real stock, and parseInt read it as 0 — 204 such rows in the real قويسنا file, 2026-08-01)
       ? { barcode: cell(c[map.barcode]), name: cell(c[map.name]),
-          qty: parseInt(cell(map.qty !== undefined ? c[map.qty] : ""), 10) }
+          qty: parseFloat(cell(map.qty !== undefined ? c[map.qty] : "")) }
       : { barcode: cell(c[0]), name: c.slice(1, -1).map(cell).join(" ").trim(),
-          qty: parseInt(cell(c[c.length - 1]), 10) }))
+          qty: parseFloat(cell(c[c.length - 1])) }))
     .filter(r => r.barcode && /\d/.test(r.barcode) && r.name && Number.isFinite(r.qty) && r.qty >= 0);
   if (!rows.length) { toast("الملف مفيهوش صفوف صالحة — لازم: باركود، اسم، كمية"); return; }
   // The catalog is the reference: a barcode it does not know is reported, never created —

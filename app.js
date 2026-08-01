@@ -409,6 +409,9 @@ const WARN = {
   label: "الباركود ده مش موجود في ملف الأصناف، ومفيش اسم نطبعه على الليبل.",
 };
 
+// «هذا الصنف كود فرعي، برجاء جرد الكود الأساسي» (the owner, 2026-08-01)
+const SUB_CODE_MSG = "الصنف ده كود فرعي مش موجود في جرد الفرع — اجرد الكود الأساسي بتاعه.";
+
 async function onBarcode(code) {
   const p = await db.resolveProduct(code);
   // the catalog's own spelling of the code is what the item carries — never the typed one
@@ -418,6 +421,14 @@ async function onBarcode(code) {
   state.currentSys = db.stockFor(p, state.branch);
   state.currentUnit = (p && p.unit) || "";     // information only: it is never counted or summed
   const known = state.currentName !== "";
+  /* A code the catalog knows but the branch's own جرد file never listed is a sub-code: it must
+     be counted under its main code, so the sheet says that and refuses the row. Judged only in
+     a stocktake, and only on the branch KEY itself (stockFor falls back to the old shop-wide
+     qty, which would hide exactly the absence this is about) — and only after that branch's
+     sheet was actually imported, or every product would look like a sub-code. */
+  const jardStamp = !!((window.APP_CONFIG.filesMeta || {})[`جرد ${state.branch}`]);
+  state.subCode = counting() && known && jardStamp
+    && !(p && p.stock && Object.prototype.hasOwnProperty.call(p.stock, state.branch));
   // a label needs a name and nothing else: no quantity, no sheet, straight to the preview
   if (labeling() && known) { clearFind(); showLabel(state.currentBarcode, state.currentName, p && p.price); return; }
   $("item-barcode").textContent = state.currentBarcode;   // the code as the catalog spells it
@@ -429,21 +440,21 @@ async function onBarcode(code) {
   const factor = p && Number.isFinite(p.factor) && p.factor > 1 ? p.factor : null;
   $("item-factor").hidden = !(known && factor);
   $("item-factor-val").textContent = factor || "";
-  $("item-warn").hidden = known;                 // full explanation instead of a silent add
-  $("item-warn-line").textContent = WARN[state.mode];
+  $("item-warn").hidden = known && !state.subCode; // full explanation instead of a silent add
+  $("item-warn-line").textContent = state.subCode ? SUB_CODE_MSG : WARN[state.mode];
   // the whole point of a stocktake: the employee sees what the system claims before he types
-  $("item-stock").hidden = !(known && counting());
+  $("item-stock").hidden = !(known && counting() && !state.subCode);
   $("item-stock-qty").textContent = state.currentSys === null ? "غير مسجّلة" : state.currentSys;
   // .code is dir=ltr for numbers; Arabic words inside it come out spaced wrong
   $("item-stock-qty").classList.toggle("code", state.currentSys !== null);
-  $("qty-hint").hidden = !(known && (counting() || expiring()));
+  $("qty-hint").hidden = !(known && !state.subCode && (counting() || expiring()));
   $("qty-hint").textContent = expiring()
     ? "اكتب عدد القطع اللي بتنتهي في التاريخ ده."
     : "اكتب الكمية اللي لقيتها فعلاً على الرف.";
   paintExpiryFields(known);
-  $("qty-row").hidden = !known;                  // nothing to count if the item cannot be added
-  $("btn-add-item").hidden = !known;             // only catalog items can enter a shipment
-  $("btn-add-item").disabled = !known;
+  $("qty-row").hidden = !known || state.subCode; // nothing to count if the item cannot be added
+  $("btn-add-item").hidden = !known || state.subCode;   // only catalog items can enter a shipment
+  $("btn-add-item").disabled = !known || state.subCode;
   $("btn-add-item").textContent = counting() ? "تسجيل الكمية" : (expiring() ? "تسجيل الصلاحية" : "إضافة الصنف");
   $("item-qty").value = 1;
   clearFind();                                   // the item is picked; the results list is done
@@ -471,6 +482,7 @@ function hideSheet() {
   state.currentBarcode = null;
   state.currentName = "";
   state.currentSys = null;
+  state.subCode = false;
 }
 
 $("btn-cancel-item").onclick = hideSheet;
@@ -484,6 +496,7 @@ $("btn-add-item").onclick = async () => {
   const barcode = state.currentBarcode;
   if (!barcode) return;
   if (!name) { toast("الصنف مش في ملف الأصناف — مش هينفع يتسجّل"); return; }
+  if (state.subCode) { toast("الصنف ده كود فرعي — اجرد الكود الأساسي بتاعه"); return; }
   if (expiring()) { await addExpiry(barcode, name, qty); return; }
   const dup = state.items.find(i => i.barcode === barcode);
   // a second scan of the same item means more of it was found, in both modes
@@ -1320,8 +1333,12 @@ cfgReady = (async () => {
   const ok = await db.initDb().then(() => true).catch((e) => { console.error(e); return false; });
   dbBroken = !ok;
   updateSync();
-  // branches, PINs, types and users the admin edited win over the ones shipped in the code
-  Object.assign(window.APP_CONFIG, await db.getConfig().catch(() => ({})));
+  // branches, PINs, types and users the admin edited win over the ones shipped in the code.
+  // cfgRead is what tells «the shop has no users» apart from «the read failed»: a failed read
+  // used to fall back to the code config, see zero users, and open the no-PIN name screen —
+  // which is exactly the «بيانات الموظف» door the owner asked to close (2026-08-01).
+  let cfgRead = false;
+  Object.assign(window.APP_CONFIG, await db.getConfig().then((c) => { cfgRead = true; return c; }).catch(() => ({})));
   applyBrand(window.APP_CONFIG);
   state.branch = myBranch();
   if (!types().includes(state.type)) state.type = types()[0];
@@ -1345,7 +1362,10 @@ cfgReady = (async () => {
   }).catch(console.error);
 
   const s = auth.session();
-  const usersExist = (window.APP_CONFIG.users || []).length > 0;
+  // the name screen exists only for a shop that has truly never created a user — a config that
+  // could not be read does not count as that shop, it gets the PIN screen (the admin PIN in the
+  // code still works there, so a broken read can never lock anyone out)
+  const needPin = (window.APP_CONFIG.users || []).length > 0 || !cfgRead;
   if (s && s.user && s.perms.includes("emp") && !myName()) {
     // signed in on another page and sent here: don't ask for the PIN a second time
     localStorage.setItem("employeeName", s.name);
@@ -1357,10 +1377,10 @@ cfgReady = (async () => {
     const page = auth.landingPage(s.perms);
     if (page && page !== "index.html") { auth.goTo(page); return; }
   }
-  if ((s || !usersExist) && myName()) {
+  if ((s || !needPin) && myName()) {
     history.replaceState({ screen: "screen-home" }, "");
     await goHome();
-  } else if (usersExist) {                    // users configured → the PIN decides who you are
+  } else if (needPin) {                       // users configured → the PIN decides who you are
     history.replaceState({ screen: "screen-login" }, "");
     render("screen-login");
   } else {

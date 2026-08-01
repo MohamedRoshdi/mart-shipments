@@ -35,7 +35,9 @@ export const clean = (c) => String(c == null ? "" : c).trim().replace(/^﻿/, ""
 const scan = (cells) => {
   const map = {};
   (cells || []).forEach((c, i) => {
-    const t = clean(c);
+    // the ERP writes «أسم الصنف» and «أخر سعر بيع» — hamza folded so the patterns match the
+    // shop's real headings, not just the dictionary spelling (measured on the real files 2026-08-01)
+    const t = clean(c).replace(/[أإآ]/g, "ا");
     for (const [key, re] of HEADERS) if (map[key] === undefined && re.test(t)) map[key] = i;
   });
   return map;

@@ -232,10 +232,11 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
 - **An empty price box is not a broken screen.** `showLabel` fills the price from the product when
   the catalog carries one; when it does not, `#label-price-note` says so in as many words, because
   a blank box next to a barcode reads as a bug. The catalog only carries a price when a sheet with
-  an «اخر سعر بيع» column has been imported — **and the shop's catalog export has no such column
-  and never will** (the owner, 2026-08-01): a future price would come from a separate file, so the
-  typed-per-print price is the normal case, not the fallback. The header pattern stays because it
-  costs nothing and a price file may reuse it.
+  an «اخر سعر بيع» column has been imported — and the shop's real export **does carry one**: the
+  actual «بيانات الاصناف.txt» (measured 2026-08-01) ends in «أخر سعر بيع», which the hamza fold in
+  `sheet.js scan()` now matches. (The owner had earlier said the export had no price column — the
+  real file corrected him.) After one import of that file the label fills itself in, and the
+  typed-per-print price becomes the override, not the normal case.
 - **The label is the shop's own design, and the price is the loud part** (their label software,
   2026-07-31): logo, then the price at 8 mm with a small `LE`, then the name, the bars, the number
   centred and the print date tucked in the corner. Every row is always in the markup — a label
@@ -257,6 +258,16 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   with that hash; `openDeepLabel()` runs from `goHome()`, drops the hash with `replaceState`
   before opening the screen, and re-checks the permission. Without dropping it, every later trip
   home would jump back into the label screen.
+- **A sub-code is refused with its name, not treated as surplus.** The catalog file holds main
+  AND sub codes; a branch's جرد file holds main codes only (measured 2026-08-01: 9,550 of the
+  catalog's 10,098 codes are in the جرد file, 548 are not, 0 the other way). In count mode,
+  a code the catalog knows whose product doc has **no `stock` key for `state.branch`** gets
+  «الصنف ده كود فرعي… اجرد الكود الأساسي» and no add button (`state.subCode` in `onBarcode`,
+  double-checked in the add handler). Two guards keep it honest: the branch KEY is tested
+  directly — `stockFor` falls back to the legacy shop-wide `qty`, which would hide exactly the
+  absence this is about — and nothing is judged until `filesMeta["جرد <الفرع>"]` exists, or an
+  un-imported branch would flag its whole catalog. The zero rows in the جرد file are what make
+  membership work: a `0` balance still writes `stock[branch] = 0`.
 - **`sys` is read for free, and it is per branch.** The quantities live on the product doc, so
   a scan still costs the one `getProduct` read it always cost. `state.branch` (the branch the
   count is stamped with, not `myBranch()`) picks which number the employee sees. Never add a
@@ -279,6 +290,14 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   **The supplier file is header-driven too** (`admin.js`), so the ERP's column order stops mattering
   there as well; `parseSupplier` survives only for the textarea, where a person types «كود، اسم» by
   hand. The same code twice in one file is one supplier, the later row winning.
+  **The headings are hamza-folded before matching** (`scan()` maps أ/إ/آ→ا): the ERP's real files
+  write «أسم الصنف» and «أخر سعر بيع» (measured 2026-08-01 on the owner's own exports — the جرد
+  files were refused whole and the price column was silently dropped until the fold). The real
+  shapes, for the record: catalog = «كود الصنف، الوحدة، اسم الصنف، معامل التحويل، أخر سعر بيع»
+  tab-separated UTF-8-BOM CRLF; جرد = «الرصيد ، كود الصنف، أسم الصنف، !، !، !» — three filler
+  `!` columns that match nothing and are ignored, and fractional balances on weight items
+  (`0.03400` of a kilo is a real stock), which is why the stock importer reads `parseFloat`,
+  never `parseInt`.
   **The headings are matched in Arabic only, and the quantity one has to allow a suffix**: the
   catalog export writes «الكمية في فرع قويسنا», so the pattern ends in `( في .+)?`. (The shipped
   `stock-template.csv` said «الكمية في النظام» until the templates were re-cut to the ERP's own
@@ -625,12 +644,17 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   `.row-actions button.primary` when a row button must be amber.
 - **The item sheet owns the screen while open** (scrim + `body.sheet-open` hides
   the bottom bar). Anything behind it is unclickable — dismiss with `#btn-cancel-item`.
-- **Two ways in, both still live.** With users configured, the PIN alone identifies the person
-  and the branch comes from their account. With **no users at all**, `#screen-name` still asks
-  for a name and a branch and nothing else — no password guards that path any more, which is
-  accepted because the app has no auth to begin with (the URL is the protection). Shipments
-  always carry a branch and the manager can never move one between branches (the rules forbid
-  it).
+- **Two ways in — but the no-PIN one needs a successfully-read config with zero users.**
+  With users configured, the PIN alone identifies the person and the branch comes from their
+  account. `#screen-name` (titled «بيانات الموظف») survives only for a shop that has truly never
+  created a user — and «truly» is the point: `needPin` in the boot IIFE is
+  `users.length > 0 || !cfgRead`, because a FAILED config read used to fall back to the code
+  config, see zero users, and open the name screen with no PIN at all. That is the door the
+  owner asked to close (2026-08-01: «عايز الصفحة دي تتشال») — with 3 real users in production it
+  is now unreachable on every device, even one that boots offline or during quota exhaustion
+  (the code admin PIN still opens the PIN screen there, so a broken read cannot lock anyone
+  out). Shipments always carry a branch and the manager can never move one between branches
+  (the rules forbid it).
 - **Manager scope filters before render**, never after: `openManager()` drops other branches
   out of `all`, so a scoped user's page never holds data they may not see.
 - Catalog screen loads `PRODUCT_CAP = 300` rows; `countProducts()` gives the honest total.
