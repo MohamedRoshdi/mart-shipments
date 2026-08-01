@@ -2,7 +2,7 @@ import * as db from "./db.js";
 import * as auth from "./auth.js";
 import * as ex from "./expiry.js";
 import { zipBlob } from "./zip.js";
-import { sheetRows, requireColumns, unitName, unitCode, clean as cell } from "./sheet.js";
+import { sheetRows, requireColumns, headerMap, unitName, unitCode, clean as cell } from "./sheet.js";
 import { versionLine } from "./version.js";
 import { downloadBlob, saveText, listFolder, listFiles, readText, available as folderReady, uniqueName, safeSegment } from "./files.js";
 import * as erp from "./erp.js";
@@ -1202,12 +1202,21 @@ $("import-file").onchange = async (e) => {
   if (file) await importCatalogFile(file);
 };
 
-async function importCatalogFile(file) {
+async function importCatalogFile(file, auto = false) {
   let all, map;
   try {
     all = await sheetRows(file);
     map = requireColumns(all, ["barcode", "name"]);
   } catch (err) { toast(err.message, "bad"); return; }
+  /* The auto path trusts less than the button (review 2026-08-01): a file with no header row is
+     not the ERP's real catalog export — positional guessing on an unattended import would write
+     the ERP's own pulled TXT in as junk products — and a file that carries a quantity column is
+     a STOCK sheet dropped in the wrong folder, one Arabic word away from the right one. */
+  if (auto && !map) { toast(`ملف «${file.name}» من غير سطر عناوين — الاستيراد التلقائي سابه`, "warn"); return; }
+  if (auto && headerMap(all[0], ["qty"])) {
+    toast(`ملف «${file.name}» فيه عمود رصيد — ده ملف جرد اتحط في مجلد الأصناف، اتساب`, "warn");
+    return;
+  }
   const usable = (map ? all.slice(1) : all)
     .map(c => productRow(c, map))
     .filter(r => r.barcode && /\d/.test(r.barcode) && r.name);
@@ -1239,7 +1248,7 @@ async function importCatalogFile(file) {
       await db.saveProductName(r.barcode, r.name, r);
       n++;
     }
-    if (existingBy) removed = await offerDeletions(existingBy, rows);
+    if (existingBy && !auto) removed = await offerDeletions(existingBy, rows);   // deletions belong to a human on the button
     const stamp = { at: Date.now(), rows: rows.length, by: identity };
     // merged locally too: the importing machine must show its own stamp even before (or without)
     // the server echoing it back through the config listener
@@ -1289,7 +1298,7 @@ $("stock-file").onchange = async (e) => {
   await importStockFile(file, stockBranch);   // the chip, read before any await, owns the branch
 };
 
-async function importStockFile(file, branch) {
+async function importStockFile(file, branch, auto = false) {
   // With a header row the columns can be in any order (theirs is الرصيد first); without one the
   // quantity is the last column, so a name with a comma in it still lands whole.
   let all, map;
@@ -1297,6 +1306,8 @@ async function importStockFile(file, branch) {
     all = await sheetRows(file);
     map = requireColumns(all, ["qty", "barcode", "name"]);
   } catch (err) { toast(err.message, "bad"); return; }
+  // same trust rule as the catalog auto path: an unattended import takes header-driven files only
+  if (auto && !map) { toast(`ملف «${file.name}» من غير سطر عناوين — الاستيراد التلقائي سابه`, "warn"); return; }
   const rows = (map ? all.slice(1) : all)
     .map(c => (map
       // the name is read for the report only — the catalog file owns names, units and prices,
@@ -1312,7 +1323,7 @@ async function importStockFile(file, branch) {
   // import, the same price the catalog diff already pays on a daily file.
   let known;
   try { known = new Set((await db.listAllProducts()).map(p => p.barcode)); }
-  catch (err) { console.error(err); toast("مقدرناش نقرا الأصناف — جرّب تاني", "bad"); e.target.value = ""; return; }
+  catch (err) { console.error(err); toast("مقدرناش نقرا الأصناف — جرّب تاني", "bad"); return; }
   const missing = rows.filter(r => !known.has(r.barcode));
   const found = rows.filter(r => known.has(r.barcode));
   let n = 0;
@@ -1349,11 +1360,16 @@ async function importStockFile(file, branch) {
    twice. Nothing here deletes a source file: the stamp is what makes re-reading free. */
 
 let autoImported = false;
+let cfgFromServer = false;   // the settings doc was actually READ — without it filesMeta is empty and every file looks new
 async function autoImportFiles() {
-  if (autoImported || !canDo("import")) return;
+  /* A failed settings read means filesMeta is the shipped default (empty), so EVERY file looks
+     never-imported and the full-read imports re-run on each open — the same failure that emptied
+     the suppliers list on 2026-07-31, and here it would also burn the read quota. Not once-flagged:
+     the config may still arrive through the live listener, and a later visit then imports. */
+  if (autoImported || !cfgFromServer || !canDo("import")) return;
   autoImported = true;                        // once per page life, like keepFresh's reload
-  const jobs = [["بيانات الأصناف", "الأصناف", (f) => importCatalogFile(f)]];
-  for (const b of myBranches()) jobs.push([`بيانات جرد ${b}`, `جرد ${b}`, (f) => importStockFile(f, b)]);
+  const jobs = [["بيانات الأصناف", "الأصناف", (f) => importCatalogFile(f, true)]];
+  for (const b of myBranches()) jobs.push([`بيانات جرد ${b}`, `جرد ${b}`, (f) => importStockFile(f, b, true)]);
   for (const [folder, kind, run] of jobs) {
     const files = (await listFiles(folder)).filter((f) => /\.(csv|txt|xlsx)$/i.test(f.name));
     const newest = files.sort((a, b) => b.lastModified - a.lastModified)[0];
@@ -1410,7 +1426,7 @@ function watchSettings() {
 // PIN screen paints straight away; the PIN check waits for this instead
 cfgReady = (async () => {
   await db.initDb().catch(console.error);
-  Object.assign(window.APP_CONFIG, await db.getConfig().catch(() => ({})));
+  Object.assign(window.APP_CONFIG, await db.getConfig().then((c) => { cfgFromServer = true; return c; }).catch(() => ({})));
   applyBrand(window.APP_CONFIG);
   watchSettings();
   const s = auth.session();

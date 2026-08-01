@@ -335,7 +335,14 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   the `filesMeta` stamp of its kind. The stamp is written at import time, so the same file never
   imports twice, and **no source file is ever deleted** — the stamp is what makes re-reading free.
   It calls the same `importCatalogFile`/`importStockFile` the buttons call, so the diff, the
-  refusals and the unknown-barcode report all apply unchanged. Suppliers stay manual: their import
+  refusals and the unknown-barcode report all apply — but the auto path TRUSTS LESS (review
+  2026-08-01): it takes header-driven files only (positional guessing would import the ERP's own
+  pulled TXT as junk products), refuses a "catalog" file that carries a quantity column (a stock
+  sheet dropped one Arabic word away from its folder), **never deletes** (offerDeletions is the
+  button's alone — a page open must not pop the catalog-wipe confirm), and runs only when the
+  settings doc was actually read (`cfgFromServer` — an unread config means an empty filesMeta,
+  every file looks new, and the full-read imports would burn the quota on each open, the same
+  failure that emptied the suppliers list on 2026-07-31). Suppliers stay manual: their import
   writes `config/app`, and only the admin page owns that doc. **UNVERIFIED on a real machine**:
   the FSA half needs the folder picked once in Chrome (same class as the D:\import write).
 - **A header-driven catalog import is a REPLACE, and the diff is what makes it affordable.**

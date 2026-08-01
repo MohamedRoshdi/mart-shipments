@@ -982,7 +982,7 @@ async function renderBtRow() {
   $("job-bt-row").hidden = true;
   const tpls = (await listFiles(BT_TPL)).filter((f) => /\.btw$/i.test(f.name));
   if (!tpls.length) return;
-  $("job-bt-tpl").innerHTML = tpls.map((t) => `<option>${esc(t.name)}</option>`).join("");
+  $("job-bt-tpl").innerHTML = tpls.map((t) => `<option value="${escAttr(t.name)}">${esc(t.name)}</option>`).join("");
   $("job-bt-row").hidden = false;
 }
 

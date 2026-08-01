@@ -193,6 +193,9 @@ export async function saveBytes(folder, name, buf) {
     putTestFiles(all);
     return { how: "disk", path: `${folder}\\${safe}` };
   }
+  // the desktop bridge has no byte-write; a null here makes the caller say so honestly instead
+  // of pointing at a folder picker that build hides (review 2026-08-01)
+  if (bridge()) return null;
   const root = await usableRoot(false);
   if (!root) return null;
   try {

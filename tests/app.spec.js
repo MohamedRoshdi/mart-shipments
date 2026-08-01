@@ -1248,7 +1248,7 @@ test('auto-import: opening the manager page imports a data file newer than the s
   await page.goto('/manager.html?test=1');
   await page.evaluate(() => {
     const branch = window.APP_CONFIG.branches[0].name;
-    localStorage.setItem('test-products', JSON.stringify({ '111': 'لحمة بلدي' }));
+    localStorage.setItem('test-products', JSON.stringify({ '111': 'لحمة بلدي', '222': 'رز' }));
     // the catalog stamp is OLDER than its file (imports), the stock stamp NEWER (skips)
     localStorage.setItem('test-config', JSON.stringify({
       filesMeta: { 'الأصناف': { at: 1000, rows: 1, by: 'قديم' }, [`جرد ${branch}`]: { at: 9e12, rows: 1, by: 'قديم' } },
@@ -1275,6 +1275,29 @@ test('auto-import: opening the manager page imports a data file newer than the s
   const meta = await page.evaluate(() => window.APP_CONFIG.filesMeta['الأصناف']);
   expect(meta.rows).toBe(1);
   expect(meta.at).toBeGreaterThan(2000);
+  // 222 was not in the file, and the AUTO path never deletes — no confirm popped, the row stays
+  expect(products['222']).toBe('رز');
+});
+
+// A stock export dropped into «بيانات الأصناف» must be refused, not imported as the catalog —
+// the two folders are one Arabic word apart (review 2026-08-01, finding H1).
+test('auto-import: a stock-shaped file in the catalog folder is refused whole', async ({ page }) => {
+  await page.goto('/manager.html?test=1');
+  await page.evaluate(() => {
+    localStorage.setItem('test-products', JSON.stringify({ '111': 'لحمة بلدي', '222': 'رز' }));
+    localStorage.setItem('test-datafiles', JSON.stringify({
+      'بيانات الأصناف': [
+        { name: 'stock-by-mistake.csv', mtime: 5000, text: 'الرصيد,كود الصنف,الوحدة,اسم الصنف\n7,111,2,لحمة مستوردة\n' },
+      ],
+    }));
+  });
+  await page.reload();
+  await page.fill('#pin-input', await page.evaluate(() => window.APP_CONFIG.managerPin));
+  await page.click('#btn-pin');
+  await expect(page.locator('#toast')).toContainText('فيه عمود رصيد');
+  const products = await page.evaluate(() => JSON.parse(localStorage.getItem('test-products')));
+  expect(products['111']).toBe('لحمة بلدي');          // the wrong-name write never happened
+  expect(products['222']).toBe('رز');
 });
 
 test('the same barcode shows each branch its own quantity', async ({ page }) => {

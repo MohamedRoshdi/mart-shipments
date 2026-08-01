@@ -280,7 +280,12 @@ $("btw-file").onchange = async (e) => {
   e.target.value = "";
   if (!file) return;
   const out = await files.saveBytes(BT_TPL, file.name, await file.arrayBuffer());
-  if (!out) { toast("مفيش مجلد متاح على الجهاز ده — اختار مجلد الاستيراد الأول", "bad"); return; }
+  if (!out) {
+    toast(files.bridge()
+      ? "نسخة الويندوز لسه مش بتدعم رفع القوالب من هنا — انسخ ملف btw لمجلد «قوالب الطباعة» بنفسك"
+      : "مفيش مجلد متاح على الجهاز ده — اختار مجلد الاستيراد الأول", "bad");
+    return;
+  }
   db.logAction(identity, "رفع قالب طباعة", file.name);
   toast(`القالب اترفع: ${out.path}`, "ok");
   renderBtw().catch(console.error);
