@@ -35,10 +35,11 @@ const TITLES = {
   "screen-folder": "مجلد الاستيراد",
   "screen-pins": "الأرقام السرية",
   "screen-danger": "أدوات خطرة",
+  "screen-status": "حالة النظام",
   "screen-logs": "آخر العمليات",
 };
 // screens you can go back from, and the ones that edit the working copy (they carry the save bar)
-const DEEP = ["screen-data", "screen-label", "screen-btw", "screen-folder", "screen-pins", "screen-danger", "screen-logs"];
+const DEEP = ["screen-data", "screen-label", "screen-btw", "screen-folder", "screen-pins", "screen-danger", "screen-status", "screen-logs"];
 const EDITING = ["screen-data", "screen-label", "screen-pins"];
 
 let cfg = null;        // working copy of the settings
@@ -84,6 +85,77 @@ document.querySelector("#screen-admin .actions").onclick = (e) => {
   render(id);
   if (id === "screen-logs") loadLogs();
   if (id === "screen-btw") renderBtw().catch(console.error);
+  if (id === "screen-status") renderStatus();
+};
+
+/* «حالة النظام»: what the owner would otherwise have to ask a human. Every line here is already
+   in memory — the config, the version, this machine's own copy — so opening the screen costs
+   NOTHING. The one number that needs the server («عدد الأصناف») is a button, because on the free
+   plan a read is a thing worth spending on purpose. */
+const statusRow = (label, value, cls = "") =>
+  `<li class="${cls}"><div class="card-main"><div class="card-title">${esc(label)}</div>
+    <div class="meta">${esc(value)}</div></div></li>`;
+
+let productCount = null;             // filled only when the owner asks for it, never on open
+
+// the day's allowance, in the words the shop would use. A spent quota does not FAIL a write —
+// it makes it wait, which is why «الحفظ بيتأخر» is the symptom and not an error message.
+function quotaLine() {
+  const err = db.dbError();
+  if (!err || Date.now() - err.at > 30 * 60 * 1000) return ["شغالة", "st-ok"];
+  if (err.code === "resource-exhausted")
+    return [`خلصت النهارده — الحفظ هيتأخر لحد ما ترجع الساعة ١٠ صباحًا (آخر رفض ${fmtWhen(err.at)})`, "st-bad"];
+  return [`فيه مشكلة اتسجلت: ${err.message}`, "st-warn"];
+}
+
+// what this machine is holding for the name search, and how old it is
+function copyLine() {
+  let idx = null;
+  try { idx = JSON.parse(localStorage.getItem("catalogIndex") || "null"); } catch { idx = null; }
+  return idx && idx.rows
+    ? `${idx.rows.length} صنف · اتاخدت ${fmtWhen(idx.at)}`
+    : "مفيش نسخة — هتتاخد أول مرة تدوّر باسم";
+}
+
+function renderStatus() {
+  const cfg = window.APP_CONFIG;
+  const [quota, quotaCls] = quotaLine();
+  const stamps = Object.entries(cfg.filesMeta || {});
+  $("status-list").innerHTML = [
+    statusRow("الاتصال بالإنترنت",
+      navigator.onLine ? "متصل" : "مفيش اتصال — الشغل بيتحفظ على الجهاز لحد ما يرجع",
+      navigator.onLine ? "st-ok" : "st-bad"),
+    statusRow("الحصة اليومية المجانية", quota, quotaCls),
+    statusRow("نسخة التطبيق على الجهاز ده", versionLine()),
+    statusRow("المستخدمين", `${(cfg.users || []).length} مستخدم`),
+    statusRow("الفروع", (cfg.branches || []).map(b => b.name).join(" · ") || "—"),
+    statusRow("الموردين", `${db.supplierList(cfg).length} مورد`),
+    statusRow("أنواع الشحنات", (cfg.shipmentTypes || []).join(" · ") || "—"),
+    statusRow("نسخة الأصناف المحفوظة على الجهاز ده", copyLine()),
+    statusRow("عدد الأصناف في السيرفر",
+      productCount === null ? "اضغط الزرار تحت عشان تعرفه" : `${productCount} صنف`),
+    ...(stamps.length
+      ? stamps.map(([kind, m]) => statusRow(`آخر استيراد: ${kind}`,
+        `${fmtWhen(m.at)}${m.rows ? ` · ${m.rows} صف` : ""}${m.by ? ` · ${m.by}` : ""}`))
+      : [statusRow("آخر استيراد", "مفيش ملفات اتستوردت لسه")]),
+  ].join("");
+}
+
+$("btn-count-products").onclick = async () => {
+  $("btn-count-products").disabled = true;
+  $("btn-count-products").textContent = "بنعدّ...";
+  try {
+    productCount = await db.countProducts();
+    toast(`${productCount} صنف في السيرفر`, "ok");
+  } catch (err) {
+    console.error(err);
+    toast(err && err.code === "resource-exhausted"
+      ? "الحصة اليومية خلصت — جرّب بكرة بعد الساعة ١٠"
+      : "مقدرناش نعدّ الأصناف — جرّب تاني", "bad");
+  }
+  $("btn-count-products").disabled = false;
+  $("btn-count-products").textContent = "اعرف عدد الأصناف دلوقتي";
+  renderStatus();
 };
 
 

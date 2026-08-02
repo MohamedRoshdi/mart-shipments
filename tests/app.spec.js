@@ -751,7 +751,7 @@ test('admin page: PIN gate, then a menu whose cards open the settings', async ({
   await expect(page.locator('#screen-admin')).toBeHidden();
   await expect(page.locator('#toast')).toContainText('الرقم السري غلط');
   await openAdmin(page);
-  await expect(page.locator('#screen-admin .action')).toHaveCount(7);   // the menu, not a wall
+  await expect(page.locator('#screen-admin .action')).toHaveCount(8);   // the menu, not a wall
   await page.click('#screen-admin [data-goto="screen-data"]');
   await expect(page.locator('#branches-list li')).toHaveCount(2);
   await expect(page.locator('#types-list li')).toHaveCount(3);
@@ -2782,6 +2782,31 @@ test('a catalog stamp newer than the local index drops it', async ({ page }) => 
     return { kept, dropped };
   });
   expect(r).toEqual({ kept: true, dropped: true });
+});
+
+/* «حالة النظام» (the owner, 2026-08-02, after asking why the daily allowance ran out): the screen
+   answers it in the app. Opening it must cost NOTHING — every line is already in memory, and the
+   one number that needs the server sits behind a button. */
+test('admin: the status screen reads the system without touching the server', async ({ page }) => {
+  await openAdmin(page, 'screen-status');
+  await expect(page.locator('#status-list li')).not.toHaveCount(0);
+  await expect(page.locator('#status-list')).toContainText('الاتصال بالإنترنت');
+  await expect(page.locator('#status-list')).toContainText('الحصة اليومية المجانية');
+  await expect(page.locator('#status-list')).toContainText('نسخة التطبيق على الجهاز ده');
+  // the catalog count is not read on open — it is offered
+  await expect(page.locator('#status-list')).toContainText('اضغط الزرار تحت عشان تعرفه');
+
+  // a quota refusal is named in the shop's own words, not as an error code
+  await page.evaluate(() => dispatchEvent(new CustomEvent('db-error',
+    { detail: { code: 'resource-exhausted', message: 'Quota exceeded.' } })));
+  await page.click('#btn-back');
+  await page.click('button[data-goto="screen-status"]');
+  await expect(page.locator('#status-list li.st-bad')).toContainText('خلصت النهارده');
+
+  await page.evaluate(() => localStorage.setItem('test-products', JSON.stringify({ 1: 'أ', 2: 'ب' })));
+  await page.click('#btn-count-products');
+  await expect(page.locator('#toast')).toContainText('2 صنف في السيرفر');
+  await expect(page.locator('#status-list')).toContainText('2 صنف');
 });
 
 /* «عرض المزيد» (the owner, 2026-08-02): a list of hundreds is read a page at a time, and the

@@ -21,6 +21,16 @@ export function initDb() {
 // a call that lands before initDb finished (fast tapping, slow network) must wait, not crash
 const live = () => (TEST_MODE ? Promise.resolve() : initDb());
 
+/* The last thing the database refused, kept so a screen can SAY it instead of the shop guessing.
+   `resource-exhausted` is the one that matters: on the free plan the day's allowance runs out and
+   every write then waits behind a backoff instead of failing, which looks exactly like a hang. */
+let lastError = null;
+addEventListener('db-error', (e) => {
+  const err = e.detail || {};
+  lastError = { code: err.code || 'unknown', message: String(err.message || err), at: Date.now() };
+});
+export const dbError = () => lastError;
+
 function lsArr(key) { return JSON.parse(localStorage.getItem(key) || '[]'); }
 function lsObj(key) { return JSON.parse(localStorage.getItem(key) || '{}'); }
 

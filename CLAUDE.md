@@ -678,6 +678,13 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   on for `screen-home` and takes it off everywhere else, so the menu uses a tablet or laptop
   (cards in columns, `.actions` auto-fill from 760px) while the scanner, the item sheet and the
   camera preview keep the phone column they are designed around.
+- **«حالة النظام» (`#screen-status`, admin) costs nothing to open, on purpose.** Every line comes
+  from what is already in memory — the merged config, `versionLine()`, this machine's own
+  `catalogIndex` — so the screen that explains a spent quota can never be the thing that spends
+  it. The one server number (`countProducts`, a count aggregation = 1 read) sits behind a button.
+  `db.dbError()` is the last `db-error` detail, and `resource-exhausted` is named in the shop's
+  words: a spent allowance does not fail a write, it makes it WAIT, which is why «الحفظ بيتأخر»
+  is the symptom the owner reports rather than an error.
 - **Every long list pages with «عرض المزيد», and the button says where you are.** `shownOf` in
   `manager.js` holds the row count per list, `moreRow()` renders the button AS the last `<li>` (no
   new markup, no new handler — the list's own `onclick` gets the tap through `onMore`), and any
@@ -851,6 +858,14 @@ debounce, or it reports false negatives.
   direct doc read — but by name only after this phone refreshes the copy, or through the server
   prefix fallback when the local copy returns nothing. Any product write on the phone drops the
   copy at once.
+- **A full catalog sweep is ~10k READS, and three of them in one afternoon spend the day.**
+  Measured 2026-08-02: the shop imported nothing all day (audit trail: one bulk delete, ~6 settings
+  saves, one shipment load — a few hundred writes at most), yet the project was `resource-exhausted`
+  by 12:57Z. The cause was the maintenance itself: `live-zero-dupes.mjs` reads `listAllProducts()`,
+  and it was run three times (dry, delete, verify) at ~10.3k reads each ≈ 31k, on top of every
+  device rebuilding its own `catalogIndex` (10k each). **A full-read script is a budget decision,
+  not a free check** — run the dry pass once, keep its output, and never re-run it to "confirm"
+  what a single doc read can confirm.
 - **The free Spark plan is 20k writes / 50k reads a day, and a full sheet import is one write
   per row.** The owner's catalog is ~10k products, so two full imports in a day exhaust the
   write quota; Firestore then answers `[code=resource-exhausted]: Quota exceeded` and writes

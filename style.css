@@ -417,6 +417,13 @@ li.more {
   grid-column: 1 / -1;
 }
 li.more button { inline-size: 100%; padding-block: 14px; }
+
+/* «حالة النظام»: a colour is never the only signal — every row says its state in words too,
+   the stripe just makes the bad one findable at a glance. */
+#status-list li { border-inline-start: 5px solid var(--line); }
+#status-list li.st-ok { border-inline-start-color: var(--good); }
+#status-list li.st-warn { border-inline-start-color: var(--amber); }
+#status-list li.st-bad { border-inline-start-color: var(--bad); }
 .card-main { flex: 1; min-inline-size: 0; display: grid; gap: 4px; }
 /* A whole card that opens a screen. The list used to carry five buttons per row and read as a
    wall of controls; the card itself is the target now, and everything else lives on the screen
