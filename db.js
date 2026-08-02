@@ -142,9 +142,17 @@ const setPending = (v) => {
   pending = v;
   dispatchEvent(new CustomEvent('db-pending', { detail: v }));
 };
+/* EVERY refusal has to reach `db-error`, not just the ones a listener happens to catch. Proved in
+   a real browser on the live site (2026-08-02 15:34Z): the console had `resource-exhausted`, the
+   chip correctly said «لسه بيتبعت...», and «حالة النظام» still said «الحصة اليومية المجانية: شغالة»
+   with two green bars — because the one-shot reads and the fire-and-forget writes each swallow
+   their own rejection in a caller's `.catch()`, so nothing ever dispatched the event. Announcing it
+   here, at the six doors, is the only place that cannot be forgotten by the next call site. */
+const announce = (e) => { dispatchEvent(new CustomEvent('db-error', { detail: e })); return e; };
 function noteWrite(p) {
   meter('writes');
   if (!slowTimer) slowTimer = setTimeout(() => setPending(true), SLOW_MS);
+  p.catch(announce);                  // the caller keeps its own catch; this one only reports
   fs.waitForPendingWrites(dbRef)
     .then(() => { clearTimeout(slowTimer); slowTimer = null; setPending(false); })
     .catch(() => {});
@@ -167,8 +175,8 @@ export const errorText = (err) => ((err && err.code) === 'resource-exhausted'
 const billed = (snap) => (snap.metadata && snap.metadata.fromCache ? 0 : undefined);
 // a listener delivery: the first one is the whole query, every later one only what changed
 const metered = (snap) => meter('reads', billed(snap) ?? (snap.docChanges ? snap.docChanges().length : 1));
-const getDocs = async (q) => { const s = await fs.getDocs(q); meter('reads', billed(s) ?? Math.max(s.size, 1)); return s; };
-const getDoc = async (r) => { const s = await fs.getDoc(r); meter('reads', billed(s) ?? 1); return s; };
+const getDocs = async (q) => { const s = await fs.getDocs(q).catch((e) => { throw announce(e); }); meter('reads', billed(s) ?? Math.max(s.size, 1)); return s; };
+const getDoc = async (r) => { const s = await fs.getDoc(r).catch((e) => { throw announce(e); }); meter('reads', billed(s) ?? 1); return s; };
 
 /* Every test-mode collection write goes through here so the listeners below hear it. Firestore's
    onSnapshot fires for THIS tab's own writes; the browser's `storage` event never does — it is
