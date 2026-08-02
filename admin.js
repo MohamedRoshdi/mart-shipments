@@ -135,9 +135,21 @@ $("btn-logout").onclick = () => {
 };
 
 
+/* `saveConfig` writes the WHOLE settings doc, so two people editing at once means the second
+   save silently erases the first. This page cannot merge them — it can refuse to pretend the
+   problem is not there: while it is dirty it stops following the server, and says so. */
+let serverAhead = false;
+
+function paintDirty() {
+  $("cfg-dirty").textContent = serverAhead
+    ? "فيه تعديل مش محفوظ — وفيه تعديلات جديدة من جهاز تاني"
+    : "فيه تعديل مش محفوظ";
+  $("cfg-dirty").classList.toggle("warn", serverAhead);
+}
+
 function markDirty() {
   dirty = true;
-  $("cfg-dirty").textContent = "فيه تعديل مش محفوظ";
+  paintDirty();
   $("cfg-savebar").hidden = !(EDITING.includes(screen) || screen === "screen-admin");
 }
 
@@ -600,6 +612,12 @@ $("btn-save-config").onclick = async () => {
   // trail shows the counts). A save that wipes every account gets one loud question first.
   if (!cfg.users.length && (window.APP_CONFIG.users || []).length
     && !confirm("الحفظ ده هيمسح كل المستخدمين، وكلهم هيدخلوا بالأرقام القديمة.\nمتأكد؟")) return;
+  /* Somebody saved from another device while this page was being edited. The write below replaces
+     the whole doc, so going ahead erases their change — the honest thing is to say so and let the
+     human pick, because only they know which of the two edits matters. */
+  if (serverAhead && !confirm(
+    "فيه تعديلات اتحفظت من جهاز تاني وإنت بتعدّل هنا.\nلو كمّلت حفظ، تعديلاتهم هتتمسح."
+    + "\n\nاضغط «إلغاء» وحدّث الصفحة عشان تشوف تعديلاتهم الأول، أو «موافق» لو تعديلك إنت هو الصح.")) return;
   if (cfg.suppliers.length > SUPPLIER_CAP) { toast(`الموردين أكتر من ${SUPPLIER_CAP} — شيل اللي مش شغال معاك`); return; }
 
   const payload = {
@@ -642,7 +660,9 @@ $("btn-save-config").onclick = async () => {
   Object.assign(window.APP_CONFIG, payload);
   db.logAction(identity, "تغيير الإعدادات", `${payload.users.length} مستخدم · ${payload.branches.length} فرع · ${payload.shipmentTypes.length} نوع`);
   dirty = false;
+  serverAhead = false;              // this save IS now the server's copy; the listener follows again
   $("cfg-dirty").textContent = "";
+  $("cfg-dirty").classList.remove("warn");
   $("cfg-savebar").hidden = !EDITING.includes(screen);   // a clean menu carries no save bar
   renderAll();
   toast("تم حفظ الإعدادات — الموبايلات هتشوفها مع أول فتح");
@@ -838,7 +858,7 @@ cfgReady = (async () => {
   db.watchConfig((server) => {
     Object.assign(window.APP_CONFIG, server);
     applyBrand(window.APP_CONFIG);
-    if (dirty) return;
+    if (dirty) { serverAhead = true; paintDirty(); return; }
     cfg = workingCopy();
     renderAll();
   }).catch(console.error);

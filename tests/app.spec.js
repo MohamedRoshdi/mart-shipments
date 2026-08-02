@@ -2666,8 +2666,10 @@ test('a pulled ERP file flips its shipment to تم الاستيراد, and an am
   await expect(page.locator('#btn-erp-check')).toBeVisible();      // a folder is reachable here
   const tagOf = (name) => page.locator('#all-shipments li', { hasText: name }).locator('.tag-erp');
   await expect(tagOf('المراعي')).toHaveText('تم الاستيراد');       // settled automatically, no tap
-  await expect(tagOf('توأم أ')).toHaveText('جاهزة للاستيراد');
-  await expect(tagOf('توأم ب')).toHaveText('جاهزة للاستيراد');
+  // both twins were downloaded, so both read «تم الاستيراد» — what the ambiguous file must not
+  // do is stamp erpAt on either of them, which the saved rows below assert
+  await expect(tagOf('توأم أ')).toHaveText('تم الاستيراد');
+  await expect(tagOf('توأم ب')).toHaveText('تم الاستيراد');
   const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('test-shipments')));
   expect(saved.find(s => s.name === 'المراعي').erpFile).toBe('store 1_4552.txt');
   expect(typeof saved.find(s => s.name === 'المراعي').erpAt).toBe('number');
@@ -2873,19 +2875,24 @@ test('the daily view keeps what is unfinished and drops what is done', async ({ 
   await page.fill('#pin-input', await page.evaluate(() => window.APP_CONFIG.managerPin));
   await page.click('#btn-pin');
 
-  await expect(page.locator('#month-pick')).toHaveValue('open');
-  await expect(page.locator('#all-shipments li')).toHaveCount(3);
+  // the default view is TODAY and nothing else (the owner, 2026-08-02)
+  await expect(page.locator('#month-pick')).toHaveValue('today');
+  await expect(page.locator('#all-shipments li')).toHaveCount(2);
   await expect(page.locator('#all-shipments')).not.toContainText('خلصت من زمان');
-  await expect(page.locator('#all-shipments')).toContainText('لسه معلقة من زمان');
+  await expect(page.locator('#all-shipments')).not.toContainText('لسه معلقة من زمان');
 
-  // the three states, said in words
+  // two states now, and the downloaded one sank to the bottom of the list
   const tags = await page.locator('#all-shipments .tag-erp').allTextContents();
-  expect(tags).toContain('جديدة');
-  expect(tags).toContain('جاهزة للاستيراد');
+  expect(tags).toEqual(['جديدة', 'تم الاستيراد']);
 
   // the counters count what is loaded, not what the list is showing
   const counts = await page.locator('#erp-counts li b').allTextContents();
-  expect(counts).toEqual(['2', '1', '0', '2']);   // today · ready · imported today · pending
+  expect(counts).toEqual(['2', '1', '2']);   // today · imported today · pending
+
+  // what is still waiting lives one pick away, not on the daily screen
+  await page.selectOption('#month-pick', 'pending');
+  await expect(page.locator('#all-shipments')).toContainText('لسه معلقة من زمان');
+  await expect(page.locator('#all-shipments')).not.toContainText('اتعملها ملف');
 
   // and the archive still has everything
   await page.selectOption('#month-pick', '');
@@ -2973,8 +2980,8 @@ test('تم تحميلها: the export marks it, and somebody else has to confirm
     JSON.parse(localStorage.getItem('test-logs')).filter(l => l.action === 'تحميل شحنة').length)).toBe(1);
 
   await page.click('#btn-back');
-  // the card now carries the ERP state, and a file having been made IS «جاهزة للاستيراد»
-  await expect(page.locator('#all-shipments .tag-erp')).toHaveText('جاهزة للاستيراد');
+  // downloading the file IS taking the shipment in: the card says «تم الاستيراد» straight away
+  await expect(page.locator('#all-shipments .tag-erp')).toHaveText('تم الاستيراد');
   await expect(page.locator('#all-shipments li')).toContainText('حمّلها');
 
   // somebody else opens it: the warning names who loaded it, and cancelling loads nothing

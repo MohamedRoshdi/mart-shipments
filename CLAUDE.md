@@ -471,8 +471,17 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   That default is why a small barcode reads on one phone and not another; `ideal` (not `exact`)
   so a camera that cannot do it still starts. `navTo` calls `stopScan()` for any screen other
   than `screen-new`, otherwise the camera keeps running behind the settings screen.
-- **The ERP state is derived, never stored.** `erpState(s)` reads `erpAt` → «تم الاستيراد»,
-  `loadedAt` → «جاهزة للاستيراد», neither → «جديدة». The absence of a key IS a state, the same
+- **TWO ERP states, not three** (2026-08-02, the owner: «مايبقاش فيه مرحلة جاهز للاستيراد…
+  بتلخبط»). `erpState(s)` is `erpAt || loadedAt ? "done" : "new"` — downloading the file from the
+  manager page IS taking the shipment into the shop's system, so «تم الاستيراد» lands on the
+  download and the pulled-file scan (`erpAt`) only confirms it. Done shipments sort to the BOTTOM
+  of the list (`shown.sort` in `renderList`), and the counters are three, not four.
+- **The month picker opens on «شحنات النهارده», and «المعلّق» is its own pick.** `VIEW_TODAY`
+  (default) shows only `isToday(createdAt)`; `VIEW_PENDING` reads the same two bounded months and
+  shows only `erpState !== "done"`. Both go through `inView(s)`; `openView()` is «either of the
+  two live views», which is what `loadMonth` branches on. Older-and-unfinished work is one pick
+  away, never mixed into the daily screen.
+- **The ERP state is derived, never stored.** `erpState(s)` reads `erpAt`/`loadedAt`, The absence of a key IS a state, the same
   shape as «تم تحميلها»; there is no status column to keep in step with the two timestamps that
   already say everything. **`checkErpFiles()` in `manager.js` is what sets them**, from the flag
   `erp.js` reads — built from a real pulled file (`store 1_4552.txt`, measured 2026-08-01): six
@@ -686,6 +695,15 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   out of `all`, so a scoped user's page never holds data they may not see.
 - Catalog screen loads `PRODUCT_CAP = 300` rows; `countProducts()` gives the honest total.
   Export uses `listAllProducts()` — one deliberate full read.
+- **The local catalog copy is a POINTER, never the answer.** `resolveProduct` falls back to
+  `catalogIndex()` only to learn WHICH barcode to ask for, then re-reads that doc from Firestore.
+  Without it a phone served the week-old row: after the 2026-08-02 sweep deleted 412 stripped-zero
+  twins, phones still resolved «45» to the deleted doc — no price on it, which is exactly what
+  «الليبل مش بيجيب السعر» was. **And any bulk catalog change must stamp `filesMeta["الأصناف"]`**
+  (`scripts/live-zero-dupes.mjs` does) — that stamp is the ONLY cross-device invalidation, it
+  rides the config listener, and without it every other phone keeps the stale copy for 7 days.
+  Measured: the server had no `الأصناف` stamp at all on 2026-08-02, so no phone had ever dropped
+  its copy since the price import.
 - **Search matches the middle of a name, and that is why the catalog is cached.** Firestore
   answers prefix queries only, so `db.catalogIndex()` pulls the whole catalog once per phone
   into `localStorage.catalogIndex` (7-day TTL, memoised in `indexRows`) and `searchProducts`

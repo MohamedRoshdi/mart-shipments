@@ -209,7 +209,13 @@ export async function resolveProduct(code) {
   if (direct) return direct;                     // row() already carries the barcode
   if (!/^\d{1,8}$/.test(c)) return null;
   const rows = await catalogIndex().catch(() => []);
-  return rows.find((r) => zeroless(r.barcode) === zeroless(c)) || null;
+  const hit = rows.find((r) => zeroless(r.barcode) === zeroless(c));
+  if (!hit) return null;
+  /* The local copy can be up to a week old, so it is a POINTER, never the answer: it says which
+     barcode to ask for, and the server says what that product is. Without this re-read a phone
+     served the stale row — the old stripped-zero twin that was deleted server-side, with no
+     price on it, which is exactly what «الليبل مش بيجيب السعر» looked like (2026-08-02). */
+  return (await getProduct(hit.barcode)) || null;
 }
 
 // first page only for the default view; searching goes to the server

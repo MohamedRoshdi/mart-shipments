@@ -206,34 +206,39 @@ const monthOf = (ts) => {
   const d = new Date(ts);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 };
-let month = "open";        // VIEW_OPEN — the daily screen, not an archive month
+let month = "today";       // VIEW_TODAY — the daily screen, not an archive month
 
-/* Where a shipment is in its life. Derived, never stored: the absence of a key IS a state, the
-   same shape as «تم تحميلها». A file was made → «جاهزة للاستيراد»; the shop's system took it in
-   → «تم الاستيراد». Nothing sets erpAt yet — reading the success flag out of the TXT needs a real
-   sample of one PowerTech has touched, and guessing at it would mark a shipment as imported when
-   it was not. The state model is here so the rest of the screen can be built against it. */
+/* Where a shipment is in its life — TWO states, not three (the owner, 2026-08-02: «مايبقاش فيه
+   مرحلة جاهز للاستيراد… بتلخبط»). Downloading the file from this page IS taking the shipment
+   into the shop's system, so the download stamps `loadedAt` and the card says «تم الاستيراد».
+   `erpAt` (the pulled-file scan) still lands on the same state — it is confirmation, not a new
+   stage. Derived, never stored: the absence of both keys IS «جديدة». */
 const ERP = {
   new: { label: "جديدة", cls: "erp-new" },
-  ready: { label: "جاهزة للاستيراد", cls: "erp-ready" },
   done: { label: "تم الاستيراد", cls: "erp-done" },
 };
-const erpState = (s) => (s.erpAt ? "done" : s.loadedAt ? "ready" : "new");
+const erpState = (s) => (s.erpAt || s.loadedAt ? "done" : "new");
 
 const dayKey = (ts) => new Date(ts).toLocaleDateString("en-CA");
 const isToday = (ts) => dayKey(ts) === dayKey(Date.now());
 
-/* The default view, and the reason the page stays fast as the months pile up: today's shipments
-   plus everything older that has not finished its life. A shipment leaves the screen only when
-   both stages are done — which is exactly «تظل الشحنة ظاهرة حتى تنتهي جميع مراحلها». Picking a
-   real month, or «كل الشهور», is the archive and shows everything in it. */
-const VIEW_OPEN = "open";
-const openView = () => month === VIEW_OPEN;
-const isOpen = (s) => isToday(s.createdAt) || erpState(s) !== "done";
+/* The default view is TODAY, and nothing else (the owner, 2026-08-02: «يكفيني أشوف شحنات اليوم
+   فقط… المعلّقة تبقى في تبويب منفصل»). Older unfinished work is not lost — it is one pick away
+   under «المعلّق», which reads this month and last. A real month, or «كل الشهور», is the archive. */
+const VIEW_TODAY = "today";
+const VIEW_PENDING = "pending";
+const todayView = () => month === VIEW_TODAY;
+const pendingView = () => month === VIEW_PENDING;
+// both views read bounded months and then filter to what that view is about
+const openView = () => todayView() || pendingView();
+const inView = (s) => (todayView() ? isToday(s.createdAt) : erpState(s) !== "done");
 
 function renderMonthPick() {
   const now = new Date();
-  const opts = [`<option value="${VIEW_OPEN}"${openView() ? " selected" : ""}>النهارده والمعلّق</option>`];
+  const opts = [
+    `<option value="${VIEW_TODAY}"${todayView() ? " selected" : ""}>شحنات النهارده</option>`,
+    `<option value="${VIEW_PENDING}"${pendingView() ? " selected" : ""}>المعلّق (لسه ما اتحملش)</option>`,
+  ];
   opts.push(...Array.from({ length: 12 }, (_, i) => {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
     const k = monthOf(d.getTime());
@@ -305,7 +310,7 @@ async function openManager() {
      at midnight on the 1st that jump was showing the whole archive. Everything stays one
      step behind the picker. What counts as empty is what the view will SHOW — the daily view
      loads finished shipments it then hides, and those must not stop the fallback. */
-  const showing = () => (openView() ? all.filter(isOpen) : all).length + counts.length;
+  const showing = () => (openView() ? all.filter(inView) : all).length + counts.length;
   if (!showing() && month !== MONTH_ALL) {
     month = monthOf(Date.now());
     await loadMonth();
@@ -394,10 +399,10 @@ $("btn-filters").onclick = () => {
    a counter that moved with the search box would be a different number every keystroke. */
 function renderCounters() {
   const mine = all.filter(s => filter === ALL || s.branch === filter);
+  // three numbers, not four: «جاهزة للاستيراد» is gone with the stage it counted
   const cells = [
     ["شحنات النهارده", mine.filter(s => isToday(s.createdAt)).length, ""],
-    ["جاهزة للاستيراد", mine.filter(s => erpState(s) === "ready").length, "erp-ready"],
-    ["اتستوردت النهارده", mine.filter(s => s.erpAt && isToday(s.erpAt)).length, "erp-done"],
+    ["اتستوردت النهارده", mine.filter(s => isToday(s.createdAt) && erpState(s) === "done").length, "erp-done"],
     ["معلّقة", mine.filter(s => erpState(s) === "new").length, "erp-new"],
   ];
   $("erp-counts").innerHTML = cells.map(([label, n, cls]) =>
@@ -411,8 +416,12 @@ function renderList() {
   if (tab === "expiry") { renderMonths(); return; }
   shown = all.filter(s => (filter === ALL || s.branch === filter)
     && (typeFilter === ALL || s.type === typeFilter)
-    && (!openView() || isOpen(s))
+    && (!openView() || inView(s))
     && matchesSearch(s));
+  /* «وبعدها تنزل في اسفل القائمة» (the owner, 2026-08-02): a shipment already taken into the
+     shop's system is done work — it stays visible for the day, but under everything still
+     waiting. Newest first inside each group, which is the order the query already delivers. */
+  shown.sort((a, b) => (erpState(a) === "done") - (erpState(b) === "done") || b.createdAt - a.createdAt);
   renderCounters();
   // One card, one tap. Five buttons on every row turned the list into a wall of controls (the
   // owner's words, 2026-07-31); copy/Excel/TXT/delete all live on the screen the card opens,

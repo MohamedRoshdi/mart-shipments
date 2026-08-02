@@ -49,10 +49,16 @@ if (DELETE && found.dupes.length) {
   const gone = await page.evaluate(async (codes) => {
     const db = await import("./db.js");
     for (const c of codes) await db.deleteProduct(c);
+    /* Deleting here drops THIS browser's search copy and nobody else's — every real phone would
+       keep serving the deleted twins (and their price-less rows) until the 7-day TTL. One stamp
+       on the config doc is the cross-device invalidation the imports already use: the config
+       listener carries it in seconds and every page drops its copy. Measured 2026-08-02: without
+       it, the shop still saw 45 beside 000045 hours after the sweep. */
+    await db.stampFile("الأصناف", { at: Date.now(), rows: 0, by: "تنظيف الأكواد" });
     return codes.length;
   }, found.dupes.map((d) => d.drop));
   await page.waitForTimeout(4000);
-  log("deleted:", gone);
+  log("deleted:", gone, "· stamped الأصناف so every phone drops its search copy");
 } else if (found.dupes.length) {
   log("nothing deleted — re-run with DELETE=1");
 }
