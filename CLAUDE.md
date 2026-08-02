@@ -1001,7 +1001,20 @@ debounce, or it reports false negatives.
   driver: «الحجم الفعلي / 100%» must be picked once, or the label prints shrunk to fit.
 - The label carries no price until the catalog has one. `labelHtml` prints `item.price` when it
   is there, and the printing screen lets one be typed for that print only.
-- The sync chip reports connectivity (`navigator.onLine`), not real sync state.
+- **The sync chip tells the truth about unsent work now, and that closes the worst silent failure**
+  (2026-08-02, the owner: «لو عملت شحنة من الفون مش بتظهر على الويب»). Measured cause at 15:11Z:
+  production answered `resource-exhausted` — a parked write, not a failed one — so the phone showed
+  «متصل» and «اتحفظت» while nothing left it and the laptop saw nothing. `noteWrite()` in `db.js`
+  wraps all four write doors, starts an 8-second timer (`SLOW_MS`) and clears it when
+  `fs.waitForPendingWrites(dbRef)` resolves; a `db-pending` event carries the flag and all three
+  chips read «لسه بيتبعت...» and go amber. Only after 8s, or a healthy save would blink a warning.
+  `db.errorText(err)` is the one copy of the wording, and it names the quota in the shop's words —
+  the work is safe on the device, it just has not been sent.
+  **And `?test=1` is now visible in the footer** («وضع تجربة — مفيش حفظ حقيقي»): a phone whose
+  home-screen shortcut carries that flag writes to itself for ever, with the same screens and the
+  same version number, which is indistinguishable from the bug above. The test suite asserts the
+  marker on all three pages; it deliberately does NOT assert the negative, because a page without
+  the flag boots against production and a test must never read the shop's data.
 - Camera *decoding* can only be verified on a physical phone. `scripts/live-camera.mjs` proves
   the plumbing (camera list, chosen device, start/stop, release, ghost-camera fallback) with
   Chromium's `--use-fake-device-for-media-stream`; that fake stream never contains a barcode.

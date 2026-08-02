@@ -1520,12 +1520,15 @@ addEventListener("keydown", (e) => {
 
 /* ---------- boot ---------- */
 
+// unsent work outranks «متصل»: a network is not the same as the work having left this machine
+let stuck = db.hasPending();
 function updateSync() {
-  $("sync-state").textContent = navigator.onLine ? "متصل" : "مستني الاتصال";
-  $("sync-state").classList.toggle("off", !navigator.onLine);
+  $("sync-state").textContent = !navigator.onLine ? "مستني الاتصال" : stuck ? "لسه بيتبعت..." : "متصل";
+  $("sync-state").classList.toggle("off", !navigator.onLine || stuck);
 }
 addEventListener("online", updateSync);
 addEventListener("offline", updateSync);
+addEventListener("db-pending", (e) => { stuck = e.detail; updateSync(); });
 updateSync();
 
 history.replaceState({ screen: "screen-pin" }, "");
@@ -1550,7 +1553,7 @@ function watchSettings() {
 }
 
 // a live listener that errors (quota, offline, bad rules) must say so, same as the employee app
-addEventListener("db-error", () => toast("مشكلة في مزامنة البيانات — اتأكد من الاتصال والإعدادات", "bad"));
+addEventListener("db-error", (e) => toast(db.errorText(e.detail), "bad"));
 
 // PIN screen paints straight away; the PIN check waits for this instead
 cfgReady = (async () => {

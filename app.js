@@ -1358,16 +1358,29 @@ addEventListener("keydown", (e) => {
 
 /* ---------- boot ---------- */
 
-addEventListener("db-error", () => toast("مشكلة في مزامنة البيانات — اتأكد من الاتصال والإعدادات", "bad"));
+addEventListener("db-error", (e) => toast(db.errorText(e.detail), "bad"));
 
 let dbBroken = false;
 
+/* The chip used to report `navigator.onLine` and nothing else — which says the PHONE has a network,
+   not that the work left it. The shipment that «اتحفظت» and never reached the laptop is exactly
+   that gap, so unsent work now outranks «متصل» here. */
+let stuck = db.hasPending();
 function updateSync() {
-  $("sync-state").textContent = dbBroken ? "إعدادات ناقصة" : (navigator.onLine ? "متصل" : "مستني الاتصال");
-  $("sync-state").classList.toggle("off", dbBroken || !navigator.onLine);   // the dot follows the word
+  $("sync-state").textContent = dbBroken ? "إعدادات ناقصة"
+    : !navigator.onLine ? "مستني الاتصال"
+    : stuck ? "لسه بيتبعت..."
+    : "متصل";
+  $("sync-state").classList.toggle("off", dbBroken || !navigator.onLine || stuck);
 }
 addEventListener("online", updateSync);
 addEventListener("offline", updateSync);
+addEventListener("db-pending", (e) => {
+  stuck = e.detail;
+  updateSync();
+  // said once, when it starts — the chip is what stays. Silence here is what made this invisible.
+  if (stuck) toast("شغلك لسه ما وصلش للسيرفر — سيبها مفتوحة، هي بتحاول لوحدها", "warn");
+});
 
 let cfgReady = null;
 

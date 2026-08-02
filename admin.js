@@ -999,12 +999,15 @@ addEventListener("keydown", (e) => {
 });
 
 
+// unsent work outranks «متصل»: a network is not the same as the work having left this machine
+let stuck = db.hasPending();
 function updateSync() {
-  $("sync-state").textContent = navigator.onLine ? "متصل" : "مستني الاتصال";
-  $("sync-state").classList.toggle("off", !navigator.onLine);
+  $("sync-state").textContent = !navigator.onLine ? "مستني الاتصال" : stuck ? "لسه بيتبعت..." : "متصل";
+  $("sync-state").classList.toggle("off", !navigator.onLine || stuck);
 }
 addEventListener("online", updateSync);
 addEventListener("offline", updateSync);
+addEventListener("db-pending", (e) => { stuck = e.detail; updateSync(); });
 updateSync();
 
 history.replaceState({ screen: "screen-pin" }, "");
@@ -1028,7 +1031,7 @@ const workingCopy = () => ({
 });
 
 // a failed write or listener must say so, same as the other two pages
-addEventListener("db-error", () => toast("مشكلة في مزامنة البيانات — اتأكد من الاتصال والإعدادات", "bad"));
+addEventListener("db-error", (e) => toast(db.errorText(e.detail), "bad"));
 
 cfgReady = (async () => {
   await db.initDb().catch(console.error);

@@ -126,12 +126,44 @@ export async function listUsage() {
   return snap.docs.map((d) => ({ ...d.data(), _id: d.id }));
 }
 
-/* The only four doors to a write, and the two to a read, so the meter lives in one place instead
-   of on thirty call sites. Same signatures as the SDK's — everything below calls these. */
-const addDoc = (c, d) => { meter('writes'); return fs['addDoc'](c, d); };
-const setDoc = (r, d, o) => { meter('writes'); return fs['setDoc'](r, d, o); };
-const updateDoc = (r, d) => { meter('writes'); return fs['updateDoc'](r, d); };
-const deleteDoc = (r) => { meter('writes'); return fs['deleteDoc'](r); };
+/* «الشغل لسه ما اتبعتش» — the one thing this app never said out loud. EVERY write here is
+   fire-and-forget (deliberately: a phone on a shelf must not wait on a server), so a phone whose
+   writes are stuck — offline, or behind the free plan's backoff, which does not FAIL a write but
+   parks it — looked exactly like a phone that had saved. The screen said «متصل» because
+   `navigator.onLine` was true, and the shipment sat in the phone's own cache while the laptop
+   showed nothing. `waitForPendingWrites` is Firestore's own answer: it resolves when everything
+   this device wrote has been acknowledged by the server. Only raised after SLOW_MS, or every save
+   would blink a warning for the fraction of a second a healthy write takes. */
+const SLOW_MS = 8000;
+let pending = false, slowTimer = null;
+export const hasPending = () => pending;
+const setPending = (v) => {
+  if (v === pending) return;
+  pending = v;
+  dispatchEvent(new CustomEvent('db-pending', { detail: v }));
+};
+function noteWrite(p) {
+  meter('writes');
+  if (!slowTimer) slowTimer = setTimeout(() => setPending(true), SLOW_MS);
+  fs.waitForPendingWrites(dbRef)
+    .then(() => { clearTimeout(slowTimer); slowTimer = null; setPending(false); })
+    .catch(() => {});
+  return p;
+}
+
+/* The only four doors to a write, and the two to a read, so the meter — and the unsent-work flag —
+   live in one place instead of on thirty call sites. Same signatures as the SDK's. */
+const addDoc = (c, d) => noteWrite(fs['addDoc'](c, d));
+const setDoc = (r, d, o) => noteWrite(fs['setDoc'](r, d, o));
+const updateDoc = (r, d) => noteWrite(fs['updateDoc'](r, d));
+const deleteDoc = (r) => noteWrite(fs['deleteDoc'](r));
+
+/* One copy of the words, because all three pages raise the same toast and the quota is the case
+   that actually happens. A spent allowance does not fail a write — it parks it — so the message
+   has to say the work is safe AND that it has not left the phone yet. */
+export const errorText = (err) => ((err && err.code) === 'resource-exhausted'
+  ? 'الحصة اليومية المجانية خلصت — شغلك محفوظ على الجهاز، وهيتبعت لوحده أول ما ترجع الساعة ١٠ الصبح'
+  : 'مشكلة في مزامنة البيانات — اتأكد من الاتصال والإعدادات');
 const billed = (snap) => (snap.metadata && snap.metadata.fromCache ? 0 : undefined);
 // a listener delivery: the first one is the whole query, every later one only what changed
 const metered = (snap) => meter('reads', billed(snap) ?? (snap.docChanges ? snap.docChanges().length : 1));

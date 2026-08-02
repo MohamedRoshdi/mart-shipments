@@ -2304,7 +2304,14 @@ test('the version line names the system and the build on all three pages', async
   for (const url of ['/?test=1', '/manager.html?test=1', '/admin.html?test=1']) {
     await page.goto(url);
     await expect(page.locator('#version-line')).toHaveText(/العائلة مارت \| Version \d+\.\d+\.\d+ \| Build \d{2}-\d{2}-\d{4}/);
+    /* ?test=1 writes to this device and nowhere else, which looks exactly like the sync failure the
+       owner reported on 2026-08-02 — and it is otherwise invisible. The footer has to say it. */
+    await expect(page.locator('#version-line')).toContainText('وضع تجربة');
   }
+  /* The other half — that a real load says nothing extra — is NOT asserted here on purpose: a page
+     without ?test=1 boots against production Firestore, and a test suite must never read the
+     shop's data. `versionLine()` adds the marker from the query string alone, so the negative case
+     is the same one line. */
 });
 
 /* files.js decides where a file goes. The disk path needs a real folder pick, which no headless
@@ -2883,6 +2890,30 @@ test('admin: the audit trail explains only the actions whose name is ambiguous',
   await page.click('#btn-logs');
   await expect(page.locator('#logs-list li').first()).toContainText('مالهاش أي علاقة بصلاحيات المستخدمين');
   await expect(page.locator('#logs-list li').nth(1).locator('.note')).toHaveCount(0);
+});
+
+/* «لو عملت شحنة من الفون مش بتظهر على الويب» (the owner, 2026-08-02). The measured cause was the
+   free plan's write backoff: a parked write does not fail, so the phone showed «متصل» and «اتحفظت»
+   while nothing left it. The app has to SAY it — the chip is the thing that stays on screen. */
+test('the chip says when work has not left this device', async ({ page }) => {
+  await page.goto('/?test=1');
+  await setUp(page);
+  await expect(page.locator('#sync-state')).toHaveText('متصل');
+  await page.evaluate(() => dispatchEvent(new CustomEvent('db-pending', { detail: true })));
+  await expect(page.locator('#sync-state')).toHaveText('لسه بيتبعت...');
+  await expect(page.locator('#sync-state')).toHaveClass(/off/);
+  await expect(page.locator('#toast')).toContainText('لسه ما وصلش للسيرفر');
+  await page.evaluate(() => dispatchEvent(new CustomEvent('db-pending', { detail: false })));
+  await expect(page.locator('#sync-state')).toHaveText('متصل');
+});
+
+test('a spent allowance is named in the shop\'s words, not as an error code', async ({ page }) => {
+  await page.goto('/?test=1');
+  await setUp(page);
+  await page.evaluate(() => dispatchEvent(new CustomEvent('db-error',
+    { detail: { code: 'resource-exhausted', message: 'Quota exceeded.' } })));
+  await expect(page.locator('#toast')).toContainText('شغلك محفوظ على الجهاز');
+  await expect(page.locator('#toast')).toContainText('الساعة ١٠ الصبح');
 });
 
 /* Paging is in the QUERY now, not only in the rendering (the owner, 2026-08-02: «modify your
