@@ -247,21 +247,36 @@ let indexRows = null;                        // parsed once per page, not once p
 // here. Kept in localStorage so a reload is free; a phone that cannot store it keeps the copy in
 // memory for the session.
 export async function catalogIndex() {
-  if (TEST_MODE) return listProducts();
+  if (TEST_MODE) return dedupeZeros(await listProducts());
   if (indexRows) return indexRows;
   try {
     const cached = JSON.parse(localStorage.getItem(INDEX_KEY) || 'null');
     if (cached && Array.isArray(cached.rows) && Date.now() - cached.at < INDEX_TTL) {
-      indexRows = cached.rows;
+      // the copy on THIS phone may predate the sweep, so it is de-duplicated on the way out too
+      indexRows = dedupeZeros(cached.rows);
       return indexRows;
     }
   } catch (e) { console.error(e); }
-  indexRows = await listAllProducts();
+  indexRows = dedupeZeros(await listAllProducts());
   try {
     localStorage.setItem(INDEX_KEY, JSON.stringify({ at: Date.now(), rows: indexRows }));
   } catch (e) { console.error(e); }          // over the storage quota: the memory copy still serves
   return indexRows;
 }
+
+/* One product can never be two rows. The pre-2ad9ba2 imports stored codes with their leading
+   zeros stripped, so a copy taken before the 2026-08-02 sweep holds «45» AND «000045» — and a
+   name search shows the shop the same product twice. The padded spelling is the ERP's own and
+   always wins. This runs on the copy, costs nothing, and needs no read or write: a phone fixes
+   its own view the moment it loads this file, instead of waiting for a stamp to reach it. */
+const dedupeZeros = (rows) => {
+  const padded = new Set(rows.map((r) => String(r.barcode)).filter((b) => /^0+\d/.test(b))
+    .map((b) => b.replace(/^0+(?=\d)/, '')));
+  return rows.filter((r) => {
+    const b = String(r.barcode);
+    return /^0+\d/.test(b) || !padded.has(b);
+  });
+};
 
 export function dropCatalogIndex() {
   indexRows = null;

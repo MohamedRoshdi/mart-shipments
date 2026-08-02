@@ -703,7 +703,12 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   (`scripts/live-zero-dupes.mjs` does) — that stamp is the ONLY cross-device invalidation, it
   rides the config listener, and without it every other phone keeps the stale copy for 7 days.
   Measured: the server had no `الأصناف` stamp at all on 2026-08-02, so no phone had ever dropped
-  its copy since the price import.
+  its copy since the price import — and the one write that would have fixed it **hung** (the
+  write quota was spent), which is why the copy is ALSO de-duplicated locally: `dedupeZeros` in
+  `catalogIndex()` drops any stripped code whose padded twin is in the same copy, on every path
+  including the cached one and `?test=1`. No read, no write, no waiting for a stamp — a phone
+  repairs its own view the moment it loads the new `db.js`. The ERP never ships both spellings,
+  so the padded one always wins.
 - **Search matches the middle of a name, and that is why the catalog is cached.** Firestore
   answers prefix queries only, so `db.catalogIndex()` pulls the whole catalog once per phone
   into `localStorage.catalogIndex` (7-day TTL, memoised in `indexRows`) and `searchProducts`

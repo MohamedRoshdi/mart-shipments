@@ -2784,6 +2784,23 @@ test('a catalog stamp newer than the local index drops it', async ({ page }) => 
   expect(r).toEqual({ kept: true, dropped: true });
 });
 
+/* A phone's week-old search copy can still hold the stripped-zero twins the 2026-08-02 sweep
+   deleted server-side, and the shop then sees one product twice in a name search. The copy is
+   de-duplicated on the way out — no read, no write, no waiting for a stamp to arrive. */
+test('the local search copy never shows a code twice, padded and stripped', async ({ page }) => {
+  await page.goto('/?test=1');
+  const rows = await page.evaluate(async () => {
+    const db = await import('./db.js');
+    localStorage.setItem('test-products', JSON.stringify({
+      '45': { name: 'العائله جبن اسطنبولي خزين' },                  // the stale stripped twin
+      '000045': { name: 'العائله جبن اسطنبولي خزين', price: 175 },
+      '77': { name: 'ملح' },                                        // no padded twin: it stays
+    }));
+    return (await db.catalogIndex()).map(r => r.barcode).sort();
+  });
+  expect(rows).toEqual(['000045', '77']);        // the ERP's own spelling wins, the other is gone
+});
+
 /* The logo the admin uploads for the label is also the brand: app bar + tab icon, on every page,
    straight from the config — and a config with no logo changes nothing at all. */
 test('the uploaded logo lands in the app bar and the tab icon', async ({ page }) => {
