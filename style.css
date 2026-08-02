@@ -426,6 +426,16 @@ li.more button { inline-size: 100%; padding-block: 14px; }
 #status-list li.st-bad { border-inline-start-color: var(--bad); }
 /* the day's allowance as a bar. It fills from the start edge, so in RTL it grows right→left —
    which is why the fill is a plain block child and not a `background-position` trick. */
+/* The «the screen may be incomplete» band under the app bar. Amber, not red: nothing is lost and
+   nothing is broken — the work is on the device. Full bleed so it reads as a state of the whole
+   page rather than a message inside one screen. */
+.band {
+  margin: 0; padding: 10px var(--pad);
+  background: var(--amber-soft); color: var(--ink);
+  border-block-end: 1px solid #f0dcb4;
+  font-size: .85rem; line-height: 1.6;
+}
+
 /* the explanation under an audit row: quieter than the row itself, and set off by a rule on the
    start edge so the eye can skip every one of them at once. */
 .note {

@@ -20,6 +20,12 @@
     <span id="sync-state" class="sync"></span>
   </header>
 
+  <!-- An empty list says «مفيش» with total confidence, and on a phone that cannot reach the server
+       that is a lie: the reads come back empty from the offline cache without failing. This band is
+       the one place that says the screen may be incomplete. Driven by the same unsent-work flag as
+       the chip, so it can never contradict it. -->
+  <p id="offline-note" class="band" hidden></p>
+
   <main>
     <section id="screen-login" hidden>
       <h2>الرقم السري</h2>

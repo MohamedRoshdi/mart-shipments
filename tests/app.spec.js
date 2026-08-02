@@ -2923,8 +2923,14 @@ test('the chip says when work has not left this device', async ({ page }) => {
   await expect(page.locator('#sync-state')).toHaveText('لسه بيتبعت...');
   await expect(page.locator('#sync-state')).toHaveClass(/off/);
   await expect(page.locator('#toast')).toContainText('لسه ما وصلش للسيرفر');
+  /* …and the band, because an empty list saying «مفيش» is a lie on a device that cannot reach the
+     server: the reads come back empty from the offline cache without failing. Caught by looking at
+     the live site on a 412px viewport, not by any test. */
+  await expect(page.locator('#offline-note')).toBeVisible();
+  await expect(page.locator('#offline-note')).toContainText('ممكن يكون ناقص');
   await page.evaluate(() => dispatchEvent(new CustomEvent('db-pending', { detail: false })));
   await expect(page.locator('#sync-state')).toHaveText('متصل');
+  await expect(page.locator('#offline-note')).toBeHidden();
 });
 
 test('a spent allowance is named in the shop\'s words, not as an error code', async ({ page }) => {

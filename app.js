@@ -1372,6 +1372,11 @@ function updateSync() {
     : stuck ? "لسه بيتبعت..."
     : "متصل";
   $("sync-state").classList.toggle("off", dbBroken || !navigator.onLine || stuck);
+  const band = $("offline-note");
+  band.hidden = !(stuck || !navigator.onLine);
+  band.textContent = !navigator.onLine
+    ? "مفيش اتصال — شغلك محفوظ على الجهاز وهيتبعت أول ما النت يرجع."
+    : "السيرفر مش بيرد دلوقتي. شغلك محفوظ على الجهاز وهيتبعت لوحده — بس اللي ظاهر على الشاشة ممكن يكون ناقص.";
 }
 addEventListener("online", updateSync);
 addEventListener("offline", updateSync);
