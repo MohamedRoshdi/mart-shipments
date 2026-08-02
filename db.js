@@ -111,11 +111,14 @@ export async function flushUsage(now = false) {
   }).catch((e) => dispatchEvent(new CustomEvent('db-error', { detail: e })));
 }
 
-// a device that is gone (sold phone, wiped browser) should not sit in the list for ever
+/* A device that is gone (sold phone, wiped browser) should not sit in the list for ever.
+   NOT awaited on the network — measured 2026-08-02 in a real browser: with the allowance spent a
+   `deleteDoc` await simply never returns, and it hung the caller for 45 seconds. Same reason every
+   other write here is fire-and-forget. */
 export async function deleteUsage(device) {
   if (TEST_MODE) return;
   await live();
-  await deleteDoc(fs.doc(dbRef, 'usage', String(device)));
+  deleteDoc(fs.doc(dbRef, 'usage', String(device))).catch(console.error);
 }
 
 // one read per device in the shop — a handful, and the only way the admin can see past its own screen

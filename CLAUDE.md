@@ -588,6 +588,16 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   **`visibilitychange` is deliberately not a trigger** — a phone switching apps every minute would
   make the meter the thing that spends the allowance. Ceiling: five devices working all day is
   under 300 writes of the 20,000. The reporter's own writes are metered like any other, on purpose.
+  **A SPENT ALLOWANCE MAKES NOTHING FAIL — so `db-error` never fires and cannot be the signal.**
+  Proved in a real browser on the deployed site, 2026-08-02 15:34–15:44Z, with the day's allowance
+  actually spent: the console showed `resource-exhausted`, and the app saw **no rejection at all**.
+  The persistent cache answers `getDocs`, and an offline-capable `setDoc` resolves against that same
+  cache and parks the mutation — both promises succeed. Wrapping the six doors to announce failures
+  (`announce()`) is right and still worth having, but it does NOT cover this case. The only true
+  signal is that the work was never acknowledged: `db.hasPending()` (from `waitForPendingWrites`)
+  plus `navigator.onLine`. That pair is what `quotaLine()` reads FIRST, before `dbError()`.
+  Corollary, measured the same session: `await deleteDoc(...)` never returned and hung its caller
+  for 45 seconds — every write in this file stays fire-and-forget, `deleteUsage` included.
   **THE SERVER'S REFUSAL OUTRANKS THE COUNTER, and the screen has to say why** (2026-08-02, the
   owner: «how the limits not reached?! and u said it's reached?!» — his screenshot read 0٪ while
   two measured probes twelve minutes apart got `resource-exhausted`). Both were true: the meter can
