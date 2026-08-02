@@ -94,10 +94,10 @@ function navTo(id) {
    the current month for the same reason the manager's is: the old unbounded read grew forever. */
 const dayKey = (ts) => new Date(ts).toLocaleDateString("en-CA");
 const isToday = (ts) => dayKey(ts) === dayKey(Date.now());
-const thisMonth = () => {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-};
+/* The query is the DAY, not the month (2026-08-02). The screen only ever showed today, but it was
+   READING a whole month to do it — on every phone, on every page load, against a 50,000-read day.
+   `dayKey` is already «YYYY-MM-DD», which `db.monthRange` reads as a single day. */
+const todayKey = () => dayKey(Date.now());
 
 /* Every list on this page that another device can change is LIVE (the owner, 2026-08-02: he edits
    on the laptop and the phone keeps showing the old thing). `feed` subscribes ONCE per page life
@@ -124,9 +124,9 @@ async function goHome() {
   // life, and it sits after the session check because a signed-out device has nothing to report.
   db.reportUsage({ device: auth.deviceId(), who: myName(), branch: myBranch() });
   render("screen-home");
-  await feed("ships", cb => db.watchShipments(thisMonth(), cb), paintMyShipments);
+  await feed("ships", cb => db.watchShipments(todayKey(), cb), paintMyShipments);
   paintMyShipments();             // the branch/name filter may have moved since the last delivery
-  if (canDo("count")) { await feed("counts", cb => db.watchCounts(thisMonth(), cb), paintMyCounts); paintMyCounts(); }
+  if (canDo("count")) { await feed("counts", cb => db.watchCounts(todayKey(), cb), paintMyCounts); paintMyCounts(); }
   openDeepLabel();
 }
 
@@ -621,6 +621,9 @@ function renderMonths() {
       </div>
       <button class="ghost" data-month="${escAttr(m.key)}">فتح</button>
     </li>`).join("") || `<li class="empty">لسه مفيش صلاحيات — امسح أول صنف وحدّد تاريخه</li>`;
+  // the months are DERIVED from the rows, so a capped read would be a half-truth — say it, never hide it
+  $("exp-months").innerHTML += rawExp.length >= db.EXPIRY_CAP
+    ? `<li class="empty">القايمة واقفة عند ${db.EXPIRY_CAP} صنف — امسح الشهور اللي عدّت عشان تشوف الباقي</li>` : "";
 }
 
 $("exp-months").onclick = (e) => {
@@ -955,9 +958,20 @@ let job = null;
 const jobState = (j) => (j.printedAt ? "تمت طباعتها" : j.readyAt ? "جاهزة للطباعة" : "جديدة");
 const jobLabels = (j) => j.items.reduce((n, r) => n + (Number(r.copies) || 1), 0);
 
+/* The queue is read a page at a time — the newest `jobPage`, never the lot. Widening a LIVE query
+   means re-subscribing, so «عرض المزيد» drops the listener and takes a bigger window; that costs
+   the new window once, which is why the page is 50 and not 5. */
+let jobPage = db.JOB_PAGE, jobsOff = null;
+
 async function openJobs() {
-  await feed("jobs", db.watchJobs, paintJobs);
+  await feed("jobs", (cb) => db.watchJobs(cb, jobPage).then((off) => { jobsOff = off; return off; }), paintJobs);
   navTo("screen-jobs");
+}
+
+async function moreJobs() {
+  jobPage += db.JOB_PAGE;
+  if (jobsOff) jobsOff();
+  jobsOff = await db.watchJobs(paintJobs, jobPage);
 }
 
 // live: a job stamped «تمت طباعتها» on the shop laptop stops looking new on the phone
@@ -971,7 +985,7 @@ function paintJobs(rows) {
 $("btn-jobs").onclick = () => { openJobs().catch(() => toast("حصلت مشكلة — جرّب تاني")); };
 
 function renderJobs() {
-  $("jobs-list").innerHTML = jobs.length ? jobs.map((j) => `<li>
+  $("jobs-list").innerHTML = (jobs.length ? jobs.map((j) => `<li>
       <button class="card-open" data-job="${escAttr(j._id)}">
         <div class="card-main">
           <div class="card-title">${esc(j.name)}</div>
@@ -979,7 +993,11 @@ function renderJobs() {
         </div>
         <span class="stamp">${jobState(j)}</span>
       </button>
-    </li>`).join("") : `<li class="empty">مفيش مهام محفوظة. جهّز الأصناف في شاشة ليبل الرف ودوس «حفظ كمهمة طباعة».</li>`;
+    </li>`).join("") : `<li class="empty">مفيش مهام محفوظة. جهّز الأصناف في شاشة ليبل الرف ودوس «حفظ كمهمة طباعة».</li>`)
+    // a full page means the server probably has more behind it; a short one is the end of the list
+    + (jobs.length >= jobPage
+      ? `<li class="more"><button type="button" class="ghost" id="btn-more-jobs">عرض المزيد — ${jobs.length} مهمة</button></li>`
+      : "");
 }
 
 function renderJob() {
@@ -997,6 +1015,7 @@ function renderJob() {
 }
 
 $("jobs-list").onclick = (e) => {
+  if (e.target.closest("#btn-more-jobs")) { moreJobs().catch(console.error); return; }
   const b = e.target.closest("button[data-job]");
   if (!b) return;
   job = jobs.find((j) => j._id === b.dataset.job);

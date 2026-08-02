@@ -930,7 +930,7 @@ $("btn-wipe-products").onclick = async () => {
 /* The audit trail grows for ever, so it is read a page at a time — «عرض المزيد» asks the server
    for a bigger slice of the same descending query. A cap that silently hides the rest is what a
    trail must never do: the button says how many are on screen, and it keeps going. */
-const LOG_PAGE = 100;
+const LOG_PAGE = db.LOG_PAGE;      // the page sizes live in db.js, next to the reads they cost
 let logLimit = LOG_PAGE;
 
 /* A one-line explanation under the rows whose NAME does not say enough — and only those. «حذف

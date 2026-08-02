@@ -533,6 +533,27 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   Cost: what the one-shot read already cost, plus one read per actual change — the watchConfig
   arithmetic. In `?test=1` it relays the `storage` event, and the listener test dispatches a
   synthetic `StorageEvent` (same-tab writes never fire the real one).
+- **Paging lives in the QUERY, and the page sizes live in `db.js`** (2026-08-02, the owner: «modify
+  your queries of reads and writes to not get all the records»). `PRODUCT_CAP` 50, `JOB_PAGE` 50,
+  `LOG_PAGE` 50, `EXPIRY_CAP` 1000, `HITS` 50 — every one of them is a READ per row on the free
+  plan, so a screen opening with 300 rows nobody scrolls to has spent 300 for nothing. Never
+  hard-code a page size at a call site again; `admin.js` reads `db.LOG_PAGE`.
+  **`monthRange` takes a DAY key too**: «YYYY-MM-DD» is a one-day span, «YYYY-MM» a month. That is
+  what the employee home uses now — it only ever SHOWED today but was READING a whole month to do
+  it, on every phone on every page load. `new Date(y, m-1, d+1)` rolls over the month end by itself.
+  **Widening a live query means re-subscribing**, which re-reads the window — that is why
+  `watchJobs(cb, page)` takes the page and «عرض المزيد» costs one bigger window, and why the page
+  is 50 rather than 5.
+  **الصلاحيات is capped, NOT paged, and the cap is visible.** The months on screen are DERIVED from
+  every row (`ex.months`), so a half-read collection is a half-truth about which shelf to clear —
+  both screens print «القايمة واقفة عند 1000 صنف» when the cap is hit rather than quietly showing
+  part of it. And `listAllProducts()` in `?test=1` must NOT delegate to `listProducts()`: that is a
+  PAGE now, and an import diff run against one page would offer to delete everything past row 50.
+  **What is deliberately still unbounded**: `listAllProducts()` (import diff + export),
+  `catalogIndex()` (once per phone per 7 days), and the manager's month/pending views — the last
+  one because the «معلّقة» counter needs every unfinished shipment and Firestore cannot query for
+  a MISSING field, so bounding it would mean storing the state as a column. Since the list became a
+  listener it costs its window once per page load, not per screen switch.
 - **Every list a second device can change is LIVE — that is the whole list, not a sample**
   (2026-08-02, the owner: «شوف الصح إن كله يسمع على كله»). Beyond the manager's shipments and
   counts: the employee home (`feed()` in `app.js`, attached once per page life), الصلاحيات on both
@@ -771,7 +792,7 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   branches (the rules forbid it).
 - **Manager scope filters before render**, never after: `openManager()` drops other branches
   out of `all`, so a scoped user's page never holds data they may not see.
-- Catalog screen loads `PRODUCT_CAP = 300` rows; `countProducts()` gives the honest total.
+- Catalog screen loads `PRODUCT_CAP = 50` rows per page; `countProducts()` gives the honest total.
   Export uses `listAllProducts()` — one deliberate full read.
 - **The local catalog copy is a POINTER, never the answer.** `resolveProduct` falls back to
   `catalogIndex()` only to learn WHICH barcode to ask for, then re-reads that doc from Firestore.

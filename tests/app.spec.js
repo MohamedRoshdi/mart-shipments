@@ -2885,6 +2885,47 @@ test('admin: the audit trail explains only the actions whose name is ambiguous',
   await expect(page.locator('#logs-list li').nth(1).locator('.note')).toHaveCount(0);
 });
 
+/* Paging is in the QUERY now, not only in the rendering (the owner, 2026-08-02: «modify your
+   queries … to not get all the records»). Two things to prove: a day key really is a one-day
+   range, and the print queue asks the server for a page and grows it on «عرض المزيد». */
+test('the day key is a one-day range, not the whole month', async ({ page }) => {
+  await page.goto('/?test=1');
+  const spans = await page.evaluate(async () => {
+    const db = await import('./db.js');
+    const day = db.monthRange('2026-08-02');
+    const month = db.monthRange('2026-08');
+    // the last day of a month has to roll into the next one, not run off the end
+    const rollover = db.monthRange('2026-08-31');
+    return {
+      dayHours: (day[1] - day[0]) / 3600000,
+      monthDays: (month[1] - month[0]) / 86400000,
+      rolloverStartsSept: new Date(rollover[1]).getMonth() === 8,
+    };
+  });
+  expect(spans.dayHours).toBe(24);
+  expect(spans.monthDays).toBe(31);
+  expect(spans.rolloverStartsSept).toBe(true);
+});
+
+test('the print queue reads a page, and «عرض المزيد» asks for the next one', async ({ page }) => {
+  await page.goto('/?test=1');
+  await page.evaluate(() => {
+    localStorage.setItem('employeeName', 'أحمد');
+    localStorage.setItem('session', JSON.stringify({ name: 'أحمد', branches: [], perms: ['emp', 'label'], user: true, at: Date.now() }));
+    localStorage.setItem('test-jobs', JSON.stringify(Array.from({ length: 60 }, (_, i) => ({
+      name: `مهمة ${i + 1}`, createdBy: 'أحمد', createdAt: Date.now() - i * 1000,
+      items: [{ barcode: '111', name: 'لبن', price: '', copies: 1 }],
+    }))));
+  });
+  await page.reload();
+  await page.click('#btn-jobs');
+  await expect(page.locator('#jobs-list li:not(.more)')).toHaveCount(50);   // JOB_PAGE, not all 60
+  await expect(page.locator('#btn-more-jobs')).toBeVisible();
+  await page.click('#btn-more-jobs');
+  await expect(page.locator('#jobs-list li:not(.more)')).toHaveCount(60);
+  await expect(page.locator('#btn-more-jobs')).toBeHidden();               // short page = the end
+});
+
 /* «عرض المزيد» (the owner, 2026-08-02): a list of hundreds is read a page at a time, and the
    button says where you are. A new search or filter starts the count over. */
 test('long lists page instead of dumping every row', async ({ page }) => {

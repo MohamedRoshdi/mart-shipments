@@ -528,6 +528,9 @@ function renderMonths() {
         <span class="meta">${m.count} صنف · ${m.qty} قطعة · ${esc(ex.daysWord(m.days))}</span>
       </button>
     </li>`).join("") || `<li class="empty">${filter === ALL ? "مفيش صلاحيات مسجّلة" : "مفيش صلاحيات في الفرع ده"}</li>`;
+  // the months are DERIVED from the rows, so a capped read would be a half-truth — say it, never hide it
+  $("all-months").innerHTML += expRows.length >= db.EXPIRY_CAP
+    ? `<li class="empty">القايمة واقفة عند ${db.EXPIRY_CAP} صنف — امسح الشهور اللي عدّت عشان تشوف الباقي</li>` : "";
 }
 
 $("all-months").onclick = (e) => {

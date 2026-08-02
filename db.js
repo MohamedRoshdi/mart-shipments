@@ -1,5 +1,15 @@
 const TEST_MODE = new URLSearchParams(location.search).has('test');
-export const PRODUCT_CAP = 300;    // catalog rows the screen pulls before searching
+/* Page sizes. Every one of these is a READ per row on the free plan, so a screen that opens with
+   300 rows nobody scrolls to has spent 300 of the day's 50,000 for nothing. 50 fills a phone
+   screen several times over, and «عرض المزيد» fetches the next 50 from a cursor — never the lot. */
+export const PRODUCT_CAP = 50;     // catalog rows per page, server-side (startAfter cursor)
+export const JOB_PAGE = 50;        // print jobs per page; «عرض المزيد» re-subscribes with +50
+export const LOG_PAGE = 50;        // audit rows per page
+/* الصلاحيات cannot be paged: the months on screen are DERIVED from every row, so a half-read
+   collection shows a half-truth about which shelf has to be cleared. This is a runaway guard, not
+   a page — a shop tracking more than a thousand near-expiry rows has a different problem, and the
+   screen says so instead of quietly showing part of it. */
+export const EXPIRY_CAP = 1000;
 const HITS = 50;                   // rows one search returns
 
 let fs = null;      // firestore module namespace
@@ -154,9 +164,14 @@ export async function saveShipment(shipment) {
    fine at a few hundred, not at a few years. `month` is "YYYY-MM"; null still means everything,
    which is what the «الكل» option and the tests use. A range on the field the query is already
    ordered by needs no composite index. */
-export function monthRange(month) {
-  if (!month) return null;
-  const [y, m] = month.split('-').map(Number);
+/* «YYYY-MM» is a month and «YYYY-MM-DD» is a single day — same function, because every caller of
+   the month queries wants the day form too and a second range builder would drift from this one.
+   A day range is what the employee home actually needs: it shows today, and it used to READ a
+   whole month to do it. `new Date(y, m-1, d+1)` rolls over the end of the month by itself. */
+export function monthRange(key) {
+  if (!key) return null;
+  const [y, m, d] = String(key).split('-').map(Number);
+  if (d) return [new Date(y, m - 1, d).getTime(), new Date(y, m - 1, d + 1).getTime()];
   return [new Date(y, m - 1, 1).getTime(), new Date(y, m, 1).getTime()];
 }
 
@@ -229,15 +244,19 @@ export async function watchCounts(month, cb) {
   return watchMonthly('counts', month, cb);
 }
 
+// capped, not paged — see EXPIRY_CAP. `cb` gets the rows; `atCap` tells the screen to say so.
 export async function watchExpiry(cb) {
-  if (TEST_MODE) return watchLsWith('test-expiry', () => lsArr('test-expiry'), cb);
-  return watchAll('expiry', cb);
+  if (TEST_MODE) return watchLsWith('test-expiry', () => lsArr('test-expiry').slice(0, EXPIRY_CAP), cb);
+  await live();
+  return watchAll('expiry', cb, fs.orderBy('createdAt', 'desc'), fs.limit(EXPIRY_CAP));
 }
 
-export async function watchJobs(cb) {
-  if (TEST_MODE) return watchLsWith('test-jobs', () => lsMonth('test-jobs', null), cb);
+// `page` grows by JOB_PAGE per «عرض المزيد»; the caller re-subscribes, which is the only way to
+// widen a live query. A wider window re-reads the window — rare, and the list is dozens of rows.
+export async function watchJobs(cb, page = JOB_PAGE) {
+  if (TEST_MODE) return watchLsWith('test-jobs', () => lsMonth('test-jobs', null).slice(0, page), cb);
   await live();       // the constraints below read `fs`, which only exists once the SDK is loaded
-  return watchAll('print_jobs', cb, fs.orderBy('createdAt', 'desc'), fs.limit(200));
+  return watchAll('print_jobs', cb, fs.orderBy('createdAt', 'desc'), fs.limit(page));
 }
 
 export async function updateShipment(id, data) {
@@ -374,7 +393,9 @@ export async function listProducts(afterName) {
 
 // every product, for the export file (one deliberate full read, never a screen load)
 export async function listAllProducts() {
-  if (TEST_MODE) return listProducts();
+  // NOT listProducts(): that one is a PAGE now, and a diff run against one page would offer to
+  // delete every product past the first fifty
+  if (TEST_MODE) return Object.entries(lsObj('test-products')).map(([barcode, v]) => row(barcode, v));
   await live();
   const snap = await getDocs(fs.query(fs.collection(dbRef, 'products'), fs.orderBy('name')));
   return snap.docs.map((d) => row(d.id, d.data()));
@@ -618,7 +639,7 @@ export async function logAction(who, action, target) {
   }
 }
 
-export async function listLogs(max = 100) {
+export async function listLogs(max = LOG_PAGE) {
   if (TEST_MODE) return lsArr('test-logs').sort((a, b) => b.at - a.at).slice(0, max);
   await live();
   const snap = await getDocs(
@@ -753,14 +774,6 @@ export async function saveJob(job) {
   addDoc(fs.collection(dbRef, "print_jobs"), job).catch((e) => dispatchEvent(new CustomEvent("db-error", { detail: e })));
 }
 
-export async function listJobs() {
-  if (TEST_MODE) return lsMonth("test-jobs", null);
-  await live();
-  // newest 200: jobs persist for reprint, so without a cap this read grows for ever. 200 is months
-  // of shop work; anything older is archive nobody reprints, and حذف exists for real cleanup.
-  const snap = await getDocs(fs.query(fs.collection(dbRef, "print_jobs"), fs.orderBy("createdAt", "desc"), fs.limit(200)));
-  return snap.docs.map((d) => ({ ...d.data(), _id: d.id }));
-}
 
 // marking ready/printed is fire-and-forget, like every stamp in the app
 export async function updateJob(id, patch) {
@@ -803,13 +816,6 @@ export async function saveExpiry(row) {
 
 // no orderBy: sorting by year+month+day on the server would need a composite index, and the
 // screen groups the rows into months anyway
-export async function listExpiry() {
-  if (TEST_MODE) return lsArr('test-expiry');
-  await live();
-  const snap = await getDocs(fs.collection(dbRef, 'expiry'));
-  return snap.docs.map((d) => ({ ...d.data(), _id: d.id }));
-}
-
 // Quantity or date only: a row moves to another month by changing its date, never by re-adding.
 // Not awaited on the network, for the same reason the adds are not: a phone on the shelf may be
 // offline (or behind a write backoff), and awaiting the server ack would leave the item sheet
