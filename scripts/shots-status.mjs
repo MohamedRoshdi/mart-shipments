@@ -40,6 +40,15 @@ await page.waitForTimeout(500);
 
 await page.click('button[data-goto="screen-status"]');
 await page.waitForTimeout(500);          // the device roll-up lands right after the first paint
+
+// and the case the owner actually hit: the server refusing while the counter still reads low
+if (process.env.REFUSED) {
+  await page.evaluate(() => dispatchEvent(new CustomEvent("db-error",
+    { detail: { code: "resource-exhausted", message: "Quota exceeded." } })));
+  await page.click("#btn-back");
+  await page.click('button[data-goto="screen-status"]');
+  await page.waitForTimeout(300);
+}
 const bars = await page.evaluate(() => [...document.querySelectorAll("#status-list .quota-bar > span")]
   .map((s) => ({ width: s.style.inlineSize, colour: getComputedStyle(s).backgroundColor })));
 console.log("[status] bars:", JSON.stringify(bars));

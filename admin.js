@@ -99,15 +99,21 @@ const statusRow = (label, value, cls = "") =>
 /* The day's allowance, as a bar. Google gives a client no access to the project's own counters
    (that is Cloud Monitoring), so the total is the sum of what every device REPORTED — which is why
    the screen also lists the devices one by one: a total nobody can break down cannot be acted on. */
-const bar = (label, used, cap, note) => {
+/* THE SERVER'S «لأ» OUTRANKS OUR OWN TALLY (2026-08-02, the owner: «how the limits not reached?!
+   and u said it's reached?!» — the screen said 0٪ while a measured probe got `resource-exhausted`
+   twelve minutes apart, twice). Both were true: the counter can only ever see work the APP did on
+   devices that reported in, and what actually spent that day was maintenance run from outside it.
+   A counter is an estimate; a refusal is a fact. So when the database has refused recently, the
+   bars go full and red whatever the count says, and the row says which number to believe. */
+const bar = (label, used, cap, note, refused) => {
   const pct = Math.min(100, Math.round((used / cap) * 100));
-  const cls = pct >= 90 ? "st-bad" : pct >= 60 ? "st-warn" : "st-ok";
+  const cls = refused ? "st-bad" : pct >= 90 ? "st-bad" : pct >= 60 ? "st-warn" : "st-ok";
   return `<li class="${cls}"><div class="card-main">
       <div class="card-title">${esc(label)}</div>
       <!-- «من», never «/»: a slash between two numbers inside an RTL line flips which one reads first -->
-      <div class="meta">${used.toLocaleString("en-US")} من ${cap.toLocaleString("en-US")} · ${pct}٪</div>
-      <div class="meta">${esc(note)}</div>
-      <div class="quota-bar"><span style="inline-size:${pct}%"></span></div>
+      <div class="meta">${refused ? "خلصت — السيرفر رافض دلوقتي" : `${used.toLocaleString("en-US")} من ${cap.toLocaleString("en-US")} · ${pct}٪`}</div>
+      <div class="meta">${esc(refused ? `العدّاد بيقول ${used.toLocaleString("en-US")} بس، وده مش الحقيقة — شوف السطر تحت` : note)}</div>
+      <div class="quota-bar"><span style="inline-size:${refused ? 100 : pct}%"></span></div>
     </div></li>`;
 };
 
@@ -122,7 +128,9 @@ const USAGE_FRESH = 60 * 1000;
 async function loadUsage(force = false) {
   if (!force && usageRows && Date.now() - usageAt < USAGE_FRESH) return;
   await db.flushUsage(true);         // this device's own numbers first, or the admin reads itself stale
-  usageRows = await db.listUsage().catch(() => []);
+  // null on failure, NEVER [] — «ما وصلناش للسيرفر» and «مفيش أجهزة» are opposite things, and the
+  // read failing is exactly what happens on the day this screen most needs to be honest
+  usageRows = await db.listUsage().catch(() => null);
   usageAt = Date.now();
 }
 
@@ -138,7 +146,8 @@ function resetLine() {
 }
 
 function deviceRows() {
-  if (!usageRows) return [statusRow("أجهزة المحل", "بنجيب أرقام الأجهزة...")];
+  if (!usageRows) return [statusRow("أجهزة المحل",
+    "ما قدرناش نجيب أرقام الأجهزة من السيرفر — الأرقام فوق من الجهاز ده بس", "st-warn")];
   if (!usageRows.length) return [statusRow("أجهزة المحل", "لسه مفيش جهاز بعت أرقامه — بيحصل بعد أول ١٠ دقايق شغل")];
   const mine = localStorage.getItem("deviceId");
   return [statusRow("أجهزة المحل", `${usageRows.length} جهاز — مرتّبين بالأكتر حفظًا`),
@@ -179,16 +188,26 @@ function renderStatus() {
   const [quota, quotaCls] = quotaLine();
   const stamps = Object.entries(cfg.filesMeta || {});
   const u = db.usage();
+  // the label must never claim more than it has: a failed roll-up read is this device's numbers only
+  const scope = usageRows && usageRows.length ? "كل الأجهزة" : "الجهاز ده";
+  const refused = quotaCls === "st-bad";     // the server said no; that outranks anything we counted
   $("status-list").innerHTML = [
     statusRow("الاتصال بالإنترنت",
       navigator.onLine ? "متصل" : "مفيش اتصال — الشغل بيتحفظ على الجهاز لحد ما يرجع",
       navigator.onLine ? "st-ok" : "st-bad"),
     statusRow("الحصة اليومية المجانية", quota, quotaCls),
     // the shop's total when the devices have reported; this device alone until they do
-    bar("الحفظ النهارده — كل الأجهزة", Math.max(sumUsage("writes"), u.writes), db.QUOTA.writes,
-      "كل صنف بيتحفظ لوحده، فاستيراد ملف الأصناف كامل بياخد حوالي ١٠ آلاف"),
-    bar("القراءة النهارده — كل الأجهزة", Math.max(sumUsage("reads"), u.reads), db.QUOTA.reads,
-      "أول مرة تدوّر باسم بتنزّل الكتالوج كله مرة واحدة على كل جهاز"),
+    bar(`الحفظ النهارده — ${scope}`, Math.max(sumUsage("writes"), u.writes), db.QUOTA.writes,
+      "كل صنف بيتحفظ لوحده، فاستيراد ملف الأصناف كامل بياخد حوالي ١٠ آلاف", refused),
+    bar(`القراءة النهارده — ${scope}`, Math.max(sumUsage("reads"), u.reads), db.QUOTA.reads,
+      "أول مرة تدوّر باسم بتنزّل الكتالوج كله مرة واحدة على كل جهاز", refused),
+    /* The counter measures what the APP did on devices that reported in. It is blind to anything
+       else that touched the same database — and on 2026-08-02 that blind spot WAS what spent the
+       day. Saying so is the difference between a number and a number you can act on. */
+    statusRow("العدّاد ده بيشوف إيه؟",
+      "بيحسب شغل البرنامج بس، من الأجهزة اللي بعتت أرقامها. أي حاجة تانية اشتغلت على نفس "
+      + "قاعدة البيانات (صيانة أو أدوات من برّه) مش محسوبة — عشان كده السيرفر ممكن يقول «خلصت» "
+      + "والعدّاد لسه رقمه صغير. لما يحصل كده، صدّق السيرفر."),
     statusRow("الحصة بترجع", resetLine()),
     ...deviceRows(),
     statusRow("نسخة التطبيق على الجهاز ده", versionLine()),

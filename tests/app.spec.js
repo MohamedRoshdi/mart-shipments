@@ -2836,7 +2836,8 @@ test('admin: the status screen reads the system without touching the server', as
     { detail: { code: 'resource-exhausted', message: 'Quota exceeded.' } })));
   await page.click('#btn-back');
   await page.click('button[data-goto="screen-status"]');
-  await expect(page.locator('#status-list li.st-bad')).toContainText('خلصت النهارده');
+  // a refusal now reddens the two allowance bars as well, so name the row instead of assuming one
+  await expect(page.locator('#status-list li.st-bad').first()).toContainText('خلصت النهارده');
 
   await page.evaluate(() => localStorage.setItem('test-products', JSON.stringify({ 1: 'أ', 2: 'ب' })));
   await page.click('#btn-count-products');
@@ -2870,10 +2871,28 @@ test('admin: the status screen totals the day across every device, and names the
   await expect(page.locator('#status-list')).toContainText('محمد سعيد · فرع قويسنا');
   await expect(page.locator('#status-list')).toContainText('مافيش شغل النهارده');
   await expect(page.locator('#status-list')).toContainText('فاضل');               // the reset countdown
+  await expect(page.locator('#status-list')).toContainText('صدّق السيرفر');        // what the counter cannot see
   // 90% of the writes is a red bar, 10% of the reads is a green one — colour AND the number
   await expect(page.locator('#status-list li.st-bad .quota-bar > span')).toHaveCSS('background-color', 'rgb(201, 48, 44)');
   await expect(page.locator('#status-list li.st-ok .quota-bar > span').first())
     .toHaveCSS('background-color', 'rgb(18, 133, 74)');
+
+  /* The whole point, from the owner's own screenshot: the counter said 0٪ while the server was
+     refusing. A refusal is a fact and a tally is an estimate — so a recent `resource-exhausted`
+     fills BOTH bars red whatever the count says, and the row admits the counter is not the truth. */
+  await page.evaluate(() => localStorage.setItem('usage', JSON.stringify({
+    day: new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' }), reads: 21, writes: 21,
+  })));
+  await page.evaluate(() => dispatchEvent(new CustomEvent('db-error',
+    { detail: { code: 'resource-exhausted', message: 'Quota exceeded.' } })));
+  await page.click('#btn-back');
+  await page.click('button[data-goto="screen-status"]');
+  await expect(page.locator('#status-list')).toContainText('خلصت — السيرفر رافض دلوقتي');
+  await expect(page.locator('#status-list')).toContainText('وده مش الحقيقة');
+  await expect(page.locator('#status-list .quota-bar > span').first()).toHaveCSS('width', /.+/);
+  const wide = await page.evaluate(() =>
+    [...document.querySelectorAll('#status-list .quota-bar > span')].map((s) => s.style.inlineSize));
+  expect(wide.slice(0, 2)).toEqual(['100%', '100%']);
 });
 
 /* A note under the audit rows whose NAME does not say enough — and only those (the owner:

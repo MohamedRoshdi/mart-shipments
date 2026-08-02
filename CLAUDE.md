@@ -588,6 +588,17 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   **`visibilitychange` is deliberately not a trigger** — a phone switching apps every minute would
   make the meter the thing that spends the allowance. Ceiling: five devices working all day is
   under 300 writes of the 20,000. The reporter's own writes are metered like any other, on purpose.
+  **THE SERVER'S REFUSAL OUTRANKS THE COUNTER, and the screen has to say why** (2026-08-02, the
+  owner: «how the limits not reached?! and u said it's reached?!» — his screenshot read 0٪ while
+  two measured probes twelve minutes apart got `resource-exhausted`). Both were true: the meter can
+  only see work the APP did on devices that reported in, and what actually spent that day was
+  maintenance run from OUTSIDE the app (headless scripts, fresh profiles). So a recent
+  `resource-exhausted` fills both bars red at 100% whatever the tally says, the row admits «العدّاد
+  بيقول N بس، وده مش الحقيقة», and a permanent row («العدّاد ده بيشوف إيه؟») states the blind spot.
+  A counter is an estimate; a refusal is a fact. The bar label is `كل الأجهزة` ONLY when the roll-up
+  actually returned devices — `loadUsage` keeps `usageRows` **null** on failure, never `[]`, because
+  «ما وصلناش للسيرفر» and «مفيش أجهزة» are opposite things and the read failing is exactly what
+  happens on the day this screen most needs to be honest.
   The admin reads it with `db.listUsage()` on opening «حالة النظام» (one read per device, throttled
   to once a minute, plus a «تحديث أرقام الأجهزة» button). A device whose `day` is not today reports
   as **zero for today** — yesterday's tally is not today's. `db.nextReset()` reads the Pacific clock
