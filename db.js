@@ -57,6 +57,65 @@ export function usage() {
   return u.day === quotaDay() ? { ...blank(), ...u } : blank();
 }
 
+// when the allowance comes back, read off the Pacific clock itself rather than a fixed offset —
+// Egypt and California do not change to summer time on the same day
+export function nextReset() {
+  const [h, m, s] = new Date()
+    .toLocaleTimeString('en-GB', { timeZone: 'America/Los_Angeles', hour12: false })
+    .split(':').map(Number);
+  return Date.now() + (86400 - (h * 3600 + m * 60 + s)) * 1000;
+}
+
+/* The shop-wide picture, not just the device you happen to be holding (the owner, 2026-08-02:
+   «the admin page needs to see everything to manage the system»). Each device keeps ONE doc in
+   `usage`, keyed by its own device id, and OVERWRITES it — so the collection stays as small as the
+   number of phones in the shop, for ever. No per-day history to grow, and nothing to clean up.
+   The ceiling is stated on purpose: at most one write per device per 10 minutes of real activity,
+   plus one as the page unloads. Five devices working a whole day is under 300 writes against the
+   20,000 cap. `visibilitychange` is deliberately NOT a trigger — a phone switching apps every
+   minute would turn the meter into the thing that spends the allowance. */
+const FLUSH_MS = 10 * 60 * 1000;
+let me = null, flushedKey = '', flushedAt = 0;
+
+export function reportUsage(id) {
+  if (TEST_MODE || !id || !id.device || me) return;   // once per page life
+  me = id;
+  addEventListener('pagehide', () => { flushUsage(true); });
+  setInterval(() => { flushUsage(); }, FLUSH_MS);
+  flushUsage(true);
+}
+
+export async function flushUsage(now = false) {
+  if (!me) return;
+  const u = usage();
+  const key = `${u.day}:${u.reads}:${u.writes}`;
+  if (key === flushedKey) return;                       // nothing moved: a write here is pure waste
+  if (!now && Date.now() - flushedAt < FLUSH_MS) return;
+  flushedKey = key; flushedAt = Date.now();
+  await live();
+  setDoc(fs.doc(dbRef, 'usage', String(me.device).slice(0, 60)), {
+    day: u.day, reads: u.reads, writes: u.writes,
+    who: String(me.who || '—').slice(0, 60),
+    branch: String(me.branch || '').slice(0, 40),
+    at: Date.now(),
+  }).catch((e) => dispatchEvent(new CustomEvent('db-error', { detail: e })));
+}
+
+// a device that is gone (sold phone, wiped browser) should not sit in the list for ever
+export async function deleteUsage(device) {
+  if (TEST_MODE) return;
+  await live();
+  await deleteDoc(fs.doc(dbRef, 'usage', String(device)));
+}
+
+// one read per device in the shop — a handful, and the only way the admin can see past its own screen
+export async function listUsage() {
+  if (TEST_MODE) return lsArr('test-usage');
+  await live();
+  const snap = await getDocs(fs.collection(dbRef, 'usage'));
+  return snap.docs.map((d) => ({ ...d.data(), _id: d.id }));
+}
+
 /* The only four doors to a write, and the two to a read, so the meter lives in one place instead
    of on thirty call sites. Same signatures as the SDK's — everything below calls these. */
 const addDoc = (c, d) => { meter('writes'); return fs['addDoc'](c, d); };

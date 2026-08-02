@@ -139,6 +139,10 @@ the old single `branch` string, so users saved before this still work.
 The admin page writes it; every page merges it over `window.APP_CONFIG` at boot, so the
 shipped `firebase-config.js` is only a fallback. A missing doc changes nothing.
 
+`usage/{deviceId}` — `{ day, reads, writes, who, branch, at }`: what that device spent of the day's
+free allowance. One doc per device, **overwritten** — never a row per day. `day` is the **Pacific**
+date, because that is the clock the allowance resets on. Read only by «حالة النظام».
+
 `logs/{auto}` — `{ who, action, target, at }`. Append-only audit trail: manager and admin
 mutations write a row, `update`/`delete` are denied by the rules.
 
@@ -146,6 +150,9 @@ Rules in force (all live-tested):
 - `config`: only the doc id `app`, only those eight keys (`filesMeta` a map ≤ 20 entries), PINs ≤ 8 chars, lists ≤ 10, users ≤ 40,
   suppliers ≤ 1000 (the shop's real list is 425 — 300 was refusing their save), `label` a map of
   ≤ 6 keys whose `logo` is a string ≤ 200,000 chars.
+- `usage`: one doc per device id (≤ 60 chars), the six keys only, `reads`/`writes` numbers ≥ 0,
+  `day` ≤ 10 chars, `who` ≤ 60, `branch` ≤ 40; delete open so a retired device can be dropped.
+  Deployed 2026-08-02.
 - `logs`: create-only with the four keys; `update`/`delete` always denied.
 - create: key allow-list, types, sizes, `items` ≤ 200, optional `supplierCode` a string ≤ 20,
   optional `loadedBy` a string ≤ 50 and `loadedAt` a number, optional `erpAt` a number and
@@ -552,8 +559,19 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   one place instead of on thirty call sites — **never call `fs.addDoc` and friends directly again**.
   Deliveries with `snap.metadata.fromCache` are NOT counted: a cached read is not billed. The
   bucket is the **Pacific** day (`quotaDay()`), because that is the clock the allowance resets on.
-  «حالة النظام» shows it as two bars and says «من الجهاز ده» on both — a per-device number that
-  looked shop-wide would be worse than no number.
+- **The shop-wide total is the sum of what the devices REPORTED, and the screen names them.**
+  `usage/{deviceId}` is ONE doc per device, overwritten — the collection never grows past the
+  number of phones in the shop, so there is no history to prune. `db.reportUsage({device, who,
+  branch})` is called once per page life from `goHome()` (app), `enterManager()` and
+  `enterAdmin()`; `flushUsage()` writes **at most once per 10 minutes**, plus once on `pagehide`.
+  **`visibilitychange` is deliberately not a trigger** — a phone switching apps every minute would
+  make the meter the thing that spends the allowance. Ceiling: five devices working all day is
+  under 300 writes of the 20,000. The reporter's own writes are metered like any other, on purpose.
+  The admin reads it with `db.listUsage()` on opening «حالة النظام» (one read per device, throttled
+  to once a minute, plus a «تحديث أرقام الأجهزة» button). A device whose `day` is not today reports
+  as **zero for today** — yesterday's tally is not today's. `db.nextReset()` reads the Pacific clock
+  itself rather than assuming a fixed offset from Cairo: the two do not change to summer time on
+  the same day.
 - **An empty price cell is «no price», never 0.** `Number("")` is `0`, and a stored 0 prints
   «0.00» on the shelf label — the real catalog file carries 25 such rows (measured 2026-08-02).
   `productRow` in `manager.js` maps an empty price cell to `NaN`, which `saveProductName` drops.
@@ -712,8 +730,9 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   it. The one server number (`countProducts`, a count aggregation = 1 read) sits behind a button.
   `db.dbError()` is the last `db-error` detail, and `resource-exhausted` is named in the shop's
   words: a spent allowance does not fail a write, it makes it WAIT, which is why «الحفظ بيتأخر»
-  is the symptom the owner reports rather than an error. The two usage bars come from `db.usage()`,
-  which is localStorage — so the screen is still free to open.
+  is the symptom the owner reports rather than an error. The two usage bars are the shop-wide
+  total (`db.listUsage()`, one read per device) and never fall below this device's own localStorage
+  tally, so the screen is right even before the others have reported.
 - **The audit trail explains only the rows whose NAME does not say enough** (the owner, 2026-08-02:
   «only for the ambigious actions not save and edit and export»). `ACTION_NOTE` in `admin.js` maps
   twelve action names to one Arabic line each; anything not in the map renders no note, on purpose —
@@ -807,6 +826,10 @@ node scripts/live-expiry-cleanup.mjs             # janitor for a live-expiry run
 node scripts/live-expiry-server.mjs              # fresh context: what the SERVER holds, no local cache
 node scripts/live-junk-sweep.mjs                 # every product AND shipment a dead live run left in the real data (DELETE=1 removes them); costs one full catalog read
 node scripts/live-users-probe.mjs                # read-only users list; TIME=1 also times one save ack
+# does the deployed `usage` rule accept what the app writes? write + fresh-context read + delete.
+# Blocks service workers (a first SW install reloads the page mid-evaluate). Tells a rules refusal
+# from a spent quota: the second prints INCONCLUSIVE, because the run then proved nothing.
+STAMP=$RANDOM BASE=http://localhost:8080 node scripts/live-usage.mjs
 # price, unitCode, factor, supplierCode and «تم تحميلها» — writes, re-reads in a FRESH context,
 # deletes. It tells a rules rejection from an exhausted quota: the first means the key is wrong,
 # the second means the run proved NOTHING and prints INCONCLUSIVE rather than FAIL.

@@ -2840,27 +2840,33 @@ test('admin: the status screen reads the system without touching the server', as
 /* The day's allowance as a bar (the owner, 2026-08-02: «can u show the usage of the daily
    limits»). Google gives a client no access to the project's own counters, so the number is what
    THIS device spent — and the row has to say so, or a per-device number reads as a shop-wide one. */
-test('admin: the status screen shows the day\'s usage as a bar, per device', async ({ page }) => {
+test('admin: the status screen totals the day across every device, and names them', async ({ page }) => {
   await signOut(page);
   await page.goto('/admin.html?test=1');
   await page.evaluate(() => {
     const day = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
-    localStorage.setItem('usage', JSON.stringify({ day, reads: 5000, writes: 19000 }));
+    localStorage.setItem('deviceId', 'dev-laptop');
+    localStorage.setItem('usage', JSON.stringify({ day, reads: 5000, writes: 18000 }));
+    localStorage.setItem('test-usage', JSON.stringify([
+      { _id: 'dev-laptop', who: 'حسن', branch: '', day, reads: 5000, writes: 18000, at: Date.now() },
+      { _id: 'dev-phone', who: 'محمد سعيد', branch: 'فرع قويسنا', day, reads: 300, writes: 40, at: Date.now() },
+      // a device that has not worked today reports as zero — yesterday's tally is not today's
+      { _id: 'dev-old', who: 'أحمد', branch: 'فرع شبين الكوم', day: '2020-01-01', reads: 9999, writes: 9999, at: Date.now() - 86400000 },
+    ]));
   });
   await openAdmin(page, 'screen-status');
-  await expect(page.locator('#status-list')).toContainText('الحفظ النهارده (من الجهاز ده)');
-  await expect(page.locator('#status-list')).toContainText('19,000 من 20,000');
-  await expect(page.locator('#status-list')).toContainText('5,000 من 50,000');
-  await expect(page.locator('#status-list')).toContainText('كل يوم الساعة ١٠ صباحًا بتوقيت مصر');
-  // 95% of the writes is a red bar, 10% of the reads is a green one — colour AND the number
+  await expect(page.locator('#status-list')).toContainText('الحفظ النهارده — كل الأجهزة');
+  await expect(page.locator('#status-list')).toContainText('18,040 من 20,000');   // 18,000 + 40, not + 9,999
+  await expect(page.locator('#status-list')).toContainText('5,300 من 50,000');
+  await expect(page.locator('#status-list')).toContainText('3 جهاز');
+  await expect(page.locator('#status-list')).toContainText('حسن · الجهاز ده');
+  await expect(page.locator('#status-list')).toContainText('محمد سعيد · فرع قويسنا');
+  await expect(page.locator('#status-list')).toContainText('مافيش شغل النهارده');
+  await expect(page.locator('#status-list')).toContainText('فاضل');               // the reset countdown
+  // 90% of the writes is a red bar, 10% of the reads is a green one — colour AND the number
   await expect(page.locator('#status-list li.st-bad .quota-bar > span')).toHaveCSS('background-color', 'rgb(201, 48, 44)');
   await expect(page.locator('#status-list li.st-ok .quota-bar > span').first())
     .toHaveCSS('background-color', 'rgb(18, 133, 74)');
-  // yesterday's tally is not today's: a stale day reads as zero, never as the old number
-  await page.evaluate(() => localStorage.setItem('usage', JSON.stringify({ day: '2020-01-01', reads: 9, writes: 9 })));
-  await page.click('#btn-back');
-  await page.click('button[data-goto="screen-status"]');
-  await expect(page.locator('#status-list')).toContainText('0 من 20,000');
 });
 
 /* A note under the audit rows whose NAME does not say enough — and only those (the owner:

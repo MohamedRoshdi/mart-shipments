@@ -113,6 +113,7 @@ function enterManager() {
   const s = auth.session();
   scopes = (s && s.branches) || [];                        // a scoped user never loads another branch
   identity = (s && s.name) || "مدير";
+  db.reportUsage({ device: auth.deviceId(), who: identity, branch: scopes[0] || "" });
   filter = scopes.length === 1 ? scopes[0] : ALL;
   stockBranch = myBranches()[0] || "";
   applyPerms();

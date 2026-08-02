@@ -85,21 +85,20 @@ document.querySelector("#screen-admin .actions").onclick = (e) => {
   render(id);
   if (id === "screen-logs") loadLogs();
   if (id === "screen-btw") renderBtw().catch(console.error);
-  if (id === "screen-status") renderStatus();
+  if (id === "screen-status") { renderStatus(); loadUsage().then(renderStatus).catch(console.error); }
 };
 
-/* «حالة النظام»: what the owner would otherwise have to ask a human. Every line here is already
-   in memory — the config, the version, this machine's own copy — so opening the screen costs
-   NOTHING. The one number that needs the server («عدد الأصناف») is a button, because on the free
-   plan a read is a thing worth spending on purpose. */
+/* «حالة النظام»: what the owner would otherwise have to ask a human. Almost every line is already
+   in memory — the config, the version, this machine's own copy. The two that touch the server are
+   bounded and say so: the device roll-up is ONE read per phone in the shop (a handful, refreshed
+   at most once a minute), and «عدد الأصناف» is a count aggregation behind its own button. */
 const statusRow = (label, value, cls = "") =>
   `<li class="${cls}"><div class="card-main"><div class="card-title">${esc(label)}</div>
     <div class="meta">${esc(value)}</div></div></li>`;
 
-/* The day's allowance, as a bar. Google does not let a client read the project's own counters,
-   so this is what THIS device spent — the row says so, because a number that looks shop-wide and
-   is not would be worse than no number. It is still the answer to «مين صرف الحصة؟»: open it on
-   the laptop that did the importing and the writes are there. */
+/* The day's allowance, as a bar. Google gives a client no access to the project's own counters
+   (that is Cloud Monitoring), so the total is the sum of what every device REPORTED — which is why
+   the screen also lists the devices one by one: a total nobody can break down cannot be acted on. */
 const bar = (label, used, cap, note) => {
   const pct = Math.min(100, Math.round((used / cap) * 100));
   const cls = pct >= 90 ? "st-bad" : pct >= 60 ? "st-warn" : "st-ok";
@@ -113,6 +112,48 @@ const bar = (label, used, cap, note) => {
 };
 
 let productCount = null;             // filled only when the owner asks for it, never on open
+
+/* The shop's devices, and what each one spent today. One read per device — small enough to do on
+   open, throttled so flipping in and out of the screen cannot turn it into a cost. A device whose
+   `day` is not today reports as zero for today: yesterday's tally is not today's. */
+let usageRows = null, usageAt = 0;
+const USAGE_FRESH = 60 * 1000;
+
+async function loadUsage(force = false) {
+  if (!force && usageRows && Date.now() - usageAt < USAGE_FRESH) return;
+  await db.flushUsage(true);         // this device's own numbers first, or the admin reads itself stale
+  usageRows = await db.listUsage().catch(() => []);
+  usageAt = Date.now();
+}
+
+const today = (r) => (r.day === db.quotaDay() ? r : { ...r, reads: 0, writes: 0 });
+const sumUsage = (kind) => (usageRows || []).reduce((n, r) => n + (Number(today(r)[kind]) || 0), 0);
+
+// «فاضل ٥ ساعات و٢٠ دقيقة» — and the wall-clock time too, because a countdown alone is not a plan
+function resetLine() {
+  const left = Math.max(0, db.nextReset() - Date.now());
+  const h = Math.floor(left / 3600000), m = Math.floor((left % 3600000) / 60000);
+  const at = new Date(db.nextReset()).toLocaleTimeString("ar-EG", { hour: "numeric", minute: "2-digit" });
+  return `فاضل ${h} ساعة و${m} دقيقة — يعني حوالي الساعة ${at}`;
+}
+
+function deviceRows() {
+  if (!usageRows) return [statusRow("أجهزة المحل", "بنجيب أرقام الأجهزة...")];
+  if (!usageRows.length) return [statusRow("أجهزة المحل", "لسه مفيش جهاز بعت أرقامه — بيحصل بعد أول ١٠ دقايق شغل")];
+  const mine = localStorage.getItem("deviceId");
+  return [statusRow("أجهزة المحل", `${usageRows.length} جهاز — مرتّبين بالأكتر حفظًا`),
+    ...[...usageRows]
+    .sort((a, b) => (Number(today(b).writes) || 0) - (Number(today(a).writes) || 0))
+    .map((r) => {
+      const t = today(r);
+      const stale = r.day !== db.quotaDay();
+      return statusRow(
+        `${r.who || "—"}${r.branch ? ` · ${r.branch}` : ""}${r._id === mine ? " · الجهاز ده" : ""}`,
+        stale
+          ? `مافيش شغل النهارده — آخر مرة ${fmtWhen(r.at)}`
+          : `حفظ ${(t.writes || 0).toLocaleString("en-US")} · قراءة ${(t.reads || 0).toLocaleString("en-US")} — آخر تحديث ${fmtWhen(r.at)}`);
+    })];
+}
 
 // the day's allowance, in the words the shop would use. A spent quota does not FAIL a write —
 // it makes it wait, which is why «الحفظ بيتأخر» is the symptom and not an error message.
@@ -143,11 +184,13 @@ function renderStatus() {
       navigator.onLine ? "متصل" : "مفيش اتصال — الشغل بيتحفظ على الجهاز لحد ما يرجع",
       navigator.onLine ? "st-ok" : "st-bad"),
     statusRow("الحصة اليومية المجانية", quota, quotaCls),
-    bar("الحفظ النهارده (من الجهاز ده)", u.writes, db.QUOTA.writes,
+    // the shop's total when the devices have reported; this device alone until they do
+    bar("الحفظ النهارده — كل الأجهزة", Math.max(sumUsage("writes"), u.writes), db.QUOTA.writes,
       "كل صنف بيتحفظ لوحده، فاستيراد ملف الأصناف كامل بياخد حوالي ١٠ آلاف"),
-    bar("القراءة النهارده (من الجهاز ده)", u.reads, db.QUOTA.reads,
-      "أول مرة تدوّر باسم بتنزّل الكتالوج كله مرة واحدة على الجهاز"),
-    statusRow("الحصة بترجع", "كل يوم الساعة ١٠ صباحًا بتوقيت مصر"),
+    bar("القراءة النهارده — كل الأجهزة", Math.max(sumUsage("reads"), u.reads), db.QUOTA.reads,
+      "أول مرة تدوّر باسم بتنزّل الكتالوج كله مرة واحدة على كل جهاز"),
+    statusRow("الحصة بترجع", resetLine()),
+    ...deviceRows(),
     statusRow("نسخة التطبيق على الجهاز ده", versionLine()),
     statusRow("المستخدمين", `${(cfg.users || []).length} مستخدم`),
     statusRow("الفروع", (cfg.branches || []).map(b => b.name).join(" · ") || "—"),
@@ -162,6 +205,20 @@ function renderStatus() {
       : [statusRow("آخر استيراد", "مفيش ملفات اتستوردت لسه")]),
   ].join("");
 }
+
+$("btn-refresh-usage").onclick = async () => {
+  const b = $("btn-refresh-usage");
+  b.disabled = true; b.textContent = "بنجيب...";
+  try {
+    await loadUsage(true);
+    toast(`${usageRows.length} جهاز`, "ok");
+  } catch (err) {
+    console.error(err);
+    toast("مقدرناش نجيب أرقام الأجهزة — جرّب تاني", "bad");
+  }
+  b.disabled = false; b.textContent = "تحديث أرقام الأجهزة";
+  renderStatus();
+};
 
 $("btn-count-products").onclick = async () => {
   $("btn-count-products").disabled = true;
@@ -205,6 +262,7 @@ $("btn-pin").onclick = async () => {
 
 async function enterAdmin() {
   identity = (auth.session() || {}).name || "الأدمن";
+  db.reportUsage({ device: auth.deviceId(), who: identity, branch: "" });
   history.replaceState({ screen: "screen-admin" }, "");
   render("screen-admin");
   renderAll();

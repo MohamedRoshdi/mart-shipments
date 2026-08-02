@@ -15,7 +15,13 @@ await page.goto(`${BASE}/admin.html?test=1`, { waitUntil: "load" });
 await page.evaluate(() => {
   localStorage.removeItem("session");
   const day = new Date().toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
+  localStorage.setItem("deviceId", "dev-laptop");
   localStorage.setItem("usage", JSON.stringify({ day, reads: 31000, writes: 10068 }));
+  localStorage.setItem("test-usage", JSON.stringify([
+    { _id: "dev-laptop", who: "حسن", branch: "", day, reads: 31000, writes: 10068, at: Date.now() - 120000 },
+    { _id: "dev-phone1", who: "محمد سعيد", branch: "فرع قويسنا", day, reads: 400, writes: 60, at: Date.now() - 600000 },
+    { _id: "dev-phone2", who: "أحمد", branch: "فرع شبين الكوم", day: "2020-01-01", reads: 9, writes: 9, at: Date.now() - 86400000 },
+  ]));
   localStorage.setItem("test-logs", JSON.stringify([
     { who: "حسن", action: "تعديل صلاحيات", target: "3 صنف", at: Date.now() - 60000 },
     { who: "حسن", action: "تحميل شحنة", target: "المراعي · إذن استلام", at: Date.now() - 120000 },
@@ -33,7 +39,7 @@ await page.click("#btn-pin");
 await page.waitForTimeout(500);
 
 await page.click('button[data-goto="screen-status"]');
-await page.waitForTimeout(300);
+await page.waitForTimeout(500);          // the device roll-up lands right after the first paint
 const bars = await page.evaluate(() => [...document.querySelectorAll("#status-list .quota-bar > span")]
   .map((s) => ({ width: s.style.inlineSize, colour: getComputedStyle(s).backgroundColor })));
 console.log("[status] bars:", JSON.stringify(bars));

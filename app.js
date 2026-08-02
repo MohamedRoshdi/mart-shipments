@@ -120,6 +120,9 @@ async function goHome() {
   }
   state.editingId = null;
   state.mode = "ship";
+  // from here on this device reports what it spends, so «حالة النظام» can name it. Once per page
+  // life, and it sits after the session check because a signed-out device has nothing to report.
+  db.reportUsage({ device: auth.deviceId(), who: myName(), branch: myBranch() });
   render("screen-home");
   await feed("ships", cb => db.watchShipments(thisMonth(), cb), paintMyShipments);
   paintMyShipments();             // the branch/name filter may have moved since the last delivery
