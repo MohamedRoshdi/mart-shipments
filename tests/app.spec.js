@@ -1046,6 +1046,31 @@ test('a two-branch user picks the branch per shipment, and the manager view span
   await expect(page.locator('#all-shipments li')).toContainText('مفيش شحنات');
 });
 
+/* The admin page follows the server too now — but ONLY while nothing is being edited: a clean
+   page showing yesterday's users is how «المزامنة باظت» read (2026-08-02, two open admin
+   screens), and a dirty page being overwritten is how typed edits would vanish. */
+test('admin: a user saved on another machine appears live, unless the page is mid-edit', async ({ page }) => {
+  await openAdmin(page, 'screen-data');
+  await expect(page.locator('#users-list li.empty')).toBeVisible();
+  await page.evaluate(() => {
+    const cfg = JSON.parse(localStorage.getItem('test-config') || '{}');
+    cfg.users = [{ name: 'مستخدم من اللاب', pin: '9911', branches: [], perms: ['emp'] }];
+    localStorage.setItem('test-config', JSON.stringify(cfg));
+    dispatchEvent(new StorageEvent('storage', { key: 'test-config' }));
+  });
+  await expect(page.locator('input[data-uname="0"]')).toHaveValue('مستخدم من اللاب');   // names live in value=""
+
+  await page.fill('input[data-uname="0"]', 'اسم بيتكتب حالًا');       // the page is now dirty
+  await page.evaluate(() => {
+    const cfg = JSON.parse(localStorage.getItem('test-config') || '{}');
+    cfg.users = [{ name: 'تعديل من جهاز تاني', pin: '9922', branches: [], perms: ['emp'] }];
+    localStorage.setItem('test-config', JSON.stringify(cfg));
+    dispatchEvent(new StorageEvent('storage', { key: 'test-config' }));
+  });
+  await page.waitForTimeout(300);                                      // the update must NOT land
+  await expect(page.locator('input[data-uname="0"]')).toHaveValue('اسم بيتكتب حالًا');
+});
+
 test('admin: a repeated PIN is refused before it can hand over someone else\'s access', async ({ page }) => {
   await openAdmin(page, 'screen-data');
   await page.click('#btn-add-user');

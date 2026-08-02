@@ -524,8 +524,15 @@ function readInputs() {
   } });
 }
 
-$("screen-admin").oninput = (e) => {
-  if (e.target.matches("input")) markDirty();
+/* One delegate over the whole page, not just #screen-admin: the users/branches/types inputs
+   live on #screen-data, and typing there never marked the page dirty — so the unload guard
+   skipped, «فيه تعديل مش محفوظ» never showed, and (since 1.0.78) a live update from another
+   machine would have overwritten what was being typed. Only the settings screens count: the
+   PIN box and the bulk-delete tools are not edits to the config. */
+document.querySelector("main").oninput = (e) => {
+  if (!e.target.matches("input, textarea")) return;
+  if (!EDITING.includes(screen) && screen !== "screen-admin") return;
+  markDirty();
 };
 
 $("branches-list").onclick = (e) => {
@@ -798,6 +805,17 @@ render("screen-pin");
    A page that could not read must not be allowed to write. */
 let cfgFromServer = false;
 
+// the working copy the screens edit, rebuilt from whatever APP_CONFIG holds right now
+const workingCopy = () => ({
+  managerPin: window.APP_CONFIG.managerPin,
+  adminPin: window.APP_CONFIG.adminPin,
+  branches: window.APP_CONFIG.branches.map(b => ({ ...b })),
+  shipmentTypes: [...window.APP_CONFIG.shipmentTypes],
+  suppliers: db.supplierList(window.APP_CONFIG),      // older configs held plain names
+  label: lbl.labelCfg(window.APP_CONFIG),
+  users: (window.APP_CONFIG.users || []).map(u => ({ ...u, branches: auth.branchesOf(u), perms: (u.perms || []).slice() })),
+});
+
 // a failed write or listener must say so, same as the other two pages
 addEventListener("db-error", () => toast("مشكلة في مزامنة البيانات — اتأكد من الاتصال والإعدادات", "bad"));
 
@@ -811,15 +829,19 @@ cfgReady = (async () => {
   $("btn-save-config").disabled = !cfgFromServer;
   Object.assign(window.APP_CONFIG, stored || {});
   applyBrand(window.APP_CONFIG);
-  cfg = {
-    managerPin: window.APP_CONFIG.managerPin,
-    adminPin: window.APP_CONFIG.adminPin,
-    branches: window.APP_CONFIG.branches.map(b => ({ ...b })),
-    shipmentTypes: [...window.APP_CONFIG.shipmentTypes],
-    suppliers: db.supplierList(window.APP_CONFIG),      // older configs held plain names
-    label: lbl.labelCfg(window.APP_CONFIG),
-    users: (window.APP_CONFIG.users || []).map(u => ({ ...u, branches: auth.branchesOf(u), perms: (u.perms || []).slice() })),
-  };
+  cfg = workingCopy();
+  /* The admin is the WRITER, so a live update must never overwrite what somebody is typing —
+     that rule stays. But a page nobody has touched (dirty === false) showing yesterday's users
+     is how «المزامنة باظت» read on 2026-08-02: two open admin screens each held a stale copy.
+     Clean page → take the server's word and repaint. Dirty page → the human's edits win until
+     they save or leave. */
+  db.watchConfig((server) => {
+    Object.assign(window.APP_CONFIG, server);
+    applyBrand(window.APP_CONFIG);
+    if (dirty) return;
+    cfg = workingCopy();
+    renderAll();
+  }).catch(console.error);
   const s = auth.session();
   if (!s) return;
   if (s.perms.includes("adm")) { await enterAdmin(); return; }   // already signed in elsewhere

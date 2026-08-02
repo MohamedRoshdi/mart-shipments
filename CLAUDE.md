@@ -520,14 +520,18 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
 - **An empty price cell is «no price», never 0.** `Number("")` is `0`, and a stored 0 prints
   «0.00» on the shelf label — the real catalog file carries 25 such rows (measured 2026-08-02).
   `productRow` in `manager.js` maps an empty price cell to `NaN`, which `saveProductName` drops.
-- **`config/app` is the one CONFIG listener in the app, and admin.js deliberately has none.**
+- **All three pages watch `config/app` — but the admin only follows while CLEAN.**
   `db.watchConfig(cb)` is an `onSnapshot` that fires once immediately from the cache and again on
   every change, so a permission, a branch, a supplier or a shipment type edited on another machine
   reaches a phone in seconds. `app.js` and `manager.js` re-merge and repaint **only what is derived
   from the config** — `state.branch` is left where it is unless it stopped being allowed, because
-  moving it mid-shipment would stamp the delivery with the wrong branch. **`admin.js` must never
-  watch**: the admin IS the writer and holds an unsaved working copy (`cfg`), so a live update
-  there would silently overwrite what somebody is typing.
+  moving it mid-shipment would stamp the delivery with the wrong branch. `admin.js` (since 1.0.78)
+  rebuilds its working copy from a live update **only when `dirty` is false** — a clean admin
+  screen showing yesterday's users is how «المزامنة باظت» read on 2026-08-02 (two open admin
+  pages), and a dirty one is the human's, never the server's, until they save or leave. The
+  `dirty` flag is fed by ONE input delegate on `main` (settings screens only — the PIN box and
+  the bulk tools are not config edits); it used to sit on `#screen-admin` alone, so typing a
+  user's name on `#screen-data` never armed the unload guard at all.
   This is also the answer to the «كل 10 إلى 30 ثانية» in the sync spec: a listener costs one read
   per real change, a 30 s poll costs one per interval per phone against a 50k/day quota, and the
   listener is faster. In `?test=1` it listens for the `storage` event — a second tab.
