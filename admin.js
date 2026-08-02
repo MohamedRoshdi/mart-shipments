@@ -88,6 +88,9 @@ document.querySelector("#screen-admin .actions").onclick = (e) => {
   if (id === "screen-status") { renderStatus(); loadUsage().then(renderStatus).catch(console.error); }
 };
 
+// the status screen is the one place that must not sit on a stale verdict while it is open
+addEventListener("db-pending", () => { if (screen === "screen-status") renderStatus(); });
+
 /* «حالة النظام»: what the owner would otherwise have to ask a human. Almost every line is already
    in memory — the config, the version, this machine's own copy. The two that touch the server are
    bounded and say so: the device roll-up is ONE read per phone in the shop (a handful, refreshed
@@ -167,6 +170,13 @@ function deviceRows() {
 // the day's allowance, in the words the shop would use. A spent quota does not FAIL a write —
 // it makes it wait, which is why «الحفظ بيتأخر» is the symptom and not an error message.
 function quotaLine() {
+  /* Proved in a real browser on the live site (2026-08-02, 1.0.87): with the day's allowance spent,
+     NOTHING rejects. The offline cache answers the reads, and an offline-capable `setDoc` resolves
+     against that same cache and parks the write — so no promise ever fails and `db-error` never
+     fires. The one true signal is that the work has not been acknowledged. Online, with writes
+     still pending, means the server is not taking them. That is what this row must say. */
+  if (db.hasPending() && navigator.onLine)
+    return ["الحفظ مش واصل للسيرفر دلوقتي — غالبًا الحصة اليومية خلصت. شغلك محفوظ على الجهاز وهيتبعت لوحده", "st-bad"];
   const err = db.dbError();
   if (!err || Date.now() - err.at > 30 * 60 * 1000) return ["شغالة", "st-ok"];
   if (err.code === "resource-exhausted")

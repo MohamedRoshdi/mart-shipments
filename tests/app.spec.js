@@ -2888,6 +2888,7 @@ test('admin: the status screen totals the day across every device, and names the
   await page.click('#btn-back');
   await page.click('button[data-goto="screen-status"]');
   await expect(page.locator('#status-list')).toContainText('خلصت — السيرفر رافض دلوقتي');
+  await expect(page.locator('#status-list')).toContainText('خلصت النهارده');
   await expect(page.locator('#status-list')).toContainText('وده مش الحقيقة');
   await expect(page.locator('#status-list .quota-bar > span').first()).toHaveCSS('width', /.+/);
   const wide = await page.evaluate(() =>
