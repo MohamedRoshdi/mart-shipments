@@ -67,6 +67,11 @@ function render(id) {
   const slot = SLOTS[id];
   if (slot) $(slot).append($("scan-block"));       // move, never copy: one camera, one set of controls
   $("scan-block").hidden = !slot;
+  /* The home screen is a MENU, and a menu should use the screen it is on: on a tablet or a
+     laptop its cards run in columns instead of stretching into banners. Every other employee
+     screen keeps the phone column — the scanner, the item sheet and the camera preview are
+     designed around it and get worse wide, which is why this is per screen, not per page. */
+  document.body.classList.toggle("wide", id === "screen-home");
   $("screen-title").textContent = (id === "screen-new" && counting()) ? "جرد" : (TITLES[id] || "شحنات المحل");
   $("btn-back").hidden = id === "screen-home" || id === "screen-login";
   $("btn-cam").hidden = !(id === "screen-home" || id === "screen-new" || id === "screen-expiry" || id === "screen-label");

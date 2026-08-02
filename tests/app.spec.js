@@ -2784,6 +2784,34 @@ test('a catalog stamp newer than the local index drops it', async ({ page }) => 
   expect(r).toEqual({ kept: true, dropped: true });
 });
 
+/* «عرض المزيد» (the owner, 2026-08-02): a list of hundreds is read a page at a time, and the
+   button says where you are. A new search or filter starts the count over. */
+test('long lists page instead of dumping every row', async ({ page }) => {
+  await page.goto('/manager.html?test=1');
+  await page.evaluate(() => {
+    const products = {};
+    for (let i = 1; i <= 120; i++) products[String(1000 + i)] = `صنف رقم ${String(i).padStart(3, '0')}`;
+    localStorage.setItem('test-products', JSON.stringify(products));
+  });
+  await page.fill('#pin-input', await page.evaluate(() => window.APP_CONFIG.managerPin));
+  await page.click('#btn-pin');
+  await page.click('#btn-products');
+
+  await expect(page.locator('#products-count')).toHaveText('120 صنف');
+  await expect(page.locator('#products-list li:not(.more)')).toHaveCount(50);
+  await expect(page.locator('#products-list li.more button')).toHaveText('عرض المزيد — 50 من 120');
+
+  await page.click('#products-list li.more button');
+  await expect(page.locator('#products-list li:not(.more)')).toHaveCount(100);
+  await page.click('#products-list li.more button');
+  await expect(page.locator('#products-list li:not(.more)')).toHaveCount(120);
+  await expect(page.locator('#products-list li.more')).toHaveCount(0);   // the end says nothing
+
+  // a search is a new list, and it starts on its own first page
+  await page.fill('#product-search', 'صنف رقم 0');
+  await expect(page.locator('#products-list li:not(.more)')).toHaveCount(50);
+});
+
 /* A phone's week-old search copy can still hold the stripped-zero twins the 2026-08-02 sweep
    deleted server-side, and the shop then sees one product twice in a name search. The copy is
    de-duplicated on the way out — no read, no write, no waiting for a stamp to arrive. */

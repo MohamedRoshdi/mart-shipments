@@ -669,6 +669,22 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   `warn` when rows were dropped and `ok` when the whole file landed, so the colour IS the summary.
   Measured 2026-07-31 with `scripts/shots-wide.mjs`: `rgb(18,133,74)` / `rgb(240,154,0)` /
   `rgb(201,48,44)`.
+- **`--center` is computed on `body`, and that is what makes `body.wide` work at all.** A custom
+  property is substituted where it is DEFINED, so the old `--center` on `:root` kept using
+  `:root`'s `--col` and the 1040px wide column NEVER appeared — «2 columns at 1440px» was measured
+  against a 680px strip (found 2026-08-02). On `body`, `body.wide { --col: 1040px }` is the value
+  in scope; the manager list is 3 columns at 1440px now, which `scripts/shots-wide.mjs` asserts.
+- **`body.wide` is per SCREEN on the employee page, not per page.** `render()` in `app.js` puts it
+  on for `screen-home` and takes it off everywhere else, so the menu uses a tablet or laptop
+  (cards in columns, `.actions` auto-fill from 760px) while the scanner, the item sheet and the
+  camera preview keep the phone column they are designed around.
+- **Every long list pages with «عرض المزيد», and the button says where you are.** `shownOf` in
+  `manager.js` holds the row count per list, `moreRow()` renders the button AS the last `<li>` (no
+  new markup, no new handler — the list's own `onclick` gets the tap through `onMore`), and any
+  filter, search, tab or month change calls `resetPaging()`, because page 4 of the previous result
+  set is meaningless. The catalog is the one list whose next page may still be on the server:
+  `moreProducts()` fetches it with a `startAfter(lastName)` cursor, deduping the boundary by
+  barcode, and never while a search is showing. The audit trail raises its own server `limit`.
 - **The phone column widens, the employee screens do not.** `--col` is 520px, 680px at 760px wide,
   and 1040px at 1100px **only on `body.wide`** — which `manager.html` and `admin.html` carry and
   `index.html` deliberately does not: scanning and typing do not get better wide, and the camera

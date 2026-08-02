@@ -38,6 +38,17 @@ const TITLES = {
 const DEEP = ["screen-detail", "screen-products", "screen-expiry-month"];   // screens you can go back from
 const PAGE = 50;                                     // rows rendered at once; search narrows the rest
 
+/* One «عرض المزيد» row, rendered as the last item of whatever list needs it, so paging costs no
+   new markup and no new handler — the list's existing onclick already receives the tap. A phone
+   painting 300 cards is slow and unreadable; a page of 50 with a count on the button is neither.
+   `shownOf` holds how many rows each list is currently showing, and every filter, search or tab
+   change resets it (`resetPaging`), because page 4 of the old result set means nothing. */
+const shownOf = { ships: PAGE, counts: PAGE, products: PAGE };
+const resetPaging = () => { shownOf.ships = shownOf.counts = shownOf.products = PAGE; };
+const moreRow = (key, shown, totalRows) => (shown >= totalRows ? "" : `<li class="more">
+    <button type="button" class="ghost" data-more="${key}">عرض المزيد — ${shown} من ${totalRows}</button>
+  </li>`);
+
 let all = [];        // everything read from the database
 let shown = [];      // after the branch filter — row indexes point here
 let counts = [];     // stocktake sessions (الجرد), same scope rules as shipments
@@ -179,6 +190,7 @@ $("branch-filter").onclick = (e) => {
   const btn = e.target.closest("button[data-branch]");
   if (!btn) return;
   filter = btn.dataset.branch;
+  resetPaging();
   renderFilter();
   renderList();
 };
@@ -192,6 +204,7 @@ $("type-filter").onclick = (e) => {
   const btn = e.target.closest("button[data-typefilter]");
   if (!btn) return;
   typeFilter = btn.dataset.typefilter;
+  resetPaging();
   renderTypeFilter();
   renderList();
 };
@@ -297,6 +310,7 @@ async function loadMonth() {
 
 $("month-pick").onchange = async () => {
   month = $("month-pick").value;
+  resetPaging();
   await loadMonth();
   renderList();
 };
@@ -354,6 +368,7 @@ $("list-tabs").onclick = (e) => {
   const btn = e.target.closest("button[data-tab]");
   if (!btn) return;
   tab = btn.dataset.tab;
+  resetPaging();
   renderTabs();
   renderList();
 };
@@ -368,7 +383,8 @@ function matchesSearch(s) {
     || String(s.supplierCode || "").includes(q);
 }
 
-$("list-search").oninput = renderList;
+// a new search is a new list: page 4 of the previous one is meaningless
+$("list-search").oninput = () => { resetPaging(); renderList(); };
 
 /* Three rows of chips sat above every list — the branch, the type and the tabs — and pushed the
    first card near the fold. The chips are one button away now, and the button says what is
@@ -426,18 +442,31 @@ function renderList() {
   // One card, one tap. Five buttons on every row turned the list into a wall of controls (the
   // owner's words, 2026-07-31); copy/Excel/TXT/delete all live on the screen the card opens,
   // which is the same two taps they took before.
-  $("all-shipments").innerHTML = shown.map((s, i) => `<li>
+  $("all-shipments").innerHTML = shown.slice(0, shownOf.ships).map((s, i) => `<li>
       <button class="card-open" data-act="view" data-i="${i}">
         <span class="card-title">${esc(s.name)} <span class="tag-erp ${ERP[erpState(s)].cls}">${ERP[erpState(s)].label}</span></span>
         <span class="meta">${esc(s.type || "بدون نوع")} · ${esc(s.branch || "بدون فرع")} · ${esc(s.createdBy)} · ${fmtWhen(s.createdAt)} · ${s.items.length} صنف${s.loadedAt ? ` · حمّلها ${esc(s.loadedBy || "؟")} ${fmtWhen(s.loadedAt)}` : ""}${s.erpAt ? ` · اتستوردت ${fmtWhen(s.erpAt)}` : ""}</span>
       </button>
-    </li>`).join("") || `<li class="empty">${filter === ALL ? "مفيش شحنات لسه" : "مفيش شحنات في الفرع ده"}</li>`;
+    </li>`).join("") + moreRow("ships", Math.min(shownOf.ships, shown.length), shown.length)
+    || `<li class="empty">${filter === ALL ? "مفيش شحنات لسه" : "مفيش شحنات في الفرع ده"}</li>`;
 }
 
 $("all-shipments").onclick = (e) => {
+  if (onMore(e)) return;
   const btn = e.target.closest("button[data-i]");
   if (btn) openDetail(shown[+btn.dataset.i]);
 };
+
+// the «عرض المزيد» row of any list: one more page, then repaint. The catalog is the one list
+// whose next page may still be on the server, so it goes through its own loader.
+function onMore(e) {
+  const btn = e.target.closest("button[data-more]");
+  if (!btn) return false;
+  const key = btn.dataset.more;
+  shownOf[key] += PAGE;
+  if (key === "products") moreProducts().catch(console.error); else renderList();
+  return true;
+}
 
 /* ---------- stocktake list (الجرد) ---------- */
 
@@ -450,15 +479,17 @@ const diffWord = (n) => (n === 0 ? "مظبوط" : (n > 0 ? `زيادة ${n}` : `
 
 function renderCounts() {
   shownCounts = counts.filter(c => (filter === ALL || c.branch === filter) && matchesSearch(c));
-  $("all-counts").innerHTML = shownCounts.map((c, i) => `<li>
+  $("all-counts").innerHTML = shownCounts.slice(0, shownOf.counts).map((c, i) => `<li>
       <button class="card-open" data-cact="view" data-i="${i}">
         <span class="card-title">${esc(c.name)}</span>
         <span class="meta">${esc(c.branch || "بدون فرع")} · ${esc(c.createdBy)} · ${fmtDate(c.createdAt)} · ${c.items.length} صنف · الفرق ${esc(diffWord(countDiff(c)))}</span>
       </button>
-    </li>`).join("") || `<li class="empty">${filter === ALL ? "مفيش جرد لسه" : "مفيش جرد في الفرع ده"}</li>`;
+    </li>`).join("") + moreRow("counts", Math.min(shownOf.counts, shownCounts.length), shownCounts.length)
+    || `<li class="empty">${filter === ALL ? "مفيش جرد لسه" : "مفيش جرد في الفرع ده"}</li>`;
 }
 
 $("all-counts").onclick = (e) => {
+  if (onMore(e)) return;
   const btn = e.target.closest("button[data-i]");
   if (btn) openDetail(shownCounts[+btn.dataset.i], "count");
 };
@@ -1063,6 +1094,7 @@ $("btn-products").onclick = async () => {
 
 async function loadProducts() {
   edits.clear();
+  shownOf.products = PAGE;
   $("products-count").textContent = "بنجيب الأصناف...";
   products = (await db.listProducts().catch(() => []))
     .sort((a, b) => a.name.localeCompare(b.name, "ar"));
@@ -1072,6 +1104,22 @@ async function loadProducts() {
     total = await db.countProducts().catch(() => products.length);
     renderProducts();
   }
+}
+
+/* «عرض المزيد» on the catalog can outrun what was read: the screen holds PRODUCT_CAP rows and the
+   shop has ten thousand. When the page being asked for is past the end of what is loaded — and the
+   server has more — one more capped page is fetched from where the last one stopped. Never during
+   a search: those hits came from the search query, and paging them is paging a different list. */
+async function moreProducts() {
+  const searching = $("product-search").value.trim() !== "";
+  if (!searching && shownOf.products > products.length && products.length < total) {
+    const next = await db.listProducts(products[products.length - 1].name).catch(() => []);
+    // a name repeated across two docs would otherwise come back twice on the cursor boundary
+    const seen = new Set(products.map(p => p.barcode));
+    products = products.concat(next.filter(p => !seen.has(p.barcode)))
+      .sort((a, b) => a.name.localeCompare(b.name, "ar"));
+  }
+  renderProducts();
 }
 
 // every branch that has a number for this product, plus the older shop-wide sheet
@@ -1090,11 +1138,11 @@ const labelHref = (barcode) => `${auth.withQuery("index.html")}#label=${encodeUR
 
 function renderProducts() {
   const found = products;
-  const page = found.slice(0, PAGE);
+  const page = found.slice(0, shownOf.products);
   const searching = $("product-search").value.trim() !== "";
   $("products-count").textContent = searching
-    ? `${found.length} نتيجة` + (found.length > PAGE ? ` — بيظهر أول ${PAGE}` : "")
-    : (total ? `${total} صنف` + (total > products.length ? ` — بيظهر أول ${products.length}، دوّر عن الباقي` : "") : "");
+    ? `${found.length} نتيجة`
+    : (total ? `${total} صنف` : "");
   // «تاريخ آخر تحديث لكل ملف»: the stamps ride the live config, so every phone shows the same ones
   const meta = window.APP_CONFIG.filesMeta || {};
   const cat = meta["الأصناف"], st = meta[`جرد ${stockBranch}`];
@@ -1109,7 +1157,8 @@ function renderProducts() {
       </div>
       ${canLabel() ? `<a class="lbl-link" href="${escAttr(labelHref(p.barcode))}">ليبل</a>` : ""}
       <button class="del" data-delproduct="${escAttr(p.barcode)}" aria-label="حذف الصنف">×</button>
-    </li>`).join("") || `<li class="empty">${searching ? "مفيش نتيجة — جرّب أي جزء من الاسم أو الباركود" : "مفيش أصناف — استورد ملف الأصناف الأول"}</li>`;
+    </li>`).join("") + moreRow("products", page.length, searching ? found.length : total)
+    || `<li class="empty">${searching ? "مفيش نتيجة — جرّب أي جزء من الاسم أو الباركود" : "مفيش أصناف — استورد ملف الأصناف الأول"}</li>`;
   updateDirty();
 }
 
@@ -1132,6 +1181,7 @@ async function runSearch() {
   if ($("product-search").value.trim() !== q) return;   // a newer search already ran
   products = hits.sort((a, b) => a.name.localeCompare(b.name, "ar"));
   edits.clear();
+  shownOf.products = PAGE;                              // a new result set starts on its first page
   renderProducts();
 }
 
@@ -1145,6 +1195,7 @@ $("products-list").oninput = (e) => {
 };
 
 $("products-list").onclick = async (e) => {
+  if (onMore(e)) return;
   const btn = e.target.closest("button[data-delproduct]");
   if (!btn) return;
   const barcode = btn.dataset.delproduct;
@@ -1154,6 +1205,7 @@ $("products-list").onclick = async (e) => {
     await db.deleteProduct(barcode);
     db.logAction(identity, "حذف صنف", `${barcode} — ${p.name}`);
     products = products.filter(x => x.barcode !== barcode);
+    total = Math.max(0, total - 1);      // the catalog is one smaller, and «عرض المزيد» counts it
     edits.delete(barcode);
     renderProducts();
     toast("تم حذف الصنف");

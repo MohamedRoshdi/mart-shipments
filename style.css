@@ -25,8 +25,13 @@
   --sh-lift: 0 2px 6px rgba(16, 24, 40, .08), 0 10px 24px rgba(16, 24, 40, .1);
   --mono: ui-monospace, "DejaVu Sans Mono", "Courier New", monospace;
   --col: 520px;
-  --center: max(var(--pad), calc((100% - var(--col)) / 2));
 }
+/* --center is computed HERE, not on :root, and that is the whole reason `body.wide` works: a
+   custom property is substituted where it is DEFINED, so a --center written on :root would keep
+   using :root's --col and the 1040px wide column would never appear (it never did — «2 columns
+   at 1440px» was measured against a 680px strip). On body, `body.wide { --col: 1040px }` is the
+   value in scope. */
+body { --center: max(var(--pad), calc((100% - var(--col)) / 2)); }
 
 /* The app was only ever a phone app, so on a desktop it was a 520 px strip down the middle of an
    empty screen. The column widens on a tablet and the manager's card list runs in columns on a
@@ -38,12 +43,28 @@
   body.wide #all-shipments,
   body.wide #all-counts,
   body.wide #products-list,
-  body.wide #logs-list {
+  body.wide #logs-list,
+  body.wide #my-shipments,
+  body.wide #my-counts {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
     gap: 12px;
     align-items: start;
   }
+}
+
+/* A menu card stretched across a laptop is a banner with three words on it (the owner, 2026-08-02,
+   on the employee home). From a tablet up the cards run in columns instead — the same cards, no
+   new layout, and the column itself is only widened on the screens that are a MENU: `body.wide`
+   is put on and taken off by `render()` in app.js, so the scanner, the item sheet and the camera
+   preview keep the narrow phone column they were designed for. */
+@media (min-width: 760px) {
+  body.wide .actions {
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    align-items: start;
+  }
+  /* the card grows with the grid, so the chevron needs the text to stop before it */
+  body.wide .action { min-block-size: 92px; align-content: center; }
 }
 
 * { box-sizing: border-box; }
@@ -387,6 +408,15 @@ li.empty {
   text-align: center;
   padding-block: 26px;
 }
+/* «عرض المزيد»: the last row of a paged list, and never a card — it is an action, not data.
+   It spans the whole grid when the list runs in columns on a wide screen. */
+li.more {
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+  grid-column: 1 / -1;
+}
+li.more button { inline-size: 100%; padding-block: 14px; }
 .card-main { flex: 1; min-inline-size: 0; display: grid; gap: 4px; }
 /* A whole card that opens a screen. The list used to carry five buttons per row and read as a
    wall of controls; the card itself is the target now, and everything else lives on the screen

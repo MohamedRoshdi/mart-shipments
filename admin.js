@@ -775,10 +775,16 @@ $("btn-wipe-products").onclick = async () => {
 };
 
 
+/* The audit trail grows for ever, so it is read a page at a time — «عرض المزيد» asks the server
+   for a bigger slice of the same descending query. A cap that silently hides the rest is what a
+   trail must never do: the button says how many are on screen, and it keeps going. */
+const LOG_PAGE = 100;
+let logLimit = LOG_PAGE;
+
 async function loadLogs() {
   $("logs-count").textContent = "بنجيب آخر العمليات...";
   $("logs-list").innerHTML = "";
-  const rows = await db.listLogs().catch(() => []);
+  const rows = await db.listLogs(logLimit).catch(() => []);
   $("logs-count").textContent = rows.length ? `آخر ${rows.length} عملية` : "";
   $("logs-list").innerHTML = rows.map(r => `<li>
       <div class="card-main">
@@ -786,12 +792,24 @@ async function loadLogs() {
         <div class="meta">${esc(r.target)}</div>
         <div class="meta">${esc(r.who)} · ${esc(fmtWhen(r.at))}</div>
       </div>
-    </li>`).join("") || `<li class="empty">مفيش عمليات مسجّلة لحد الآن</li>`;
+    </li>`).join("")
+    // a full page means there is probably more behind it; a short one is the end of the trail
+    + (rows.length >= logLimit
+      ? `<li class="more"><button type="button" class="ghost" id="btn-more-logs">عرض المزيد — ${rows.length} عملية</button></li>`
+      : "")
+    || `<li class="empty">مفيش عمليات مسجّلة لحد الآن</li>`;
 }
+
+$("logs-list").onclick = (e) => {
+  if (!e.target.closest("#btn-more-logs")) return;
+  logLimit += LOG_PAGE;
+  loadLogs().catch(console.error);
+};
 
 $("btn-logs").onclick = () => {
   history.pushState({ screen: "screen-logs" }, "");
   render("screen-logs");
+  logLimit = LOG_PAGE;              // every visit starts on the first page, not where it was left
   loadLogs();
 };
 

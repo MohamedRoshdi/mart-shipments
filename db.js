@@ -218,13 +218,20 @@ export async function resolveProduct(code) {
   return (await getProduct(hit.barcode)) || null;
 }
 
-// first page only for the default view; searching goes to the server
-export async function listProducts() {
+/* One page of the catalog, in name order. `afterName` is the last name already on screen — the
+   cursor «عرض المزيد» pushes forward with, so browsing a 10k catalog costs PRODUCT_CAP reads a
+   page instead of the whole thing, and the shop is never told to search for a product it should
+   simply be able to scroll to. */
+export async function listProducts(afterName) {
   if (TEST_MODE) {
-    return Object.entries(lsObj('test-products')).map(([barcode, v]) => row(barcode, v));
+    const all = Object.entries(lsObj('test-products')).map(([barcode, v]) => row(barcode, v))
+      .sort((a, b) => String(a.name).localeCompare(String(b.name), 'ar'));
+    const from = afterName ? all.findIndex((p) => p.name === afterName) + 1 : 0;
+    return all.slice(from, from + PRODUCT_CAP);
   }
   await live();
-  const snap = await fs.getDocs(fs.query(fs.collection(dbRef, 'products'), fs.orderBy('name'), fs.limit(PRODUCT_CAP)));
+  const snap = await fs.getDocs(fs.query(fs.collection(dbRef, 'products'), fs.orderBy('name'),
+    ...(afterName ? [fs.startAfter(afterName)] : []), fs.limit(PRODUCT_CAP)));
   return snap.docs.map((d) => row(d.id, d.data()));
 }
 
