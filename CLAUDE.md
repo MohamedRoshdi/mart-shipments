@@ -878,6 +878,11 @@ STAMP=$RANDOM BASE=http://localhost:8080 node scripts/live-usage.mjs
 # BASE matters: the default is the DEPLOYED site, so a key added this session has to be checked
 # against a local server (BASE=http://localhost:8080) until the push lands.
 STAMP=$RANDOM BASE=http://localhost:8080 node scripts/live-newfields.mjs
+# the employee page at a REAL 412px on the DEPLOYED site: home, new shipment, الصلاحيات, ليبل الرف.
+# Prints the viewport, --col, the sync chip and the footer for each, and waits out the 8s so the
+# «لسه بيتبعت...» state is captured. Writes nothing but the app's own boot `usage` doc, pinned to
+# deviceId `browsertest-phone` so there is at most one known row to clean up. Shots in /tmp/shots-phone
+node scripts/shots-phone-live.mjs
 node scripts/live-mobile-known.mjs               # read-only: Pixel 5 on the live site, a real catalog barcode
 OUT=/tmp/shots node scripts/shot-refused.mjs     # read-only: the refusal sheet, settled, on the live site
 OUT=/tmp/shots node scripts/shot-live-manager.mjs # read-only: one shot of the live manager screen
@@ -1031,6 +1036,13 @@ debounce, or it reports false negatives.
   chips read «لسه بيتبعت...» and go amber. Only after 8s, or a healthy save would blink a warning.
   `db.errorText(err)` is the one copy of the wording, and it names the quota in the shop's words —
   the work is safe on the device, it just has not been sent.
+  **An empty list is not the same as a list we could not read, and `#offline-note` is where that is
+  said.** Found by opening the deployed site at a 412px viewport with the allowance actually spent
+  (2026-08-02): every screen said «مفيش شحنات النهارده» / «لسه مفيش صلاحيات» with total confidence,
+  because a device that cannot reach the server gets an EMPTY result from the offline cache without
+  any failure. The band under the app bar (employee page only — that is the phone) is driven by the
+  same `stuck` flag as the chip, so the two can never disagree, and it is amber rather than red:
+  nothing is lost, the work is on the device.
   **And `?test=1` is now visible in the footer** («وضع تجربة — مفيش حفظ حقيقي»): a phone whose
   home-screen shortcut carries that flag writes to itself for ever, with the same screens and the
   same version number, which is indistinguishable from the bug above. The test suite asserts the
