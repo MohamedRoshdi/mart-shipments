@@ -34,17 +34,61 @@ export const dbError = () => lastError;
 function lsArr(key) { return JSON.parse(localStorage.getItem(key) || '[]'); }
 function lsObj(key) { return JSON.parse(localStorage.getItem(key) || '{}'); }
 
+/* What THIS DEVICE spent of the day's free allowance. Firestore does not hand a client the
+   project's own counters — only Cloud Monitoring does — so this counts what the app itself did
+   here, and «حالة النظام» says so in as many words rather than pretending it is the whole shop.
+   Reads served from the offline cache are NOT billed, so `fromCache` deliveries are not counted.
+   Kept in localStorage: costs no read, no write, and nothing to clean up. The allowance resets at
+   midnight Pacific, so the bucket is the Pacific day — the same clock Google bills on. */
+export const QUOTA = { reads: 50000, writes: 20000 };
+export const quotaDay = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+const blank = () => ({ day: quotaDay(), reads: 0, writes: 0 });
+function meter(kind, n = 1) {
+  if (TEST_MODE || !n) return;
+  try {
+    const u = lsObj('usage');
+    const cur = u.day === quotaDay() ? u : blank();
+    cur[kind] = (cur[kind] || 0) + n;
+    localStorage.setItem('usage', JSON.stringify(cur));
+  } catch (e) { /* storage full: counting must never be the thing that fails a save */ }
+}
+export function usage() {
+  const u = lsObj('usage');
+  return u.day === quotaDay() ? { ...blank(), ...u } : blank();
+}
+
+/* The only four doors to a write, and the two to a read, so the meter lives in one place instead
+   of on thirty call sites. Same signatures as the SDK's — everything below calls these. */
+const addDoc = (c, d) => { meter('writes'); return fs['addDoc'](c, d); };
+const setDoc = (r, d, o) => { meter('writes'); return fs['setDoc'](r, d, o); };
+const updateDoc = (r, d) => { meter('writes'); return fs['updateDoc'](r, d); };
+const deleteDoc = (r) => { meter('writes'); return fs['deleteDoc'](r); };
+const billed = (snap) => (snap.metadata && snap.metadata.fromCache ? 0 : undefined);
+// a listener delivery: the first one is the whole query, every later one only what changed
+const metered = (snap) => meter('reads', billed(snap) ?? (snap.docChanges ? snap.docChanges().length : 1));
+const getDocs = async (q) => { const s = await fs.getDocs(q); meter('reads', billed(s) ?? Math.max(s.size, 1)); return s; };
+const getDoc = async (r) => { const s = await fs.getDoc(r); meter('reads', billed(s) ?? 1); return s; };
+
+/* Every test-mode collection write goes through here so the listeners below hear it. Firestore's
+   onSnapshot fires for THIS tab's own writes; the browser's `storage` event never does — it is
+   other-tab only. Without this, a page in ?test=1 would see another tab's changes and miss its
+   own, which is the opposite of how the real thing behaves. */
+function lsPut(key, val) {
+  localStorage.setItem(key, JSON.stringify(val));
+  dispatchEvent(new CustomEvent('ls-write', { detail: key }));
+}
+
 export async function saveShipment(shipment) {
   shipment.createdAt = Date.now();
   if (TEST_MODE) {
     const all = lsArr('test-shipments');
     all.push(shipment);
-    localStorage.setItem('test-shipments', JSON.stringify(all));
+    lsPut('test-shipments', all);
     return;
   }
   await live();
   // no await on network: Firestore queues the write offline; awaiting would hang UI until server ack
-  fs.addDoc(fs.collection(dbRef, 'shipments'), shipment).catch((e) => dispatchEvent(new CustomEvent('db-error', { detail: e })));
+  addDoc(fs.collection(dbRef, 'shipments'), shipment).catch((e) => dispatchEvent(new CustomEvent('db-error', { detail: e })));
 }
 
 /* One month at a time. The manager page used to pull every shipment ever saved on every visit —
@@ -60,7 +104,7 @@ export function monthRange(month) {
 const monthly = async (name, month) => {
   await live();
   const span = monthRange(month);
-  const snap = await fs.getDocs(fs.query(fs.collection(dbRef, name),
+  const snap = await getDocs(fs.query(fs.collection(dbRef, name),
     ...(span ? [fs.where('createdAt', '>=', span[0]), fs.where('createdAt', '<', span[1])] : []),
     fs.orderBy('createdAt', 'desc')));
   return snap.docs.map((d) => ({ ...d.data(), _id: d.id }));
@@ -91,16 +135,29 @@ const watchMonthly = async (name, month, cb) => {
   return fs.onSnapshot(fs.query(fs.collection(dbRef, name),
     ...(span ? [fs.where('createdAt', '>=', span[0]), fs.where('createdAt', '<', span[1])] : []),
     fs.orderBy('createdAt', 'desc')),
-  (snap) => cb(snap.docs.map((d) => ({ ...d.data(), _id: d.id }))),
+  (snap) => { metered(snap); cb(snap.docs.map((d) => ({ ...d.data(), _id: d.id }))); },
   (e) => { dispatchEvent(new CustomEvent('db-error', { detail: e })); cb([]); });
 };
 
-// test mode mirrors watchConfig: fire once from localStorage, then relay another tab's writes
-const watchLs = (key, month, cb) => {
-  const relay = (e) => { if (e.key === key) cb(lsMonth(key, month)); };
+/* test mode mirrors watchConfig: fire once from localStorage, then relay EVERY write — this tab's
+   (`ls-write`, from lsPut) and another tab's (`storage`) — because that is what onSnapshot does. */
+const watchLsWith = (key, read, cb) => {
+  const relay = (e) => { if ((e.key || e.detail) === key) cb(read()); };
   addEventListener('storage', relay);
-  cb(lsMonth(key, month));
-  return () => removeEventListener('storage', relay);
+  addEventListener('ls-write', relay);
+  cb(read());
+  return () => { removeEventListener('storage', relay); removeEventListener('ls-write', relay); };
+};
+const watchLs = (key, month, cb) => watchLsWith(key, () => lsMonth(key, month), cb);
+
+/* الصلاحيات and the print queue are not filed by month, so they get the plain-collection form of
+   watchMonthly. Same arithmetic as every other listener here: attaching costs exactly the read the
+   one-shot list already cost, and after that only what actually changed. */
+const watchAll = async (name, cb, ...q) => {
+  await live();
+  return fs.onSnapshot(fs.query(fs.collection(dbRef, name), ...q),
+    (snap) => { metered(snap); cb(snap.docs.map((d) => ({ ...d.data(), _id: d.id }))); },
+    (e) => { dispatchEvent(new CustomEvent('db-error', { detail: e })); cb([]); });
 };
 
 export async function watchShipments(month, cb) {
@@ -113,17 +170,28 @@ export async function watchCounts(month, cb) {
   return watchMonthly('counts', month, cb);
 }
 
+export async function watchExpiry(cb) {
+  if (TEST_MODE) return watchLsWith('test-expiry', () => lsArr('test-expiry'), cb);
+  return watchAll('expiry', cb);
+}
+
+export async function watchJobs(cb) {
+  if (TEST_MODE) return watchLsWith('test-jobs', () => lsMonth('test-jobs', null), cb);
+  await live();       // the constraints below read `fs`, which only exists once the SDK is loaded
+  return watchAll('print_jobs', cb, fs.orderBy('createdAt', 'desc'), fs.limit(200));
+}
+
 export async function updateShipment(id, data) {
   if (TEST_MODE) {
     const all = lsArr('test-shipments').map((s) =>
       String(s.createdAt) === id
         ? { ...s, name: data.name, items: data.items, type: data.type, supplierCode: data.supplierCode || '' }
         : s);
-    localStorage.setItem('test-shipments', JSON.stringify(all));
+    lsPut('test-shipments', all);
     return;
   }
   await live();
-  await fs.updateDoc(fs.doc(dbRef, 'shipments', id), {
+  await updateDoc(fs.doc(dbRef, 'shipments', id), {
     name: data.name, items: data.items, type: data.type, supplierCode: data.supplierCode || '',
   });
 }
@@ -137,11 +205,11 @@ export async function markImported(id, at, file) {
   if (TEST_MODE) {
     const all = lsArr('test-shipments')
       .map((s) => (String(s.createdAt) === id ? { ...s, erpAt: at, erpFile: file } : s));
-    localStorage.setItem('test-shipments', JSON.stringify(all));
+    lsPut('test-shipments', all);
     return;
   }
   await live();
-  fs.updateDoc(fs.doc(dbRef, 'shipments', id), { erpAt: at, erpFile: String(file).slice(0, 200) })
+  updateDoc(fs.doc(dbRef, 'shipments', id), { erpAt: at, erpFile: String(file).slice(0, 200) })
     .catch((e) => dispatchEvent(new CustomEvent('db-error', { detail: e })));
 }
 
@@ -149,24 +217,24 @@ export async function markLoaded(id, who, at) {
   if (TEST_MODE) {
     const all = lsArr('test-shipments')
       .map((s) => (String(s.createdAt) === id ? { ...s, loadedBy: who, loadedAt: at } : s));
-    localStorage.setItem('test-shipments', JSON.stringify(all));
+    lsPut('test-shipments', all);
     return;
   }
   await live();
   // no await on the network, for the same reason as saveShipment: this runs while the person is
   // waiting for a file to download, and awaiting the ack would hold that up — for ever offline
-  fs.updateDoc(fs.doc(dbRef, 'shipments', id), { loadedBy: who, loadedAt: at })
+  updateDoc(fs.doc(dbRef, 'shipments', id), { loadedBy: who, loadedAt: at })
     .catch((e) => dispatchEvent(new CustomEvent('db-error', { detail: e })));
 }
 
 export async function deleteShipment(id) {
   if (TEST_MODE) {
     const all = lsArr('test-shipments').filter((s) => String(s.createdAt) !== id);
-    localStorage.setItem('test-shipments', JSON.stringify(all));
+    lsPut('test-shipments', all);
     return;
   }
   await live();
-  await fs.deleteDoc(fs.doc(dbRef, 'shipments', id));
+  await deleteDoc(fs.doc(dbRef, 'shipments', id));
 }
 
 // A product row is { name, stock: {branch: qty}, qty? }. Each branch has its own sheet, so the
@@ -197,7 +265,7 @@ export async function getProduct(barcode) {
     return v === undefined ? null : row(barcode, v);
   }
   await live();
-  const snap = await fs.getDoc(fs.doc(dbRef, 'products', barcode));
+  const snap = await getDoc(fs.doc(dbRef, 'products', barcode));
   return snap.exists() ? row(barcode, snap.data()) : null;
 }
 
@@ -240,7 +308,7 @@ export async function listProducts(afterName) {
     return all.slice(from, from + PRODUCT_CAP);
   }
   await live();
-  const snap = await fs.getDocs(fs.query(fs.collection(dbRef, 'products'), fs.orderBy('name'),
+  const snap = await getDocs(fs.query(fs.collection(dbRef, 'products'), fs.orderBy('name'),
     ...(afterName ? [fs.startAfter(afterName)] : []), fs.limit(PRODUCT_CAP)));
   return snap.docs.map((d) => row(d.id, d.data()));
 }
@@ -249,7 +317,7 @@ export async function listProducts(afterName) {
 export async function listAllProducts() {
   if (TEST_MODE) return listProducts();
   await live();
-  const snap = await fs.getDocs(fs.query(fs.collection(dbRef, 'products'), fs.orderBy('name')));
+  const snap = await getDocs(fs.query(fs.collection(dbRef, 'products'), fs.orderBy('name')));
   return snap.docs.map((d) => row(d.id, d.data()));
 }
 
@@ -322,7 +390,7 @@ export async function stampFile(kind, meta) {
     return;
   }
   await live();
-  await fs.setDoc(fs.doc(dbRef, 'config', 'app'), { filesMeta: { [kind]: meta } }, { merge: true });
+  await setDoc(fs.doc(dbRef, 'config', 'app'), { filesMeta: { [kind]: meta } }, { merge: true });
 }
 
 // Arabic is typed loosely: أ/إ/آ for ا, ه for ة, ى for ي, plus tatweel and harakat. Search has to
@@ -361,8 +429,8 @@ export async function searchProducts(q) {
   const prefix = (field) => fs.query(
     fs.collection(dbRef, 'products'), fs.orderBy(field), fs.startAt(q), fs.endAt(q + '\uf8ff'), fs.limit(HITS)
   );
-  if (/^\d{3,}$/.test(q)) collect(await fs.getDocs(prefix(fs.documentId())));
-  collect(await fs.getDocs(prefix('name')));
+  if (/^\d{3,}$/.test(q)) collect(await getDocs(prefix(fs.documentId())));
+  collect(await getDocs(prefix('name')));
   return [...found.values()];
 }
 
@@ -370,6 +438,7 @@ export async function searchProducts(q) {
 export async function countProducts() {
   if (TEST_MODE) return Object.keys(lsObj('test-products')).length;
   await live();
+  meter('reads');                 // a count aggregation is billed as one read, not as the count
   const snap = await fs.getCountFromServer(fs.collection(dbRef, 'products'));
   return snap.data().count;
 }
@@ -383,7 +452,7 @@ export async function deleteProduct(barcode) {
     return;
   }
   await live();
-  await fs.deleteDoc(fs.doc(dbRef, 'products', barcode));
+  await deleteDoc(fs.doc(dbRef, 'products', barcode));
 }
 
 // One admin-editable settings doc: branches, PINs, shipment types. What it returns is
@@ -391,7 +460,7 @@ export async function deleteProduct(barcode) {
 export async function getConfig() {
   if (TEST_MODE) return lsObj('test-config');
   await live();
-  const snap = await fs.getDoc(fs.doc(dbRef, 'config', 'app'));
+  const snap = await getDoc(fs.doc(dbRef, 'config', 'app'));
   return snap.exists() ? snap.data() : {};
 }
 
@@ -416,7 +485,7 @@ export async function watchConfig(onChange) {
   }
   await live();
   return fs.onSnapshot(fs.doc(dbRef, 'config', 'app'),
-    (snap) => onChange(snap.exists() ? snap.data() : {}),
+    (snap) => { meter('reads', billed(snap) ?? 1); onChange(snap.exists() ? snap.data() : {}); },
     (e) => dispatchEvent(new CustomEvent('db-error', { detail: e })));
 }
 
@@ -440,7 +509,7 @@ export async function saveConfig(cfg) {
     return;
   }
   await live();
-  await fs.setDoc(fs.doc(dbRef, 'config', 'app'), cfg);
+  await setDoc(fs.doc(dbRef, 'config', 'app'), cfg);
 }
 
 // Bind a user account to the phone that just signed in with it. Writes the users list only,
@@ -456,12 +525,12 @@ export async function claimDevice(pin, device) {
       return;
     }
     await live();
-    const snap = await fs.getDoc(fs.doc(dbRef, 'config', 'app'));
+    const snap = await getDoc(fs.doc(dbRef, 'config', 'app'));
     const stored = snap.exists() ? snap.data() : null;
     if (!stored || !Array.isArray(stored.users)) return;   // users only live in the code config
     if (!stored.users.some((u) => u.pin === pin && !u.device)) return;
     const users = stored.users.map((u) => (u.pin === pin && !u.device ? { ...u, device } : u));
-    await fs.updateDoc(fs.doc(dbRef, 'config', 'app'), { users });
+    await updateDoc(fs.doc(dbRef, 'config', 'app'), { users });
   } catch (e) {
     console.error(e);
   }
@@ -484,7 +553,7 @@ export async function logAction(who, action, target) {
       return;
     }
     await live();
-    fs.addDoc(fs.collection(dbRef, 'logs'), row).catch(console.error);
+    addDoc(fs.collection(dbRef, 'logs'), row).catch(console.error);
   } catch (e) {
     console.error(e);
   }
@@ -493,7 +562,7 @@ export async function logAction(who, action, target) {
 export async function listLogs(max = 100) {
   if (TEST_MODE) return lsArr('test-logs').sort((a, b) => b.at - a.at).slice(0, max);
   await live();
-  const snap = await fs.getDocs(
+  const snap = await getDocs(
     fs.query(fs.collection(dbRef, 'logs'), fs.orderBy('at', 'desc'), fs.limit(max))
   );
   return snap.docs.map((d) => d.data());
@@ -506,7 +575,7 @@ export async function deleteMany(collection, ids) {
     const listKey = { shipments: 'test-shipments', counts: 'test-counts', expiry: 'test-expiry' }[collection];
     if (listKey) {
       const keep = lsArr(listKey).filter((r) => !ids.includes(String(r._id || r.createdAt)));
-      localStorage.setItem(listKey, JSON.stringify(keep));
+      lsPut(listKey, keep);
     } else {
       const map = lsObj('test-products');
       ids.forEach((id) => delete map[id]);
@@ -517,7 +586,9 @@ export async function deleteMany(collection, ids) {
   await live();
   for (let i = 0; i < ids.length; i += 500) {
     const batch = fs.writeBatch(dbRef);
-    ids.slice(i, i + 500).forEach((id) => batch.delete(fs.doc(dbRef, collection, id)));
+    const chunk = ids.slice(i, i + 500);
+    chunk.forEach((id) => batch.delete(fs.doc(dbRef, collection, id)));
+    meter('writes', chunk.length);      // a batch is billed per document, exactly like separate deletes
     await batch.commit();
   }
   return ids.length;
@@ -560,7 +631,7 @@ async function writeProduct(barcode, patch) {
   }
   await live();
   // Firestore merges map fields key by key, which is exactly the per-branch behaviour wanted
-  fs.setDoc(fs.doc(dbRef, 'products', barcode), patch, { merge: true })
+  setDoc(fs.doc(dbRef, 'products', barcode), patch, { merge: true })
     .catch((e) => dispatchEvent(new CustomEvent('db-error', { detail: e })));
 }
 
@@ -571,12 +642,12 @@ export async function saveCount(count) {
   if (TEST_MODE) {
     const all = lsArr('test-counts');
     all.push(count);
-    localStorage.setItem('test-counts', JSON.stringify(all));
+    lsPut('test-counts', all);
     return;
   }
   await live();
   // same reasoning as saveShipment: awaiting the network would hang the UI while offline
-  fs.addDoc(fs.collection(dbRef, 'counts'), count).catch((e) => dispatchEvent(new CustomEvent('db-error', { detail: e })));
+  addDoc(fs.collection(dbRef, 'counts'), count).catch((e) => dispatchEvent(new CustomEvent('db-error', { detail: e })));
 }
 
 export async function listCounts(month) {
@@ -588,21 +659,21 @@ export async function updateCount(id, data) {
   if (TEST_MODE) {
     const all = lsArr('test-counts').map((c) =>
       String(c.createdAt) === id ? { ...c, name: data.name, items: data.items } : c);
-    localStorage.setItem('test-counts', JSON.stringify(all));
+    lsPut('test-counts', all);
     return;
   }
   await live();
-  await fs.updateDoc(fs.doc(dbRef, 'counts', id), { name: data.name, items: data.items });
+  await updateDoc(fs.doc(dbRef, 'counts', id), { name: data.name, items: data.items });
 }
 
 export async function deleteCount(id) {
   if (TEST_MODE) {
     const keep = lsArr('test-counts').filter((c) => String(c.createdAt) !== id);
-    localStorage.setItem('test-counts', JSON.stringify(keep));
+    lsPut('test-counts', keep);
     return;
   }
   await live();
-  await fs.deleteDoc(fs.doc(dbRef, 'counts', id));
+  await deleteDoc(fs.doc(dbRef, 'counts', id));
 }
 
 /* ---------- print jobs (مهام الطباعة): a saved label queue. The state is derived the same way
@@ -616,11 +687,11 @@ export async function saveJob(job) {
   if (TEST_MODE) {
     const all = lsArr("test-jobs");
     all.push(job);
-    localStorage.setItem("test-jobs", JSON.stringify(all));
+    lsPut("test-jobs", all);
     return;
   }
   await live();
-  fs.addDoc(fs.collection(dbRef, "print_jobs"), job).catch((e) => dispatchEvent(new CustomEvent("db-error", { detail: e })));
+  addDoc(fs.collection(dbRef, "print_jobs"), job).catch((e) => dispatchEvent(new CustomEvent("db-error", { detail: e })));
 }
 
 export async function listJobs() {
@@ -628,7 +699,7 @@ export async function listJobs() {
   await live();
   // newest 200: jobs persist for reprint, so without a cap this read grows for ever. 200 is months
   // of shop work; anything older is archive nobody reprints, and حذف exists for real cleanup.
-  const snap = await fs.getDocs(fs.query(fs.collection(dbRef, "print_jobs"), fs.orderBy("createdAt", "desc"), fs.limit(200)));
+  const snap = await getDocs(fs.query(fs.collection(dbRef, "print_jobs"), fs.orderBy("createdAt", "desc"), fs.limit(200)));
   return snap.docs.map((d) => ({ ...d.data(), _id: d.id }));
 }
 
@@ -636,21 +707,21 @@ export async function listJobs() {
 export async function updateJob(id, patch) {
   if (TEST_MODE) {
     const all = lsArr("test-jobs").map((j) => (String(j.createdAt) === id ? { ...j, ...patch } : j));
-    localStorage.setItem("test-jobs", JSON.stringify(all));
+    lsPut("test-jobs", all);
     return;
   }
   await live();
-  fs.updateDoc(fs.doc(dbRef, "print_jobs", id), patch).catch((e) => dispatchEvent(new CustomEvent("db-error", { detail: e })));
+  updateDoc(fs.doc(dbRef, "print_jobs", id), patch).catch((e) => dispatchEvent(new CustomEvent("db-error", { detail: e })));
 }
 
 export async function deleteJob(id) {
   if (TEST_MODE) {
     const keep = lsArr("test-jobs").filter((j) => String(j.createdAt) !== id);
-    localStorage.setItem("test-jobs", JSON.stringify(keep));
+    lsPut("test-jobs", keep);
     return;
   }
   await live();
-  await fs.deleteDoc(fs.doc(dbRef, "print_jobs", id));
+  await deleteDoc(fs.doc(dbRef, "print_jobs", id));
 }
 
 /* ---------- expiry (الصلاحيات): one row per product and date; months are derived, never stored ---------- */
@@ -663,12 +734,12 @@ export async function saveExpiry(row) {
   if (TEST_MODE) {
     const all = lsArr('test-expiry');
     all.push({ ...row, _id: expiryId(row) });
-    localStorage.setItem('test-expiry', JSON.stringify(all));
+    lsPut('test-expiry', all);
     return;
   }
   await live();
   // same reasoning as saveShipment: awaiting the network would hang the UI while offline
-  fs.addDoc(fs.collection(dbRef, 'expiry'), row).catch((e) => dispatchEvent(new CustomEvent('db-error', { detail: e })));
+  addDoc(fs.collection(dbRef, 'expiry'), row).catch((e) => dispatchEvent(new CustomEvent('db-error', { detail: e })));
 }
 
 // no orderBy: sorting by year+month+day on the server would need a composite index, and the
@@ -676,7 +747,7 @@ export async function saveExpiry(row) {
 export async function listExpiry() {
   if (TEST_MODE) return lsArr('test-expiry');
   await live();
-  const snap = await fs.getDocs(fs.collection(dbRef, 'expiry'));
+  const snap = await getDocs(fs.collection(dbRef, 'expiry'));
   return snap.docs.map((d) => ({ ...d.data(), _id: d.id }));
 }
 
@@ -689,21 +760,21 @@ export async function updateExpiry(id, data) {
     ...(data.supplier !== undefined ? { supplier: String(data.supplier).slice(0, 50) } : {}) };
   if (TEST_MODE) {
     const all = lsArr('test-expiry').map((e) => (e._id === id ? { ...e, ...patch } : e));
-    localStorage.setItem('test-expiry', JSON.stringify(all));
+    lsPut('test-expiry', all);
     return;
   }
   await live();
-  fs.updateDoc(fs.doc(dbRef, 'expiry', id), patch)
+  updateDoc(fs.doc(dbRef, 'expiry', id), patch)
     .catch((e) => dispatchEvent(new CustomEvent('db-error', { detail: e })));
 }
 
 export async function deleteExpiry(id) {
   if (TEST_MODE) {
     const keep = lsArr('test-expiry').filter((e) => e._id !== id);
-    localStorage.setItem('test-expiry', JSON.stringify(keep));
+    lsPut('test-expiry', keep);
     return;
   }
   await live();
-  fs.deleteDoc(fs.doc(dbRef, 'expiry', id))
+  deleteDoc(fs.doc(dbRef, 'expiry', id))
     .catch((e) => dispatchEvent(new CustomEvent('db-error', { detail: e })));
 }

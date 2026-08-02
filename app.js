@@ -99,6 +99,18 @@ const thisMonth = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 };
 
+/* Every list on this page that another device can change is LIVE (the owner, 2026-08-02: he edits
+   on the laptop and the phone keeps showing the old thing). `feed` subscribes ONCE per page life
+   and hands each delivery straight to the painter — the first one resolves the await, so the
+   callers read exactly as they did when this was a one-shot list. Attaching costs the same reads
+   the list already cost; after that only a real change costs anything. Repainting a screen nobody
+   is looking at is harmless (innerHTML on a hidden section) and is what keeps this three lines. */
+const feeds = {};
+const feed = (key, start, paint) => (feeds[key] ||= new Promise((resolve) => {
+  start((rows) => { paint(rows); resolve(); })
+    .catch((e) => { console.error(e); paint([]); resolve(); });
+}));
+
 async function goHome() {
   await stopScan();
   if (!auth.session()) {          // expired mid-use: back to the door, not a home with no buttons
@@ -109,8 +121,17 @@ async function goHome() {
   state.editingId = null;
   state.mode = "ship";
   render("screen-home");
-  const all = await db.listShipments(thisMonth()).catch(() => []);
-  state.mine = all.filter(s => s.createdBy === myName() && isToday(s.createdAt) && !s.loadedAt);
+  await feed("ships", cb => db.watchShipments(thisMonth(), cb), paintMyShipments);
+  paintMyShipments();             // the branch/name filter may have moved since the last delivery
+  if (canDo("count")) { await feed("counts", cb => db.watchCounts(thisMonth(), cb), paintMyCounts); paintMyCounts(); }
+  openDeepLabel();
+}
+
+let rawShips = [], rawCounts = [];
+
+function paintMyShipments(rows) {
+  if (rows) rawShips = rows;
+  state.mine = rawShips.filter(s => s.createdBy === myName() && isToday(s.createdAt) && !s.loadedAt);
   $("my-shipments").innerHTML = state.mine.map((s, i) => `<li>
       <div class="card-main">
         <div class="card-title">${esc(s.name)}</div>
@@ -118,8 +139,6 @@ async function goHome() {
       </div>
       ${canDo("edit") ? `<button class="ghost" data-edit="${i}">تعديل</button>` : ""}
     </li>`).join("") || `<li class="empty">مفيش شحنات النهارده — ابدأ بـ «شحنة جديدة»</li>`;
-  if (canDo("count")) await renderMyCounts();
-  openDeepLabel();
 }
 
 // the difference a stocktake found: counted minus what the system says
@@ -127,9 +146,9 @@ const countDiff = (c) => c.items.reduce((n, i) => n + (Number(i.qty) || 0) - (Nu
 // words, not "-3": a leading minus next to Arabic text renders on the wrong side (RTL bidi)
 const diffWord = (n) => (n === 0 ? "مظبوط" : (n > 0 ? `زيادة ${n}` : `ناقص ${-n}`));
 
-async function renderMyCounts() {
-  const all = await db.listCounts(thisMonth()).catch(() => []);
-  state.myCounts = all.filter(c => c.createdBy === myName() && isToday(c.createdAt));
+function paintMyCounts(rows) {
+  if (rows) rawCounts = rows;
+  state.myCounts = rawCounts.filter(c => c.createdBy === myName() && isToday(c.createdAt));
   $("my-counts").innerHTML = state.myCounts.map((c, i) => `<li>
       <div class="card-main">
         <div class="card-title">${esc(c.name)}</div>
@@ -570,15 +589,24 @@ $("btn-expiry").onclick = async () => {
   await loadExpiry();
 };
 
+let rawExp = [];
+
+// live, like the home lists: a date typed on another phone lands here without anyone reloading
 async function loadExpiry() {
-  const rows = await db.listExpiry().catch(() => []);
+  await feed("expiry", db.watchExpiry, paintExpiry);
+  paintExpiry();                 // the branch may have changed since the last delivery
+}
+
+function paintExpiry(rows) {
+  if (rows) rawExp = rows;
   // a row with no branch is from before branches were stamped; it stays visible everywhere
-  state.expRows = rows.filter(e => !e.branch || e.branch === state.branch);
+  state.expRows = rawExp.filter(e => !e.branch || e.branch === state.branch);
   /* «الموظف يشاهد فقط المنتجات التي أدخلها» (the owner, 2026-08-01) — a real account sees its
      own rows; the manager page sees everything. Legacy PIN flows keep the old shared view. */
   const s = auth.session();
   if (s && s.user) state.expRows = state.expRows.filter(e => e.createdBy === myName());
   renderMonths();
+  if (!$("screen-month").hidden) paintMonth();   // the open month may have gained or lost a row
 }
 
 function renderMonths() {
@@ -649,8 +677,11 @@ function openMonth(key) {
 }
 
 function paintMonth() {
+  // `history.back()` only takes effect on the next tick, so a second paint in the same tick would
+  // still see the month screen and go back twice. Clearing the key is what makes leaving happen once.
+  if ($("screen-month").hidden || !state.monthKey) return;
   const m = ex.months(monthRows())[0];
-  if (!m) { history.back(); return; }        // the last row left → the month is not there any more
+  if (!m) { state.monthKey = null; history.back(); return; }   // last row gone → so is the month
   $("month-head").textContent = m.label;
   $("screen-title").textContent = m.label;
   $("month-count").textContent = `${m.count} صنف · ${m.qty} قطعة · ${ex.STATUS_LABEL[m.status]}`;
@@ -724,8 +755,7 @@ $("month-items").onclick = async (e) => {
     console.error(err);
     toast("الحذف ما نفعش — جرّب تاني", "bad");
   }
-  await loadExpiry();
-  paintMonth();
+  await loadExpiry();      // the listener repaints the open month, and leaves it if it emptied
 };
 
 $("btn-save-month").onclick = async () => {
@@ -738,8 +768,7 @@ $("btn-save-month").onclick = async () => {
     console.error(err);
     toast(`اتحفظ ${n} تعديل وبعدين حصلت مشكلة — جرّب تاني`, "bad");
   }
-  await loadExpiry();
-  paintMonth();          // a row whose date moved is now in another month, and may empty this one
+  await loadExpiry();      // the listener repaints the open month, and leaves it if it emptied          // a row whose date moved is now in another month, and may empty this one
 };
 
 /* ---------- ليبل الرف: pick a product, print it. Nothing is saved. ---------- */
@@ -924,9 +953,16 @@ const jobState = (j) => (j.printedAt ? "تمت طباعتها" : j.readyAt ? "ج
 const jobLabels = (j) => j.items.reduce((n, r) => n + (Number(r.copies) || 1), 0);
 
 async function openJobs() {
-  jobs = await db.listJobs();
-  renderJobs();
+  await feed("jobs", db.watchJobs, paintJobs);
   navTo("screen-jobs");
+}
+
+// live: a job stamped «تمت طباعتها» on the shop laptop stops looking new on the phone
+function paintJobs(rows) {
+  jobs = rows;
+  if (job) job = jobs.find((j) => j._id === job._id) || job;
+  renderJobs();
+  if (!$("screen-job").hidden) renderJob();
 }
 
 $("btn-jobs").onclick = () => { openJobs().catch(() => toast("حصلت مشكلة — جرّب تاني")); };

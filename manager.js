@@ -334,8 +334,7 @@ async function openManager() {
     }
   }
   // الصلاحيات is filed by the expiry date, not by the day it was typed, so its own tab groups it
-  expRows = canDo("expiry") ? await db.listExpiry().catch(() => []) : [];
-  if (scopes.length) expRows = expRows.filter(e => !e.branch || scopes.includes(e.branch));
+  if (canDo("expiry")) await watchExpiryOnce();
   renderMonthPick();
   renderFilter();
   renderTypeFilter();
@@ -547,8 +546,11 @@ function openMonth(key) {
 }
 
 function paintMonth() {
+  // `history.back()` only lands on the next tick, so without clearing the key a second paint in
+  // the same tick would see the month screen still up and go back twice.
+  if ($("screen-expiry-month").hidden || !monthKey) return;
   const m = ex.months(monthRows())[0];
-  if (!m) { history.back(); return; }         // the last row left → the month is gone
+  if (!m) { monthKey = null; history.back(); return; }   // the last row left → the month is gone
   $("m-head").textContent = m.label;
   $("screen-title").textContent = m.label;
   $("m-count").textContent = `${m.count} صنف · ${m.qty} قطعة · ${ex.STATUS_LABEL[m.status]}`;
@@ -638,11 +640,27 @@ $("btn-save-month").onclick = async () => {
   await reloadExpiry();      // a row whose date moved is in another month now, and may empty this one
 };
 
-async function reloadExpiry() {
-  expRows = await db.listExpiry().catch(() => []);
-  if (scopes.length) expRows = expRows.filter(e => !e.branch || scopes.includes(e.branch));
-  paintMonth();
+/* الصلاحيات is live too, and it is NOT month-scoped, so it gets its own attach-once listener
+   instead of riding `unwatch` — that list is dropped and rebuilt on every month switch. */
+let expWatch = null;
+const watchExpiryOnce = () => (expWatch ||= new Promise((resolve) => {
+  let first = true;
+  db.watchExpiry((rows) => {
+    // a row with no branch predates branch stamping; it stays visible to everyone
+    expRows = scopes.length ? rows.filter(e => !e.branch || scopes.includes(e.branch)) : rows;
+    if (first) { first = false; resolve(); return; }
+    paintExpiry();
+  }).catch((e) => { console.error(e); expRows = []; resolve(); });
+}));
+
+// the months list and an open month are two screens over the same rows; repaint whichever is up
+function paintExpiry() {
+  if (!$("screen-expiry-month").hidden) paintMonth();
+  else if (tab === "expiry") renderList();
 }
+
+// kept as the name every caller already uses; the listener is what actually repaints
+const reloadExpiry = () => watchExpiryOnce();
 
 const expiryRows = (rows) => [
   ["الفرع", "الباركود", "اسم الصنف", "الكمية", "تاريخ الصلاحية", "الحالة", "الموظف"],

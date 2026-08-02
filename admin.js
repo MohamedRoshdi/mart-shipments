@@ -96,6 +96,22 @@ const statusRow = (label, value, cls = "") =>
   `<li class="${cls}"><div class="card-main"><div class="card-title">${esc(label)}</div>
     <div class="meta">${esc(value)}</div></div></li>`;
 
+/* The day's allowance, as a bar. Google does not let a client read the project's own counters,
+   so this is what THIS device spent — the row says so, because a number that looks shop-wide and
+   is not would be worse than no number. It is still the answer to «مين صرف الحصة؟»: open it on
+   the laptop that did the importing and the writes are there. */
+const bar = (label, used, cap, note) => {
+  const pct = Math.min(100, Math.round((used / cap) * 100));
+  const cls = pct >= 90 ? "st-bad" : pct >= 60 ? "st-warn" : "st-ok";
+  return `<li class="${cls}"><div class="card-main">
+      <div class="card-title">${esc(label)}</div>
+      <!-- «من», never «/»: a slash between two numbers inside an RTL line flips which one reads first -->
+      <div class="meta">${used.toLocaleString("en-US")} من ${cap.toLocaleString("en-US")} · ${pct}٪</div>
+      <div class="meta">${esc(note)}</div>
+      <div class="quota-bar"><span style="inline-size:${pct}%"></span></div>
+    </div></li>`;
+};
+
 let productCount = null;             // filled only when the owner asks for it, never on open
 
 // the day's allowance, in the words the shop would use. A spent quota does not FAIL a write —
@@ -121,11 +137,17 @@ function renderStatus() {
   const cfg = window.APP_CONFIG;
   const [quota, quotaCls] = quotaLine();
   const stamps = Object.entries(cfg.filesMeta || {});
+  const u = db.usage();
   $("status-list").innerHTML = [
     statusRow("الاتصال بالإنترنت",
       navigator.onLine ? "متصل" : "مفيش اتصال — الشغل بيتحفظ على الجهاز لحد ما يرجع",
       navigator.onLine ? "st-ok" : "st-bad"),
     statusRow("الحصة اليومية المجانية", quota, quotaCls),
+    bar("الحفظ النهارده (من الجهاز ده)", u.writes, db.QUOTA.writes,
+      "كل صنف بيتحفظ لوحده، فاستيراد ملف الأصناف كامل بياخد حوالي ١٠ آلاف"),
+    bar("القراءة النهارده (من الجهاز ده)", u.reads, db.QUOTA.reads,
+      "أول مرة تدوّر باسم بتنزّل الكتالوج كله مرة واحدة على الجهاز"),
+    statusRow("الحصة بترجع", "كل يوم الساعة ١٠ صباحًا بتوقيت مصر"),
     statusRow("نسخة التطبيق على الجهاز ده", versionLine()),
     statusRow("المستخدمين", `${(cfg.users || []).length} مستخدم`),
     statusRow("الفروع", (cfg.branches || []).map(b => b.name).join(" · ") || "—"),
@@ -853,6 +875,26 @@ $("btn-wipe-products").onclick = async () => {
 const LOG_PAGE = 100;
 let logLimit = LOG_PAGE;
 
+/* A one-line explanation under the rows whose NAME does not say enough — and only those. «حذف
+   شحنة» explains itself; «تعديل صلاحيات» does not (in this app it is expiry dates, not user
+   permissions — the same Arabic word), and «تحميل شحنة» reads like a download when it is the
+   receipt that somebody took the shipment into the shop's own system. Anything not listed here
+   gets no note on purpose: a line under every row is a wall, and the wall is what stops being read. */
+const ACTION_NOTE = {
+  "تحميل شحنة": "المدير نزّل ملف الشحنة — يعني اتاخدت على نظام المحل، والشحنة بتختفي من شاشة الموظف",
+  "إعادة تحميل شحنة": "شحنة كان حد تاني حمّلها قبل كده واتحمّلت تاني",
+  "تم الاستيراد في النظام": "نظام المحل فعلاً قرأ الملف — دي آخر مرحلة للشحنة",
+  "تعديل صلاحيات": "تواريخ صلاحية أصناف على الرف — مالهاش أي علاقة بصلاحيات المستخدمين",
+  "حذف صلاحية": "صنف اتشال من قايمة تواريخ الصلاحية",
+  "استيراد أصناف": "ملف الأصناف — المرجع الأساسي للأسماء والوحدات والأسعار. بيتحفظ صنف صنف",
+  "استيراد كميات الجرد": "ملف جرد فرع — بيحدّث الكمية اللي النظام شايفها في الفرع ده وبس",
+  "تغيير الإعدادات": "أي حفظ من صفحة النظام: المستخدمين والفروع والموردين والأرقام السرية",
+  "حذف بالجملة": "مسح مجموعة شحنات أو جرد مرة واحدة بالفرع والتاريخ",
+  "مسح ملف الأصناف": "مسح الكتالوج كله من السيرفر — أخطر عملية في البرنامج",
+  "رفع قالب طباعة": "ملف قالب من برنامج الطباعة اتحط في مجلد القوالب",
+  "حذف قالب طباعة": "قالب اتشال من مجلد القوالب",
+};
+
 async function loadLogs() {
   $("logs-count").textContent = "بنجيب آخر العمليات...";
   $("logs-list").innerHTML = "";
@@ -863,6 +905,7 @@ async function loadLogs() {
         <div class="card-title">${esc(r.action)}</div>
         <div class="meta">${esc(r.target)}</div>
         <div class="meta">${esc(r.who)} · ${esc(fmtWhen(r.at))}</div>
+        ${ACTION_NOTE[r.action] ? `<div class="note">${esc(ACTION_NOTE[r.action])}</div>` : ""}
       </div>
     </li>`).join("")
     // a full page means there is probably more behind it; a short one is the end of the trail

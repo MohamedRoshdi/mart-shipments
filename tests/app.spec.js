@@ -2712,6 +2712,34 @@ test('the employee home shows today only, and a loaded shipment leaves it', asyn
   // and the manager still sees all of it — nothing was deleted
   const kept = await page.evaluate(() => JSON.parse(localStorage.getItem('test-shipments')).length);
   expect(kept).toBe(3);
+
+  /* …and the same screen is LIVE (the owner, 2026-08-02: he edits on the laptop and the phone
+     keeps showing the old thing). The manager marking it «تم تحميلها» on another device takes the
+     row off this phone with nobody reloading anything. */
+  await page.evaluate(() => {
+    const all = JSON.parse(localStorage.getItem('test-shipments'));
+    all[0].loadedBy = 'المدير'; all[0].loadedAt = Date.now();
+    localStorage.setItem('test-shipments', JSON.stringify(all));
+    dispatchEvent(new StorageEvent('storage', { key: 'test-shipments' }));   // = another device
+  });
+  await expect(page.locator('#my-shipments li.empty')).toBeVisible();
+});
+
+/* الصلاحيات is live for the same reason, and it is the harder case: a date typed on another phone
+   has to reach both the months list and an open month. */
+test('الصلاحيات: a row saved on another device reaches the open screen', async ({ page }) => {
+  await openExpiry(page, [EXP_ROWS[0]]);
+  const before = await page.locator('#exp-months li').count();
+  await page.evaluate(() => {
+    const all = JSON.parse(localStorage.getItem('test-expiry') || '[]');
+    all.push({ _id: 'live1', barcode: '222', name: 'زبادي', qty: 4,
+      day: 20, month: 12, year: new Date().getFullYear() + 1, branch: 'فرع قويسنا',
+      createdBy: 'أحمد', createdAt: Date.now() });
+    localStorage.setItem('test-expiry', JSON.stringify(all));
+    dispatchEvent(new StorageEvent('storage', { key: 'test-expiry' }));
+  });
+  await expect(page.locator('#exp-months li')).toHaveCount(before + 1);
+  await expect(page.locator('#exp-months')).toContainText('ديسمبر');
 });
 
 /* «استبدالها بالكامل» (the owner's daily-files spec, 2026-08-01): a header-driven catalog file
@@ -2807,6 +2835,48 @@ test('admin: the status screen reads the system without touching the server', as
   await page.click('#btn-count-products');
   await expect(page.locator('#toast')).toContainText('2 صنف في السيرفر');
   await expect(page.locator('#status-list')).toContainText('2 صنف');
+});
+
+/* The day's allowance as a bar (the owner, 2026-08-02: «can u show the usage of the daily
+   limits»). Google gives a client no access to the project's own counters, so the number is what
+   THIS device spent — and the row has to say so, or a per-device number reads as a shop-wide one. */
+test('admin: the status screen shows the day\'s usage as a bar, per device', async ({ page }) => {
+  await signOut(page);
+  await page.goto('/admin.html?test=1');
+  await page.evaluate(() => {
+    const day = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+    localStorage.setItem('usage', JSON.stringify({ day, reads: 5000, writes: 19000 }));
+  });
+  await openAdmin(page, 'screen-status');
+  await expect(page.locator('#status-list')).toContainText('الحفظ النهارده (من الجهاز ده)');
+  await expect(page.locator('#status-list')).toContainText('19,000 من 20,000');
+  await expect(page.locator('#status-list')).toContainText('5,000 من 50,000');
+  await expect(page.locator('#status-list')).toContainText('كل يوم الساعة ١٠ صباحًا بتوقيت مصر');
+  // 95% of the writes is a red bar, 10% of the reads is a green one — colour AND the number
+  await expect(page.locator('#status-list li.st-bad .quota-bar > span')).toHaveCSS('background-color', 'rgb(201, 48, 44)');
+  await expect(page.locator('#status-list li.st-ok .quota-bar > span').first())
+    .toHaveCSS('background-color', 'rgb(18, 133, 74)');
+  // yesterday's tally is not today's: a stale day reads as zero, never as the old number
+  await page.evaluate(() => localStorage.setItem('usage', JSON.stringify({ day: '2020-01-01', reads: 9, writes: 9 })));
+  await page.click('#btn-back');
+  await page.click('button[data-goto="screen-status"]');
+  await expect(page.locator('#status-list')).toContainText('0 من 20,000');
+});
+
+/* A note under the audit rows whose NAME does not say enough — and only those (the owner:
+   «only for the ambigious actions not save and edit and export»). «تعديل صلاحيات» is the one that
+   has to be there: in this app it means expiry dates, not user permissions. */
+test('admin: the audit trail explains only the actions whose name is ambiguous', async ({ page }) => {
+  await signOut(page);
+  await page.goto('/admin.html?test=1');
+  await page.evaluate(() => localStorage.setItem('test-logs', JSON.stringify([
+    { who: 'حسن', action: 'تعديل صلاحيات', target: '3 صنف', at: Date.now() },
+    { who: 'حسن', action: 'حذف شحنة', target: 'المراعي', at: Date.now() - 1000 },
+  ])));
+  await openAdmin(page);
+  await page.click('#btn-logs');
+  await expect(page.locator('#logs-list li').first()).toContainText('مالهاش أي علاقة بصلاحيات المستخدمين');
+  await expect(page.locator('#logs-list li').nth(1).locator('.note')).toHaveCount(0);
 });
 
 /* «عرض المزيد» (the owner, 2026-08-02): a list of hundreds is read a page at a time, and the

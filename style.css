@@ -424,6 +424,18 @@ li.more button { inline-size: 100%; padding-block: 14px; }
 #status-list li.st-ok { border-inline-start-color: var(--good); }
 #status-list li.st-warn { border-inline-start-color: var(--amber); }
 #status-list li.st-bad { border-inline-start-color: var(--bad); }
+/* the day's allowance as a bar. It fills from the start edge, so in RTL it grows right→left —
+   which is why the fill is a plain block child and not a `background-position` trick. */
+/* the explanation under an audit row: quieter than the row itself, and set off by a rule on the
+   start edge so the eye can skip every one of them at once. */
+.note {
+  font-size: .82rem; color: var(--ink-2); line-height: 1.6;
+  border-inline-start: 2px solid var(--line); padding-inline-start: 8px; margin-block-start: 2px;
+}
+.quota-bar { block-size: 6px; border-radius: 3px; background: var(--line); margin-block-start: 6px; overflow: hidden; }
+.quota-bar > span { display: block; block-size: 100%; background: var(--good); }
+#status-list li.st-warn .quota-bar > span { background: var(--amber-2); }
+#status-list li.st-bad .quota-bar > span { background: var(--bad); }
 .card-main { flex: 1; min-inline-size: 0; display: grid; gap: 4px; }
 /* A whole card that opens a screen. The list used to carry five buttons per row and read as a
    wall of controls; the card itself is the target now, and everything else lives on the screen

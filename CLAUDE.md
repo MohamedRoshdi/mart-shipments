@@ -526,6 +526,34 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   Cost: what the one-shot read already cost, plus one read per actual change — the watchConfig
   arithmetic. In `?test=1` it relays the `storage` event, and the listener test dispatches a
   synthetic `StorageEvent` (same-tab writes never fire the real one).
+- **Every list a second device can change is LIVE — that is the whole list, not a sample**
+  (2026-08-02, the owner: «شوف الصح إن كله يسمع على كله»). Beyond the manager's shipments and
+  counts: the employee home (`feed()` in `app.js`, attached once per page life), الصلاحيات on both
+  pages, and مهام الطباعة. `db.watchExpiry` / `watchJobs` are `watchAll` — the plain-collection form
+  of `watchMonthly`. The catalog is the ONE deliberate exception: 10k docs, paged with a
+  `startAfter` cursor, and a product write already drops the local copy — a listener there would
+  fight the pagination for no gain. Converting a one-shot list into a listener does not cost more:
+  attaching costs the read the list already cost.
+  **`paintMonth()` had to become idempotent about leaving.** `history.back()` only lands on the
+  next tick, so a second paint in the same tick would see the month screen still up and go back
+  TWICE (caught by the test suite, both pages). Clearing `monthKey` is what makes leaving happen
+  once — the screen-hidden check alone is not enough.
+- **In `?test=1` a write must fire its own listener, and `lsPut` is why.** Firestore's onSnapshot
+  fires for THIS tab's writes; the browser's `storage` event is other-tab only. Every test-mode
+  collection write in `db.js` goes through `lsPut(key, val)`, which sets the item and dispatches
+  `ls-write`; `watchLsWith` listens for both. Without it a page would see another device's changes
+  and miss its own — the opposite of the real thing. `test-config` deliberately stays on plain
+  `setItem`: the admin page must not rebuild its screen from its own save.
+- **The day's allowance is metered on the device, and nowhere else.** Google gives a client no
+  access to the project's own counters (that is Cloud Monitoring), so `db.usage()` is what THIS
+  device spent, kept in `localStorage.usage` — no read, no write, nothing to clean up. Every
+  Firestore call in `db.js` goes through six local wrappers (`addDoc`/`setDoc`/`updateDoc`/
+  `deleteDoc`/`getDocs`/`getDoc`) plus `metered()` on each snapshot delivery, so the meter lives in
+  one place instead of on thirty call sites — **never call `fs.addDoc` and friends directly again**.
+  Deliveries with `snap.metadata.fromCache` are NOT counted: a cached read is not billed. The
+  bucket is the **Pacific** day (`quotaDay()`), because that is the clock the allowance resets on.
+  «حالة النظام» shows it as two bars and says «من الجهاز ده» on both — a per-device number that
+  looked shop-wide would be worse than no number.
 - **An empty price cell is «no price», never 0.** `Number("")` is `0`, and a stored 0 prints
   «0.00» on the shelf label — the real catalog file carries 25 such rows (measured 2026-08-02).
   `productRow` in `manager.js` maps an empty price cell to `NaN`, which `saveProductName` drops.
@@ -684,7 +712,15 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   it. The one server number (`countProducts`, a count aggregation = 1 read) sits behind a button.
   `db.dbError()` is the last `db-error` detail, and `resource-exhausted` is named in the shop's
   words: a spent allowance does not fail a write, it makes it WAIT, which is why «الحفظ بيتأخر»
-  is the symptom the owner reports rather than an error.
+  is the symptom the owner reports rather than an error. The two usage bars come from `db.usage()`,
+  which is localStorage — so the screen is still free to open.
+- **The audit trail explains only the rows whose NAME does not say enough** (the owner, 2026-08-02:
+  «only for the ambigious actions not save and edit and export»). `ACTION_NOTE` in `admin.js` maps
+  twelve action names to one Arabic line each; anything not in the map renders no note, on purpose —
+  a line under every row is a wall, and a wall stops being read. The one that must never be dropped
+  is «تعديل صلاحيات»: in this app it means expiry DATES, not user permissions, and the Arabic word
+  is the same. «تحميل شحنة» is the other: it reads like a download and is actually the receipt that
+  somebody took the shipment into the shop's own system.
 - **Every long list pages with «عرض المزيد», and the button says where you are.** `shownOf` in
   `manager.js` holds the row count per list, `moreRow()` renders the button AS the last `<li>` (no
   new markup, no new handler — the list's own `onclick` gets the tap through `onMore`), and any
@@ -786,6 +822,7 @@ OUT=/tmp/shots BASE=http://localhost:8080 node scripts/shots-expiry.mjs   # home
 OUT=/tmp/shots BASE=http://localhost:8080 node scripts/shots-all.mjs      # all 16 screens, the visual reference set
 OUT=/tmp/shots BASE=http://localhost:8080 node scripts/shots-dash.mjs    # the manager's daily screen: the four counters and all three ERP states, phone + 1440px. Its fixtures use MINUTE offsets on purpose — hour-scale ones run at 00:30 put "today" in yesterday and the counters look wrong when they are right
 OUT=/tmp/shots BASE=http://localhost:8080 node scripts/shots-wide.mjs    # the ONLY check of the 1100px breakpoint and the toast colours (exits 1 if the manager list is still one column at 1440px) — shots-all.mjs is phone-width only
+OUT=/tmp/shots BASE=http://localhost:8080 node scripts/shots-status.mjs  # «حالة النظام» with a real day's usage on the two bars, and «آخر العمليات» with its notes (exits 1 if a bar or a note went missing)
 OUT=/tmp/shots BASE=http://localhost:8080 node scripts/shots-search.mjs   # the name search on all three modes
 OUT=/tmp/shots BASE=http://localhost:8080 node scripts/shots-supplier.mjs # the supplier list, admin side and employee side
 OUT=/tmp/shots BASE=http://localhost:8080 node scripts/shots-label.mjs    # ليبل الرف + prints 3 copies to PDF and measures the page (exits 1 if the paper is wrong)
