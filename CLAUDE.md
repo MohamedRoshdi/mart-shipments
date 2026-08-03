@@ -454,6 +454,16 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   never bound — the code admin PIN stays the way back in.
 - **`device` must survive a settings save.** `admin.js` builds the payload key by key, so any
   new user field has to be copied there or every save silently unbinds every user.
+- **`claimDevice` sends the WHOLE users list back, so it must never build it from a cached read**
+  (2026-08-03). It `getDoc`s `config/app`, patches the one account, and writes `{ users }` — and
+  `getDoc` resolves out of the offline cache perfectly happily, so a phone signing in with a stale
+  copy would replace the real list with it. Guarded now: `snap.metadata.fromCache` → return, because
+  binding a phone can wait for a connection and a lost account cannot be undone (the PINs are stored
+  nowhere else). Measured the same day: an online `getDoc` reports `fromCache: false`, twice, so the
+  guard does not block a healthy sign-in. It also **writes an audit row now** («ربط جهاز»): it was
+  the one write to that list that left no trace, and the list has been lost three times
+  (2026-07-31, 08-01, and again 08-03 08:28:14Z — 3 users down to 1, with NO audit row for it, so
+  it did not come from the settings screen). One row per account per phone, a handful ever.
 - **Branch scope is a list, never a single value.** `manager.js` keeps `scopes`: empty = every
   branch (filter chips show all), one = the chip is locked and the title becomes that branch,
   several = chips are `الكل` plus that subset. The employee page mirrors it with
@@ -976,6 +986,11 @@ debounce, or it reports false negatives.
 - App: https://mohamedroshdi.github.io/mart-shipments/
 - Manager: https://mohamedroshdi.github.io/mart-shipments/manager.html
 - Admin: https://mohamedroshdi.github.io/mart-shipments/admin.html (PIN `7007` in the code)
+- **The users list dropped 3 → 1 at 2026-08-03T08:28:14Z** (`config/app.updateTime`, REST). Only
+  حسن الجندى survives, unbound, 13 perms, فرع قويسنا. **No audit row for it** — the last logged
+  save is 2026-08-02T10:50:55Z and it said «2 مستخدم», so today's two changes to that list both
+  came from outside the settings screen. Cause not determined; `claimDevice` was the only unlogged
+  writer and is now both guarded and logged, so a fourth loss will name itself.
 - Production had 3 real users — **the list is EMPTY since 2026-08-01T12:55Z**: the audit trail
   shows two «تغيير الإعدادات … 0 مستخدم» saves by «الأدمن» right after the suppliers/logo
   re-upload, so the accounts were deleted in the admin working copy and saved (not a quota

@@ -663,11 +663,22 @@ export async function claimDevice(pin, device) {
     }
     await live();
     const snap = await getDoc(fs.doc(dbRef, 'config', 'app'));
+    /* THE WHOLE LIST goes back, so the copy it was built from has to be the server's. `getDoc`
+       resolves out of the offline cache just as readily, and this write carries no audit row —
+       a phone signing in with a week-old cached list would silently replace the real one with it,
+       and nothing in «آخر العمليات» would ever say so. Binding a device can wait for a connection;
+       losing the accounts cannot be undone, because the PINs are stored nowhere else. */
+    if (snap.metadata && snap.metadata.fromCache) return;
     const stored = snap.exists() ? snap.data() : null;
     if (!stored || !Array.isArray(stored.users)) return;   // users only live in the code config
-    if (!stored.users.some((u) => u.pin === pin && !u.device)) return;
+    const mine = stored.users.find((u) => u.pin === pin && !u.device);
+    if (!mine) return;
     const users = stored.users.map((u) => (u.pin === pin && !u.device ? { ...u, device } : u));
     await updateDoc(fs.doc(dbRef, 'config', 'app'), { users });
+    /* Every write that touches the users list has to be explainable. This was the ONE that was
+       not: the list has been lost three times in production (2026-07-31, 08-01, 08-03) and «آخر
+       العمليات» could only account for the saves. One row per account per phone — a handful, ever. */
+    logAction(mine.name, 'ربط جهاز', `${mine.name} · ${users.length} مستخدم`);
   } catch (e) {
     console.error(e);
   }
