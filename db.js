@@ -618,7 +618,17 @@ export async function watchConfig(onChange) {
     return () => removeEventListener('storage', relay);
   }
   await live();
-  return fs.onSnapshot(fs.doc(dbRef, 'config', 'app'),
+  /* `includeMetadataChanges` is what makes `fromCache` usable AT ALL, and leaving it out shipped a
+     real bug (measured on the deployed site 2026-08-03, and on the owner's phone before that).
+     By default onSnapshot suppresses a delivery whose only change is metadata — so on a device
+     whose cache is WARM the sequence is: deliver the cached doc (`fromCache: true`), sync with the
+     server, find the document unchanged, and say NOTHING. `cfgFromServer` then stays false for
+     ever: the admin's «حفظ الإعدادات» is locked on every load after the first, and the manager's
+     nightly auto-import never runs. A fresh profile hides it completely — its first delivery comes
+     from the server — which is why every check passed. With the flag, the cache→server transition
+     is delivered too, and it costs no extra READ: the cached one meters 0, the server one is the
+     read the listener was always going to make. */
+  return fs.onSnapshot(fs.doc(dbRef, 'config', 'app'), { includeMetadataChanges: true },
     (snap) => {
       meter('reads', billed(snap) ?? 1);
       onChange(snap.exists() ? snap.data() : {}, !!(snap.metadata && snap.metadata.fromCache));

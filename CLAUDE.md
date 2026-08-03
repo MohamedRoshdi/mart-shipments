@@ -643,7 +643,16 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   reaches a phone in seconds. **It is the ONLY read of that doc** (2026-08-03): all three pages
   used to call `getConfig()` and then attach the listener, paying twice for the same document on
   every page load, and boot now awaits the listener's first delivery instead. The second callback
-  argument, `fromCache`, is what made that safe — and it fixed a lie: `getDoc` resolves out of the
+  argument, `fromCache`, **only works because the listener asks for `{ includeMetadataChanges:
+  true }`** — leave that out and a snapshot whose only change is metadata is suppressed, so a
+  device with a WARM cache is delivered the cached doc and then nothing at all when the server
+  confirms it. `cfgFromServer` stays false for ever: «حفظ الإعدادات» locked on every load after the
+  first, the auto-import never running, and a red «مقدرناش نقرا الإعدادات» on a perfectly healthy
+  phone. It shipped in 1.0.93 and reached the owner, because **every check used a fresh profile**,
+  whose first delivery comes from the server. `scripts/warm-cache.mjs` loads the admin page three
+  times in ONE profile and exits 1 if any load leaves the save button locked — a `?test=1` test
+  cannot see this at all, since there `watchConfig` is a localStorage relay that always says
+  `fromCache: false`. `fromCache` is what made dropping getConfig safe — and it fixed a lie: `getDoc` resolves out of the
   offline cache perfectly happily, so `cfgFromServer` (the flag that unlocks a `saveConfig`, which
   REPLACES the whole doc, and the flag that lets `autoImportFiles` run) could be set true by a copy
   that never touched the server. That is the exact shape of the accident that emptied the users
@@ -949,6 +958,9 @@ OUT=/tmp/shots BASE=http://localhost:8080 node scripts/shots-all.mjs      # all 
 # the SHOP LAPTOP: every screen of the three pages at W px (default 1280), and it measures rather
 # than just photographing — a crushed card text block, an over-stretched field or any sideways
 # overflow exits 1. Run it at 1280 and again at W=1440 after any layout change.
+# the admin page three times in ONE browser profile: a warm Firestore cache must not lock «حفظ
+# الإعدادات». No ?test=1 test can see this — there watchConfig always reports fromCache:false.
+BASE=http://localhost:8080 node scripts/warm-cache.mjs
 OUT=/tmp/shots-desktop BASE=http://localhost:8080 node scripts/shots-desktop.mjs
 W=1440 OUT=/tmp/shots-desktop-1440 BASE=http://localhost:8080 node scripts/shots-desktop.mjs
 OUT=/tmp/shots BASE=http://localhost:8080 node scripts/shots-dash.mjs    # the manager's daily screen: the four counters and all three ERP states, phone + 1440px. Its fixtures use MINUTE offsets on purpose — hour-scale ones run at 00:30 put "today" in yesterday and the counters look wrong when they are right
