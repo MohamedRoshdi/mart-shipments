@@ -447,29 +447,91 @@ export async function listAllProducts() {
 /* ---------- catalog index: what makes a mid-word search possible ---------- */
 
 const INDEX_KEY = 'catalogIndex';
-const INDEX_TTL = 7 * 24 * 60 * 60 * 1000;   // a week; a product write on this phone drops it too
+// A month, not a week: the filesMeta stamp (dropCatalogIndexIfOlder) is the real invalidation —
+// it reaches every phone within seconds of an import — so the TTL is only the safety net for a
+// stamp that never arrives. At 7 days it was itself a 10k-read event, four times a month per phone.
+const INDEX_TTL = 30 * 24 * 60 * 60 * 1000;
 let indexRows = null;                        // parsed once per page, not once per keystroke
+let indexAt = 0;                             // when the copy in memory was built (epoch ms)
 
-// Firestore only answers prefix queries, so «لبن» would never find «جهينة لبن». The whole
-// catalog is pulled once per phone instead (one full read, then nothing for a week) and searched
-// here. Kept in localStorage so a reload is free; a phone that cannot store it keeps the copy in
-// memory for the session.
-export async function catalogIndex() {
-  if (TEST_MODE) return dedupeZeros(await listProducts());
-  if (indexRows) return indexRows;
-  try {
-    const cached = JSON.parse(localStorage.getItem(INDEX_KEY) || 'null');
+/* The copy lives in IndexedDB, not localStorage. Serialized, the shop's real catalog is
+   ~1.5M chars — and localStorage accounts in UTF-16, so that is ~2.9MB of a ~5MB origin quota
+   (measured 2026-08-03 from the real export, both branch keys on). setItem over the cap throws,
+   the catch swallowed it, and the copy then silently never persisted — every page open that
+   searched became a fresh 10,061-read pull. A phone in that state is the best candidate for the
+   141k-read day measured 2026-08-03 (14 full pulls on one device). IndexedDB has no such cap at
+   this size, and a failure still falls back to the in-memory copy, same as before. */
+const IDB_STORE = 'kv';
+function idbOpen() {
+  return new Promise((res, rej) => {
+    const r = indexedDB.open('mart-cache', 1);
+    r.onupgradeneeded = () => r.result.createObjectStore(IDB_STORE);
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+}
+function idbReq(mode, op) {
+  return idbOpen().then((db) => new Promise((res, rej) => {
+    const req = op(db.transaction(IDB_STORE, mode).objectStore(IDB_STORE));
+    req.onsuccess = () => { res(req.result); db.close(); };
+    req.onerror = () => { rej(req.error); db.close(); };
+  }));
+}
+const idbGet = (key) => idbReq('readonly', (s) => s.get(key));
+const idbSet = (key, val) => idbReq('readwrite', (s) => s.put(val, key));
+const idbDel = (key) => idbReq('readwrite', (s) => s.delete(key));
+
+// One IDB write per burst, not one per row: an import patches thousands of rows in a loop, and
+// re-serializing ~1.6MB per row would make persisting the copy cost more than building it.
+let persistTimer = null;
+function idxPersist() {
+  clearTimeout(persistTimer);
+  persistTimer = setTimeout(() => {
+    if (indexRows) idbSet(INDEX_KEY, { at: indexAt, rows: indexRows }).catch((e) => console.error(e));
+  }, 1000);
+}
+
+// memory → IDB → the legacy localStorage copy (migrated forward, so no phone rebuilds on update)
+let idxLoading = null;
+function idxLoad() {
+  return (idxLoading ||= (async () => {
+    if (indexRows) return indexRows;
+    let cached = null;
+    try { cached = await idbGet(INDEX_KEY); } catch (e) { console.error(e); }
+    if (!cached) {
+      try { cached = JSON.parse(localStorage.getItem(INDEX_KEY) || 'null'); } catch { cached = null; }
+      if (cached) { localStorage.removeItem(INDEX_KEY); }
+    }
     if (cached && Array.isArray(cached.rows) && Date.now() - cached.at < INDEX_TTL) {
       // the copy on THIS phone may predate the sweep, so it is de-duplicated on the way out too
       indexRows = dedupeZeros(cached.rows);
+      indexAt = cached.at;
+      idxPersist();                          // the migrated / deduped form is what survives
       return indexRows;
     }
-  } catch (e) { console.error(e); }
+    return null;
+  })().finally(() => { idxLoading = null; }));
+}
+
+// Firestore only answers prefix queries, so «لبن» would never find «جهينة لبن». The whole
+// catalog is pulled once per phone instead (one full read, then nothing for a month) and
+// searched here. Persisted in IndexedDB so a reload is free; a phone that cannot store it
+// keeps the copy in memory for the session.
+export async function catalogIndex() {
+  if (TEST_MODE) return dedupeZeros(await listProducts());
+  if (indexRows) return indexRows;
+  const cached = await idxLoad();
+  if (cached) return cached;
   indexRows = dedupeZeros(await listAllProducts());
-  try {
-    localStorage.setItem(INDEX_KEY, JSON.stringify({ at: Date.now(), rows: indexRows }));
-  } catch (e) { console.error(e); }          // over the storage quota: the memory copy still serves
+  indexAt = Date.now();
+  idxPersist();
   return indexRows;
+}
+
+// what «حالة النظام» prints about this machine's copy — db.js owns where it lives (rule 5)
+export async function indexInfo() {
+  const rows = indexRows || await idxLoad().catch(() => null);
+  return rows ? { count: rows.length, at: indexAt } : null;
 }
 
 /* One product can never be two rows. The pre-2ad9ba2 imports stored codes with their leading
@@ -488,17 +550,48 @@ const dedupeZeros = (rows) => {
 
 export function dropCatalogIndex() {
   indexRows = null;
+  indexAt = 0;
+  clearTimeout(persistTimer);                // a drop must not lose to a persist already armed
   try { localStorage.removeItem(INDEX_KEY); } catch (e) { console.error(e); }
+  idbDel(INDEX_KEY).catch((e) => console.error(e));
+}
+
+/* One product changed on THIS phone: patch the one row in the copy instead of throwing away
+   10,061 of them. Dropping here was most of the read bill — every rename or per-row import
+   write made the very next search a full 10k pull. `patch: null` removes the row (a delete).
+   The copy is loaded from IDB if it is not in memory yet, so a rename made before the first
+   search still keeps the copy alive; only a phone with no copy at all has nothing to patch. */
+const mergedRow = (b, old, patch) => row(b, {
+  ...old, ...patch,
+  ...(patch.stock ? { stock: { ...(old.stock || {}), ...patch.stock } } : {}),
+});
+export async function patchCatalogIndex(barcode, patch) {   // exported for the test only
+  // no TEST_MODE guard: test-mode catalogIndex() reads test-products fresh and ignores the copy,
+  // so running the patch there is harmless — and it is the only way the suite can prove it
+  try {
+    const rows = indexRows || await idxLoad();
+    if (!rows) return;
+    const b = String(barcode);
+    const i = rows.findIndex((r) => String(r.barcode) === b);
+    if (patch === null && i >= 0) rows.splice(i, 1);
+    if (patch !== null) {
+      if (i >= 0) rows[i] = mergedRow(b, rows[i], patch);
+      else rows.push(mergedRow(b, {}, patch));
+    }
+    idxPersist();
+  } catch (e) { console.error(e); dropCatalogIndex(); }   // a failed patch must not leave a stale copy
 }
 
 /* The cross-phone half of freshness: an import stamps the config (one write), the config
    listener every page already runs carries the stamp here in seconds, and a local copy built
    before that import is dropped — so the next search re-pulls instead of serving last week's
-   names for up to the TTL. */
-export function dropCatalogIndexIfOlder(at) {
+   names for up to the TTL. The importing machine's own copy was patched row by row as it wrote,
+   so its copy is never OLDER than its own stamp — this only fires for a copy another machine's
+   import left behind. */
+export async function dropCatalogIndexIfOlder(at) {
   try {
-    const cached = JSON.parse(localStorage.getItem(INDEX_KEY) || 'null');
-    if ((cached && at > cached.at) || (!cached && indexRows)) dropCatalogIndex();
+    const rows = indexRows || await idxLoad();
+    if (rows && at > indexAt) dropCatalogIndex();
   } catch { dropCatalogIndex(); }
 }
 
@@ -567,7 +660,7 @@ export async function countProducts() {
 }
 
 export async function deleteProduct(barcode) {
-  dropCatalogIndex();
+  patchCatalogIndex(barcode, null);          // remove the one row; never throw away the copy
   if (TEST_MODE) {
     const map = lsObj('test-products');
     delete map[barcode];
@@ -779,7 +872,7 @@ export async function saveProductRow(barcode, qty, branch) {
 }
 
 async function writeProduct(barcode, patch) {
-  dropCatalogIndex();               // this phone's search copy is now behind the catalog
+  patchCatalogIndex(barcode, patch); // keep this phone's search copy current instead of killing it
   if (TEST_MODE) {
     const map = lsObj('test-products');
     const old = prodOf(map[barcode]);

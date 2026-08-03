@@ -561,7 +561,8 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   part of it. And `listAllProducts()` in `?test=1` must NOT delegate to `listProducts()`: that is a
   PAGE now, and an import diff run against one page would offer to delete everything past row 50.
   **What is deliberately still unbounded**: `listAllProducts()` (import diff + export),
-  `catalogIndex()` (once per phone per 7 days), and the manager's month/pending views — the last
+  `catalogIndex()` (once per phone per 30 days at most — writes patch the copy, they no longer
+  drop it), and the manager's month/pending views — the last
   one because the «معلّقة» counter needs every unfinished shipment and Firestore cannot query for
   a MISSING field, so bounding it would mean storing the state as a column. Since the list became a
   listener it costs its window once per page load, not per screen switch.
@@ -815,9 +816,9 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   (cards in columns, `.actions` auto-fill from 760px) while the scanner, the item sheet and the
   camera preview keep the phone column they are designed around.
 - **«حالة النظام» (`#screen-status`, admin) costs nothing to open, on purpose.** Every line comes
-  from what is already in memory — the merged config, `versionLine()`, this machine's own
-  `catalogIndex` — so the screen that explains a spent quota can never be the thing that spends
-  it. The one server number (`countProducts`, a count aggregation = 1 read) sits behind a button.
+  from what is already on the machine — the merged config, `versionLine()`, this machine's own
+  catalog copy (`db.indexInfo()`, an IndexedDB read, no server) — so the screen that explains a
+  spent quota can never be the thing that spends it. The one server number (`countProducts`, a count aggregation = 1 read) sits behind a button.
   `db.dbError()` is the last `db-error` detail, and `resource-exhausted` is named in the shop's
   words: a spent allowance does not fail a write, it makes it WAIT, which is why «الحفظ بيتأخر»
   is the symptom the owner reports rather than an error. The two usage bars are the shop-wide
@@ -896,13 +897,24 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   so the padded one always wins.
 - **Search matches the middle of a name, and that is why the catalog is cached.** Firestore
   answers prefix queries only, so `db.catalogIndex()` pulls the whole catalog once per phone
-  into `localStorage.catalogIndex` (7-day TTL, memoised in `indexRows`) and `searchProducts`
-  matches over it: name-prefix and barcode-prefix hits first, then anything containing the
-  term, `HITS = 50`. `norm()` folds أ/إ/آ→ا, ة→ه, ى→ي and strips tatweel/harakat, so a phone
-  keyboard reaches every row. The server prefix query stays as the fallback for a term the
-  local copy has never seen. **The price is one full read (10,043 docs measured 2026-07-30)
-  per phone per week** against a 50k/day quota — that is why `writeProduct`/`deleteProduct`
-  call `dropCatalogIndex()` instead of anything refreshing on a timer.
+  (memoised in `indexRows`) and `searchProducts` matches over it: name-prefix and barcode-prefix
+  hits first, then anything containing the term, `HITS = 50`. `norm()` folds أ/إ/آ→ا, ة→ه, ى→ي
+  and strips tatweel/harakat, so a phone keyboard reaches every row. The server prefix query
+  stays as the fallback for a term the local copy has never seen.
+- **A product write PATCHES the copy — dropping it was the read bill** (2026-08-03: 172,098 reads
+  against the 50k/day quota, 141,132 on one phone ≈ 14 full pulls, while writes were 532 of 20k).
+  `patchCatalogIndex(barcode, patch)` in `db.js` updates the one row (`null` = remove) in memory
+  AND in the persisted copy; `writeProduct`/`deleteProduct` call it instead of `dropCatalogIndex()`.
+  The copy lives in **IndexedDB (`mart-cache`/`kv`), not localStorage**: serialized it is ~1.5M
+  chars ≈ 2.9MB in localStorage's UTF-16 accounting (measured from the real export) — `setItem`
+  over the cap throws, the catch swallowed it, and a phone in that state re-pulled 10k docs on
+  every page open that searched. A legacy `localStorage.catalogIndex` is migrated forward on first
+  load. Persisting is **debounced 1s** (an import patches thousands of rows; one IDB write per
+  burst, not per row), TTL is **30 days** — the `filesMeta` stamp (`dropCatalogIndexIfOlder`,
+  now async) is the real invalidation, the TTL only a safety net. «حالة النظام» reads the copy
+  through `db.indexInfo()`; nothing outside `db.js` touches the storage. The suite proves the
+  patch path directly («a product write patches the local index…») because it never touches
+  Firestore — only test-mode `catalogIndex()` ignores the copy, so the assertion reads IDB.
 
 ## Commands
 
@@ -1085,11 +1097,12 @@ debounce, or it reports false negatives.
   edited or removed once written.
 - `scripts/live-admin.mjs` leaves one audit row behind on purpose: the rules forbid deleting
   audit rows, so a live check of that collection cannot clean up after itself.
-- Catalog search reads a **copy of the catalog taken up to 7 days ago** (`localStorage.catalogIndex`).
+- Catalog search reads a **copy of the catalog taken up to 30 days ago** (IndexedDB
+  `mart-cache`/`kv`, key `catalogIndex`; the import stamp invalidates it much sooner in practice).
   A product added from another phone is findable by scanning its barcode immediately — that is a
   direct doc read — but by name only after this phone refreshes the copy, or through the server
-  prefix fallback when the local copy returns nothing. Any product write on the phone drops the
-  copy at once.
+  prefix fallback when the local copy returns nothing. A product write on THIS phone patches its
+  own copy at once.
 - **A full catalog sweep is ~10k READS, and three of them in one afternoon spend the day.**
   Measured 2026-08-02: the shop imported nothing all day (audit trail: one bulk delete, ~6 settings
   saves, one shipment load — a few hundred writes at most), yet the project was `resource-exhausted`

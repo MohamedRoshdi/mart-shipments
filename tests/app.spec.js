@@ -2858,14 +2858,55 @@ test('a catalog stamp newer than the local index drops it', async ({ page }) => 
   await page.goto('/?test=1');
   const r = await page.evaluate(async () => {
     const db = await import('./db.js');
-    localStorage.setItem('catalogIndex', JSON.stringify({ at: 1000, rows: [{ barcode: '1', name: 'x' }] }));
-    db.dropCatalogIndexIfOlder(999);                      // older stamp: the copy is still good
-    const kept = !!localStorage.getItem('catalogIndex');
-    db.dropCatalogIndexIfOlder(2000);                     // newer import: the copy is stale
-    const dropped = !localStorage.getItem('catalogIndex');
-    return { kept, dropped };
+    // the legacy localStorage spelling: idxLoad migrates it to IndexedDB and keeps serving it
+    const t0 = Date.now();
+    localStorage.setItem('catalogIndex', JSON.stringify({ at: t0, rows: [{ barcode: '1', name: 'x' }] }));
+    await db.dropCatalogIndexIfOlder(t0 - 1);             // older stamp: the copy is still good
+    const kept = !!(await db.indexInfo());
+    const migrated = !localStorage.getItem('catalogIndex');
+    await db.dropCatalogIndexIfOlder(t0 + 1);             // newer import: the copy is stale
+    const dropped = !(await db.indexInfo());
+    return { kept, migrated, dropped };
   });
-  expect(r).toEqual({ kept: true, dropped: true });
+  expect(r).toEqual({ kept: true, migrated: true, dropped: true });
+});
+
+/* The read bill of 2026-08-03 (141k on one phone): every rename or per-row import write called
+   dropCatalogIndex(), so the very next search re-pulled all 10,061 docs. A product write now
+   patches the ONE row in the copy instead — it stays alive, carries the change, and lands in
+   IndexedDB (debounced). The patch path never touches Firestore, so it runs the same in test
+   mode; only the assertion reads IDB directly, because test-mode catalogIndex() ignores the copy. */
+test('a product write patches the local index instead of dropping it', async ({ page }) => {
+  await page.goto('/?test=1');
+  const r = await page.evaluate(async () => {
+    const db = await import('./db.js');
+    const t0 = Date.now();
+    // the legacy localStorage spelling; the first patch migrates it forward
+    localStorage.setItem('catalogIndex', JSON.stringify({
+      at: t0,
+      rows: [{ barcode: '111', name: 'لبن', stock: { 'فرع قويسنا': 3 } }, { barcode: '222', name: 'جبنة' }],
+    }));
+    await db.patchCatalogIndex('111', { name: 'لبن كامل الدسم', price: 30 });   // a rename
+    await db.patchCatalogIndex('222', null);                                    // a delete
+    await db.patchCatalogIndex('333', { name: 'صنف جديد' });                    // a new product
+    const info = await db.indexInfo();
+    await new Promise((res) => setTimeout(res, 1300));    // the persist is debounced (1s)
+    const stored = await new Promise((res, rej) => {
+      const o = indexedDB.open('mart-cache', 1);
+      o.onsuccess = () => {
+        const req = o.result.transaction('kv').objectStore('kv').get('catalogIndex');
+        req.onsuccess = () => res(req.result);
+        req.onerror = () => rej(req.error);
+      };
+      o.onerror = () => rej(o.error);
+    });
+    return { info, rows: stored.rows.map((x) => [x.barcode, x.name, x.price ?? null, x.stock]) };
+  });
+  expect(r.info.count).toBe(2);
+  expect(r.rows).toEqual([
+    ['111', 'لبن كامل الدسم', 30, { 'فرع قويسنا': 3 }],   // renamed, priced, stock untouched
+    ['333', 'صنف جديد', null, {}],
+  ]);
 });
 
 /* «حالة النظام» (the owner, 2026-08-02, after asking why the daily allowance ran out): the screen

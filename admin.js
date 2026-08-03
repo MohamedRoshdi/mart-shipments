@@ -87,7 +87,11 @@ document.querySelector("#screen-admin .actions").onclick = (e) => {
   render(id);
   if (id === "screen-logs") loadLogs();
   if (id === "screen-btw") renderBtw().catch(console.error);
-  if (id === "screen-status") { renderStatus(); loadUsage().then(renderStatus).catch(console.error); }
+  if (id === "screen-status") {
+    renderStatus();
+    loadUsage().then(renderStatus).catch(console.error);
+    db.indexInfo().then((i) => { idxInfo = i; renderStatus(); }).catch(console.error);
+  }
 };
 
 // the status screen is the one place that must not sit on a stale verdict while it is open
@@ -186,12 +190,12 @@ function quotaLine() {
   return [`فيه مشكلة اتسجلت: ${err.message}`, "st-warn"];
 }
 
-// what this machine is holding for the name search, and how old it is
+// what this machine is holding for the name search, and how old it is. The copy moved to
+// IndexedDB (db.js owns where it lives), so it is fetched async and cached for the render.
+let idxInfo = null;
 function copyLine() {
-  let idx = null;
-  try { idx = JSON.parse(localStorage.getItem("catalogIndex") || "null"); } catch { idx = null; }
-  return idx && idx.rows
-    ? `${idx.rows.length} صنف · اتاخدت ${fmtWhen(idx.at)}`
+  return idxInfo
+    ? `${idxInfo.count} صنف · اتاخدت ${fmtWhen(idxInfo.at)}`
     : "مفيش نسخة — هتتاخد أول مرة تدوّر باسم";
 }
 
