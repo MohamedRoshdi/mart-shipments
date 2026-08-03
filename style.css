@@ -51,6 +51,10 @@ body { --center: max(var(--pad), calc((100% - var(--col)) / 2)); }
     gap: 12px;
     align-items: start;
   }
+  /* The catalog row is not a card to glance at, it is an EDIT row: a name field with «ليبل» and ×
+     beside it. At 320px the field collapses to about 190px and the line under it wraps three
+     times («... في / النظام: قويسنا 12»), so it needs a real width before splitting is a gain. */
+  body.wide #products-list { grid-template-columns: repeat(auto-fill, minmax(480px, 1fr)); }
 }
 
 /* A menu card stretched across a laptop is a banner with three words on it (the owner, 2026-08-02,
@@ -400,6 +404,9 @@ li {
   flex-wrap: wrap;
 }
 li.empty {
+  /* «مفيش عمليات مسجّلة» is a sentence about the whole list, not one card in a row of them — on a
+     laptop the wide lists are a grid, and it was sitting in the first column hugging one edge */
+  grid-column: 1 / -1;
   background: transparent;
   border: 1px dashed var(--line);
   box-shadow: none;
@@ -447,6 +454,13 @@ li.more button { inline-size: 100%; padding-block: 14px; }
 #status-list li.st-warn .quota-bar > span { background: var(--amber-2); }
 #status-list li.st-bad .quota-bar > span { background: var(--bad); }
 .card-main { flex: 1; min-inline-size: 0; display: grid; gap: 4px; }
+/* Inside a card the text reads ACROSS the card and the controls sit under it. On a phone that
+   happens by itself — nothing fits beside anything — but on a laptop the chip rows and the date
+   range do fit, and `.card-main` is left with whatever remains: measured 38px of a 1040px card on
+   the admin's «أدوات خطرة» (the owner's own screenshot, 2026-08-03), which put the description on
+   one word per line. `.row-actions` already declares `inline-size: 100%` for exactly this reason;
+   these are the siblings that were missing it. `scripts/shots-desktop.mjs` fails on a repeat. */
+li > .seg, li > .filter-row, li > .date-range, li > .perm-grid { flex: 1 0 100%; min-inline-size: 0; }
 /* A whole card that opens a screen. The list used to carry five buttons per row and read as a
    wall of controls; the card itself is the target now, and everything else lives on the screen
    it opens. Same chevron as the home cards, so "this opens" reads the same everywhere. */
@@ -682,7 +696,20 @@ body.sheet-open .bottombar { display: none; }
 .user-card { display: grid; gap: 10px; }
 .user-row { display: flex; gap: 8px; align-items: center; }
 .user-row input { flex: 1; }
-.perm-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+/* A branch name is a field, not a banner. On the shop laptop these rows stretched a one-word input
+   across the whole 1040px column and pushed its own × a thousand pixels away from the word it
+   deletes. 34rem is about forty characters. A max rather than a flex basis on purpose: `.user-card`
+   is a GRID, so a flex rule is inert there — this one caps the field in both layouts. Below 34rem
+   (every phone) nothing changes at all. */
+#branches-list .card-main, #types-list .card-main, #users-list .card-main { max-inline-size: 34rem; }
+/* and the card follows the field: a one-line row has nothing to fill 1040px with. The user card is
+   NOT capped — its permission chips are what the width is for. */
+#branches-list li, #types-list li { max-inline-size: 40rem; }
+#cfg-manager-pin, #cfg-admin-pin { max-inline-size: 14rem; }   /* a PIN is at most 8 digits */
+/* Ticks, not banners. A fixed two-column grid gives each permission half the card, which is a
+   ~500px black bar carrying one short Arabic word on a laptop; `auto-fill` keeps the phone at the
+   same two columns and lets a wide screen show six. */
+.perm-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
 .perm-grid button {
   background: var(--surface);
   border: 1px solid var(--line);

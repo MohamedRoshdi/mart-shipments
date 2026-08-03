@@ -828,6 +828,23 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   set is meaningless. The catalog is the one list whose next page may still be on the server:
   `moreProducts()` fetches it with a `startAfter(lastName)` cursor, deduping the boundary by
   barcode, and never while a search is showing. The audit trail raises its own server `limit`.
+- **The wide layout had never been looked at except the manager list, and it was broken**
+  (2026-08-03, the owner's own screenshots). Everything the reference set photographed was 412px,
+  so nothing caught: the admin's «أدوات خطرة» card fitting its three chip rows and its date range
+  BESIDE `.card-main`, squeezing the description to **38px of a 1040px card** — one word per line;
+  the permission ticks as a fixed 2-column grid, i.e. ~500px black banners carrying one Arabic
+  word; branch/type/user fields stretched across the whole column with their own × pushed a
+  thousand pixels from the word it deletes; the catalog's EDIT rows split into 320px columns so
+  the name field collapsed and its meta wrapped three times; and every `li.empty` sitting in the
+  first grid column instead of speaking for the list. The rules that fix them are all in
+  `style.css` next to their reason: `li > .seg, li > .filter-row, li > .date-range, li > .perm-grid
+  { flex: 1 0 100% }` (`.row-actions` already had `inline-size: 100%` for the same reason),
+  `.perm-grid` on `auto-fill minmax(150px, 1fr)`, `max-inline-size` on the settings fields,
+  `#products-list` at `minmax(480px, 1fr)`, and `li.empty { grid-column: 1 / -1 }`.
+  **`scripts/shots-desktop.mjs` is what keeps it true**: every screen of all three pages at
+  `W` (default 1280), and it MEASURES — a card wider than 500px whose text block is under 240px,
+  a one-line field over 620px, or any sideways page overflow exits 1. Run it at 1280 AND 1440
+  after any layout change; `shots-all.mjs` is still phone-only on purpose.
 - **The phone column widens, the employee screens do not.** `--col` is 520px, 680px at 760px wide,
   and 1040px at 1100px **only on `body.wide`** — which `manager.html` and `admin.html` carry and
   `index.html` deliberately does not: scanning and typing do not get better wide, and the camera
@@ -928,7 +945,12 @@ OUT=/tmp/shots node scripts/shot-live-manager.mjs # read-only: one shot of the l
 BASE=http://localhost:8087 node scripts/live-camera.mjs   # camera list/start/stop/fallback on a fake device
 OUT=/tmp/shots node scripts/shots.mjs            # local screenshots (needs the server above)
 OUT=/tmp/shots BASE=http://localhost:8080 node scripts/shots-expiry.mjs   # home + الصلاحيات screens
-OUT=/tmp/shots BASE=http://localhost:8080 node scripts/shots-all.mjs      # all 16 screens, the visual reference set
+OUT=/tmp/shots BASE=http://localhost:8080 node scripts/shots-all.mjs      # all 16 screens, the visual reference set (412px ONLY)
+# the SHOP LAPTOP: every screen of the three pages at W px (default 1280), and it measures rather
+# than just photographing — a crushed card text block, an over-stretched field or any sideways
+# overflow exits 1. Run it at 1280 and again at W=1440 after any layout change.
+OUT=/tmp/shots-desktop BASE=http://localhost:8080 node scripts/shots-desktop.mjs
+W=1440 OUT=/tmp/shots-desktop-1440 BASE=http://localhost:8080 node scripts/shots-desktop.mjs
 OUT=/tmp/shots BASE=http://localhost:8080 node scripts/shots-dash.mjs    # the manager's daily screen: the four counters and all three ERP states, phone + 1440px. Its fixtures use MINUTE offsets on purpose — hour-scale ones run at 00:30 put "today" in yesterday and the counters look wrong when they are right
 OUT=/tmp/shots BASE=http://localhost:8080 node scripts/shots-wide.mjs    # the ONLY check of the 1100px breakpoint and the toast colours (exits 1 if the manager list is still one column at 1440px) — shots-all.mjs is phone-width only
 OUT=/tmp/shots BASE=http://localhost:8080 node scripts/shots-status.mjs  # «حالة النظام» with a real day's usage on the two bars, and «آخر العمليات» with its notes (exits 1 if a bar or a note went missing)
