@@ -1,7 +1,7 @@
 // Removes anything a crashed run of live-expiry.mjs left on production: every expiry row and
 // every catalog row named «صنف صلاحية آلي». Safe to run twice; touches nothing else.
 // node scripts/live-expiry-cleanup.mjs
-import { chromium } from "@playwright/test";
+import { chromium, safeDialogs, openManagerPage } from "./live-browser.mjs";   // blocks service workers: a fresh profile's SW install reloads the page mid-run
 
 const BASE = process.env.BASE || "https://mohamedroshdi.github.io/mart-shipments";
 const NAME = "صنف صلاحية آلي";
@@ -9,17 +9,9 @@ const log = (...a) => console.log("[cleanup]", ...a);
 
 const browser = await chromium.launch();
 const page = await browser.newPage();
-page.on("dialog", (d) => d.accept());
+safeDialogs(page);          // accepts the ordinary confirms, REFUSES anything that deletes live rows
 
-async function openManager() {
-  await page.goto(BASE + "/manager.html", { waitUntil: "load" });
-  if (await page.locator("#screen-pin:not([hidden])").count()) {
-    await page.fill("#pin-input", "1994");
-    await page.click("#btn-pin");
-  }
-  await page.waitForSelector("#screen-manager:not([hidden])");
-  await page.waitForTimeout(3500);
-}
+const openManager = () => openManagerPage(page, BASE);
 
 await openManager();
 await page.click('#list-tabs button[data-tab="expiry"]');

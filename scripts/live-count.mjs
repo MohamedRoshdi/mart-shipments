@@ -1,7 +1,7 @@
 // Live check of الجرد against the real Firestore, through the UI only. Self-cleaning: the
 // product it counts is a temporary one it imports itself, so no catalog row of the shop is touched.
 // STAMP=$RANDOM node scripts/live-count.mjs
-import { chromium } from "@playwright/test";
+import { chromium, openTools, safeDialogs, openManagerPage } from "./live-browser.mjs";   // blocks service workers: a fresh profile's SW install reloads the page mid-run
 import { writeFileSync, readFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -12,6 +12,13 @@ const NAME = "صنف جرد آلي";
 const COUNT = "جرد فحص آلي " + process.env.STAMP;
 const log = (...a) => console.log("[live-count]", ...a);
 
+/* The stock sheet REPORTS a barcode the catalog does not know, it never creates it (2026-08-01),
+   so the product has to exist before its quantity can land. Headerless on purpose: an Arabic
+   header would make this a header-driven catalog import, i.e. a full 10k read plus a confirm
+   offering to delete everything this one row does not carry. */
+const catalog = join(tmpdir(), `cat-${CODE}.csv`);
+writeFileSync(catalog, `﻿${CODE},${NAME}\r\n`);
+
 const sheet = join(tmpdir(), `stock-${CODE}.csv`);
 writeFileSync(sheet, `﻿الباركود,اسم الصنف,الكمية\r\n${CODE},${NAME},10\r\n`);
 const sheet2 = join(tmpdir(), `stock2-${CODE}.csv`);      // the other branch's own sheet
@@ -20,17 +27,9 @@ writeFileSync(sheet2, `﻿الباركود,اسم الصنف,الكمية\r\n${C
 const browser = await chromium.launch();
 const page = await browser.newPage();
 page.on("pageerror", (e) => console.log("[pageerror]", e.message));
-page.on("dialog", (d) => d.accept());
+safeDialogs(page);          // accepts the ordinary confirms, REFUSES anything that deletes live rows
 
-async function openManager() {
-  await page.goto(BASE + "/manager.html", { waitUntil: "load" });
-  if (await page.locator("#screen-pin:not([hidden])").count()) {
-    await page.fill("#pin-input", "1994");
-    await page.click("#btn-pin");
-  }
-  await page.waitForSelector("#screen-manager:not([hidden])");
-  await page.waitForTimeout(3500);        // never networkidle: Firestore keeps a socket open
-}
+const openManager = () => openManagerPage(page, BASE);
 
 // a row that was just written needs the next read, not a fixed sleep
 async function waitFor(locator, ms = 20000) {
@@ -45,6 +44,10 @@ async function waitFor(locator, ms = 20000) {
 
 // 1. the stocktake sheet: barcode, name, system quantity — for one branch
 await openManager();
+await openTools(page);            // the branch chips live inside the folded toolbox now
+await page.setInputFiles("#import-file", catalog);        // the product first — see above
+await page.waitForTimeout(4000);
+log("0. catalog seed:", await page.locator("#toast").innerText());
 const BRANCH = await page.locator("#stock-branch button[data-stockbranch]").first().getAttribute("data-stockbranch");
 await page.click(`#stock-branch button[data-stockbranch="${BRANCH}"]`);
 await page.setInputFiles("#stock-file", sheet);
@@ -114,18 +117,22 @@ const row = page.locator(`#all-counts li:has-text("${COUNT}")`);
 log("6. count reached the manager:", await waitFor(row));
 log("7. manager row:", (await row.innerText()).replace(/\s+/g, " ").trim());
 
-// 5. Excel: in-system, counted, difference
+/* 5. Excel: in-system, counted, difference. Since 2026-07-31 a list card carries NO buttons —
+   the card IS the button, and نسخ / Excel / TXT / حذف live on the screen it opens. */
+await row.locator('button[data-cact="view"]').click();
+await page.waitForSelector("#screen-detail:not([hidden])");
 const dl = (await Promise.all([
   page.waitForEvent("download"),
-  row.locator('button[data-cact="download"]').click(),
+  page.click("#btn-download"),
 ]))[0];
 const csv = readFileSync(await dl.path(), "utf8");
 log("8. excel file:", dl.suggestedFilename());
 log("9. excel row:", csv.split("\r\n")[1]);
 log("10. excel has the difference column:", csv.includes('"في النظام","المعدود","الفرق"'));
 
-// 6. cleanup: the count, then the temporary product
-await row.locator('button[data-cact="del"]').click();
+// 6. cleanup: the count, then the temporary product. The export left us on the card screen, which
+// is where حذف lives now — there is no row button to click any more.
+await page.click("#btn-delete-detail");
 await page.waitForTimeout(3000);
 // the toast may still be showing the download message, so report the row itself
 log("11. row removed from the list:", (await row.count()) === 0);

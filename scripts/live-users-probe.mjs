@@ -2,7 +2,7 @@
 // save actually takes. Writes nothing unless CLEAN=1, and then only to remove a «فحص موبايل»
 // row a crashed live-mobile run left behind.
 // node scripts/live-users-probe.mjs        |  CLEAN=1 node scripts/live-users-probe.mjs
-import { chromium, devices } from "@playwright/test";
+import { chromium, devices } from "./live-browser.mjs";   // blocks service workers: a fresh profile's SW install reloads the page mid-run
 
 const BASE = process.env.BASE || "https://mohamedroshdi.github.io/mart-shipments";
 const log = (...a) => console.log("[users]", ...a);

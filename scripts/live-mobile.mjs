@@ -1,7 +1,7 @@
 // Full flow on the LIVE site in mobile emulation (Pixel 5, touch, mobile UA). Self-cleaning.
 // Three browser contexts = three phones, because the session lives in localStorage and one
 // context would have the employee, the manager and the admin overwriting each other.
-import { chromium, devices } from "@playwright/test";
+import { chromium, devices, openTools, safeDialogs } from "./live-browser.mjs";   // blocks service workers: a fresh profile's SW install reloads the page mid-run
 import { readFileSync, writeFileSync, mkdirSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -61,7 +61,7 @@ log("0. temp user created:", await adm.locator("#toast").innerText(),
 /* ---- manager phone: real barcodes from the live catalog (unlisted ones are refused) ---- */
 const mgr = await ctxMgr.newPage();
 mgr.on("pageerror", (e) => console.log("[pageerror:mgr]", e.message));
-mgr.on("dialog", (d) => d.accept());
+safeDialogs(mgr);          // accepts the ordinary confirms, REFUSES anything that deletes live rows
 await mgr.goto(BASE + "/manager.html", { waitUntil: "load" });
 await mgr.fill("#pin-input", "1994");
 await mgr.press("#pin-input", "Enter");                       // legacy master PIN still works
@@ -193,6 +193,7 @@ log("20. shipment deleted (cleanup ok):",
 const sheet = join(tmpdir(), `stock-${SCODE}.csv`);
 writeFileSync(sheet, `﻿الباركود,اسم الصنف,الكمية\r\n${SCODE},صنف جرد موبايل,10\r\n`);
 // the employee counts in branchNames[1], so that branch's sheet is the one to load
+await openTools(mgr);             // the import tools are behind the fold now
 await mgr.tap(`#stock-branch button[data-stockbranch="${branchNames[1]}"]`);
 await mgr.setInputFiles("#stock-file", sheet);
 await mgr.waitForTimeout(SYNC);

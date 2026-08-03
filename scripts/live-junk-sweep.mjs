@@ -7,7 +7,7 @@
 //
 // node scripts/live-junk-sweep.mjs            # count and list, changes nothing
 // DELETE=1 node scripts/live-junk-sweep.mjs   # and remove them
-import { chromium } from "@playwright/test";
+import { chromium } from "./live-browser.mjs";   // blocks service workers: a fresh profile's SW install reloads the page mid-run
 
 const BASE = process.env.BASE || "https://mohamedroshdi.github.io/mart-shipments";
 const DELETE = process.env.DELETE === "1";

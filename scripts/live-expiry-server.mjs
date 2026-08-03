@@ -1,7 +1,7 @@
 // Read-only: a brand new browser context, so nothing is served from a local Firestore cache.
 // Answers one question — what does the SERVER hold in the expiry collection right now.
 // node scripts/live-expiry-server.mjs
-import { chromium } from "@playwright/test";
+import { chromium } from "./live-browser.mjs";   // blocks service workers: a fresh profile's SW install reloads the page mid-run
 
 const BASE = process.env.BASE || "https://mohamedroshdi.github.io/mart-shipments";
 const log = (...a) => console.log("[server]", ...a);

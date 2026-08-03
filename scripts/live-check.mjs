@@ -1,4 +1,4 @@
-import { chromium } from "@playwright/test";
+import { chromium, safeDialogs, openManagerPage } from "./live-browser.mjs";   // blocks service workers: a fresh profile's SW install reloads the page mid-run
 
 const BASE = "https://mohamedroshdi.github.io/mart-shipments";
 const STAMP = "فحص-آلي-" + process.env.STAMP;
@@ -41,13 +41,19 @@ log("0. barcodes taken from the live catalog:", C1, C2, C3);
 // 1. employee creates a shipment against REAL Firestore, deletes one item first
 await page.goto(BASE + "/", { waitUntil: "load" });
 const branch = await page.evaluate(() => window.APP_CONFIG.branches[0]);
-await page.fill("#employee-name", "فحص آلي");
-await page.click(`button[data-branch="${branch.name}"]`);
-await page.click("#save-name");
-await page.waitForSelector("#screen-home:not([hidden])");
+/* One door since 2026-08-01: the «بيانات الموظف» name+branch screen is DELETED, so a script signs
+   in the way a person does. The legacy master PIN carries every permission except adm. */
+await page.waitForSelector("#screen-login:not([hidden])", { timeout: 20000 });
+await page.fill("#login-pin", "1994");
+await page.click("#btn-login");
+await page.waitForSelector("#screen-home:not([hidden])", { timeout: 20000 });
 await page.click("#btn-new");
 const type = (await page.evaluate(() => window.APP_CONFIG.shipmentTypes))[1];
 await page.click(`#type-picker button[data-type="${type}"]`);
+// that PIN covers every branch, so the shipment's branch is a per-shipment pick
+if (await page.locator(`#new-branch-picker button[data-newbranch="${branch.name}"]`).count()) {
+  await page.click(`#new-branch-picker button[data-newbranch="${branch.name}"]`);
+}
 await page.fill("#shipment-name", STAMP);
 await addItem(page, C1);
 await addItem(page, C2);
@@ -77,7 +83,7 @@ await page.waitForTimeout(SYNC);
 // 3. manager page verifies the edit, changes qty, deletes an item, deletes the shipment
 const mgr = await ctx.newPage();
 mgr.on("pageerror", (e) => console.log("[pageerror:mgr]", e.message));
-mgr.on("dialog", (d) => d.accept());
+safeDialogs(mgr);          // accepts the ordinary confirms, REFUSES anything that deletes live rows
 await mgr.goto(BASE + "/manager.html", { waitUntil: "load" });
 await mgr.fill("#pin-input", "1994");
 await mgr.click("#btn-pin");
@@ -94,11 +100,12 @@ await mgr.click("#btn-filters");                               // the chips live
 await mgr.click(`button[data-typefilter="${type}"]`);          // filter by the type the employee picked
 await mgr.waitForTimeout(500);
 log("5b. type filter keeps it:", (await findRow()) >= 0, "| type:", type);
-await mgr.click(`button[data-act="copy"][data-i="${mi}"]`);
-log("6. copy format:", JSON.stringify(await mgr.evaluate(() => navigator.clipboard.readText())));
-
+/* Since 2026-07-31 a list card carries NO buttons — the card IS the button, and نسخ / Excel /
+   TXT / حذف all live on the screen it opens. So everything below goes through the card screen. */
 await mgr.click(`button[data-act="view"][data-i="${mi}"]`);
 await mgr.waitForSelector("#screen-detail:not([hidden])");
+await mgr.click("#btn-copy");
+log("6. copy format:", JSON.stringify(await mgr.evaluate(() => navigator.clipboard.readText())));
 log("7. detail rows:", await mgr.locator("#detail-items tr").count());
 await mgr.fill('input[data-qty="0"]', "5");
 await mgr.click('button[data-delitem="1"]');
@@ -106,16 +113,14 @@ await mgr.click("#btn-save-edit");
 await mgr.waitForSelector("#screen-manager:not([hidden])");
 await mgr.waitForTimeout(SYNC);
 mi = await findRow();
-await mgr.click(`button[data-act="copy"][data-i="${mi}"]`);
+await mgr.click(`button[data-act="view"][data-i="${mi}"]`);
+await mgr.waitForSelector("#screen-detail:not([hidden])");
+await mgr.click("#btn-copy");
 log("8. after manager qty=5 + item delete:", JSON.stringify(await mgr.evaluate(() => navigator.clipboard.readText())));
 
-await mgr.click(`button[data-act="del"][data-i="${mi}"]`);
+await mgr.click("#btn-delete-detail");                         // حذف lives on the card screen too
 await mgr.waitForTimeout(SYNC);
-await mgr.reload({ waitUntil: "load" });
-await mgr.fill("#pin-input", "1994");
-await mgr.click("#btn-pin");
-await mgr.waitForSelector("#screen-manager:not([hidden])");
-await mgr.waitForTimeout(SYNC);
+await openManagerPage(mgr, BASE, "1994", SYNC);
 log("9. gone after delete (cleanup ok):", (await findRow()) === -1);
 log("10. shipments left in DB:", (await mgr.locator("#all-shipments li").allInnerTexts()).length);
 

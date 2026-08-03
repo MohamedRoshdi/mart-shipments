@@ -2,7 +2,7 @@
 // imports its own temporary product, records an expiry row for it, moves it to another month,
 // exports it and deletes everything it made.
 // STAMP=$RANDOM node scripts/live-expiry.mjs
-import { chromium } from "@playwright/test";
+import { chromium, safeDialogs, openManagerPage } from "./live-browser.mjs";   // blocks service workers: a fresh profile's SW install reloads the page mid-run
 import { writeFileSync, readFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -12,23 +12,20 @@ const CODE = "998" + process.env.STAMP;
 const NAME = "صنف صلاحية آلي";
 const log = (...a) => console.log("[live-expiry]", ...a);
 
+/* NO header row, deliberately. «الباركود» and «اسم الصنف» are both recognised headings
+   (sheet.js HEADERS), so a header here makes this a HEADER-DRIVEN catalog import — which is a
+   REPLACE: one full 10,061-row read, and a confirm offering to delete every barcode this one-row
+   fixture does not carry. Headerless takes the positional path, which is merge-only: it adds one
+   product, reads nothing else, and can delete nothing. */
 const sheet = join(tmpdir(), `exp-${CODE}.csv`);
-writeFileSync(sheet, `﻿الباركود,اسم الصنف\r\n${CODE},${NAME}\r\n`);
+writeFileSync(sheet, `﻿${CODE},${NAME}\r\n`);
 
 const browser = await chromium.launch();
 const page = await browser.newPage();
 page.on("pageerror", (e) => console.log("[pageerror]", e.message));
-page.on("dialog", (d) => d.accept());
+safeDialogs(page);          // accepts the ordinary confirms, REFUSES anything that deletes live rows
 
-async function openManager() {
-  await page.goto(BASE + "/manager.html", { waitUntil: "load" });
-  if (await page.locator("#screen-pin:not([hidden])").count()) {
-    await page.fill("#pin-input", "1994");
-    await page.click("#btn-pin");
-  }
-  await page.waitForSelector("#screen-manager:not([hidden])");
-  await page.waitForTimeout(3500);        // never networkidle: Firestore keeps a socket open
-}
+const openManager = () => openManagerPage(page, BASE);
 
 async function waitFor(locator, ms = 20000) {
   const until = Date.now() + ms;
@@ -83,7 +80,11 @@ const id = await page.locator("#month-items input[data-edate]").first().getAttri
 await page.fill(`#month-items input[data-edate="${id}"]`, "2026-11-20");
 await page.click("#btn-save-month");
 await page.waitForTimeout(3000);
-log("7. after the fix, سبتمبر is gone:", (await page.locator('#exp-months li:has-text("سبتمبر 2026")').count()) === 0);
+/* Not «the month disappeared» — that is only true on an empty database, and the shop has its own
+   rows in سبتمبر (measured 2026-08-03: the month showed «2 صنف» with one of them ours). What has
+   to be true is that OUR row left it. */
+log("7. after the fix, our row left سبتمبر:",
+  !(await page.locator('#exp-months li:has-text("سبتمبر 2026")').innerText().catch(() => "")).includes(NAME));
 log("8. and نوفمبر is there:", (await page.locator('#exp-months li:has-text("نوفمبر 2026")').count()) > 0);
 
 // 5. the manager sees the same month and exports it

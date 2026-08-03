@@ -973,6 +973,41 @@ TODAY only (a fixture with a fixed `createdAt` renders an empty home the next da
 or use a second context before typing a manager PIN). All eleven pass again; run them after any
 change that moves a screen, because nothing else looks at these pages.
 
+**Every live script imports its browser from `scripts/live-browser.mjs`, and that is not a style
+rule.** The whole live suite was dead on 2026-08-03 — same rot as the screenshot scripts, plus
+three hazards of its own, all now fixed in one place:
+- **Service workers.** Fifteen of the sixteen did not block them. A fresh profile installs the
+  site's SW, the install fires `controllerchange`, `fresh.js` reloads, and the run lands back on
+  the PIN screen mid-flow. It bites hardest in the minutes after a deploy — which is exactly when
+  these get run. `chromium` from `live-browser.mjs` blocks them for every context and page.
+- **`page.on("dialog", d => d.accept())` is a loaded gun.** `live-expiry.mjs` wrote a one-row
+  fixture headed «الباركود,اسم الصنف» — BOTH are recognised headings (`sheet.js` HEADERS), so that
+  is a real header row, so it is a header-driven catalog import, so it is a REPLACE: a full
+  10,061-row read and a `confirm` offering to delete the 10,060 barcodes the fixture does not
+  carry. The script accepted every dialog. It never reached the confirm and the catalog was still
+  10,061 when this was found, but nothing in the script prevented it. Use `safeDialogs(page)`:
+  it accepts the ordinary confirms and DISMISSES anything matching `/هيتشال|نشيلهم|مسح كل|هيتمسح/`.
+  And a fixture that only needs to add a product must be **headerless** — the positional path is
+  merge-only, reads nothing else, and can delete nothing.
+- **`openManagerPage(page, BASE)`** replaces every hand-rolled copy. The markup STARTS on the PIN
+  screen, so `if (#screen-pin is visible) type the PIN` always says yes and then types into a box
+  the boot IIFE is about to hide. Try it, ignore the failure, and let the wait be the assertion.
+- Plus `openTools(page)` — the manager's import/export controls are behind the fold since
+  2026-08-03 — and the same one-door fix the screenshot scripts needed (`#employee-name` is a
+  DELETED screen; sign in through `#login-pin`), and the card screen (`#btn-copy`,
+  `#btn-download`, `#btn-delete-detail`) instead of the `data-act="copy"|"del"` row buttons that
+  went away on 2026-07-31.
+**Green on production 2026-08-03**: `live-check` 10/10, `live-count` 13/14, `live-expiry` 14/14,
+`live-usage`, `live-expiry-server`, `live-expiry-cleanup`. `live-mobile-known` had a hard-coded
+barcode that had rotted out of the catalog and now reads one off the catalog page — **unverified,
+not re-run**. `live-admin` / `live-mobile` / `live-users-probe` were NOT run: all three press
+`#btn-save-config`, which replaces `config/app`, and the users list is down to one.
+**Budget**: any script that types in a catalog search rebuilds the local index — one full
+**10,061-row read** each, because a product write drops the copy. Three or four of those in an
+afternoon is most of the day's 50,000. The REST API throttles to `RESOURCE_EXHAUSTED` long before
+the project's daily quota does; the SDK still answering (check with a real browser) is what tells
+the two apart.
+
 Writing live scripts: pull real barcodes from the catalog first — invented ones are
 refused by design. Never `waitUntil: "networkidle"`; Firestore keeps a socket open,
 so it never fires. A helper that reads the search results must wait out the 250 ms

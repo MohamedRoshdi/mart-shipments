@@ -1,5 +1,5 @@
 // Live check of the catalog screen against the real Firestore, through the UI only. Self-cleaning.
-import { chromium } from "@playwright/test";
+import { chromium, safeDialogs } from "./live-browser.mjs";   // blocks service workers: a fresh profile's SW install reloads the page mid-run
 import { writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -14,7 +14,7 @@ writeFileSync(csv, `﻿barcode,name\r\n${CODE},صنف فحص آلي\r\n`);
 const browser = await chromium.launch();
 const page = await browser.newPage();
 page.on("pageerror", (e) => console.log("[pageerror]", e.message));
-page.on("dialog", (d) => d.accept());
+safeDialogs(page);          // accepts the ordinary confirms, REFUSES anything that deletes live rows
 
 async function openCatalog() {
   await page.goto(BASE + "/manager.html", { waitUntil: "load" });
@@ -30,7 +30,11 @@ async function find(code) {
   await page.fill("#product-search", code);
   const row = page.locator(`input[data-barcode="${code}"]`);
   try {
-    await row.waitFor({ timeout: 9000 });   // debounce + server query, not an instant check
+    /* 30s, not 9. Any product write drops this phone's local search copy, so the first search
+       after an import REBUILDS it — one full read of 10,061 rows (measured 2026-08-03), which is
+       nowhere near instant. Nine seconds reported «not found» for a row that was there, in both
+       this script and live-count. */
+    await row.waitFor({ timeout: 30000 });
     return await row.inputValue();
   } catch {
     return null;

@@ -7,7 +7,7 @@
 // shipment loaded, then read it all back in a SECOND, empty browser context — no cache to lie to
 // us — and delete both.
 // STAMP=$RANDOM node scripts/live-newfields.mjs
-import { chromium } from "@playwright/test";
+import { chromium } from "./live-browser.mjs";   // blocks service workers: a fresh profile's SW install reloads the page mid-run
 
 const BASE = process.env.BASE || "https://mohamedroshdi.github.io/mart-shipments";
 const STAMP = process.env.STAMP || String(Date.now()).slice(-6);

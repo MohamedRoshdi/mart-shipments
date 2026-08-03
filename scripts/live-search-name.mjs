@@ -1,5 +1,5 @@
 // Proves the name-prefix search reaches products beyond the loaded page. Read-only.
-import { chromium } from "@playwright/test";
+import { chromium } from "./live-browser.mjs";   // blocks service workers: a fresh profile's SW install reloads the page mid-run
 
 const BASE = "https://mohamedroshdi.github.io/mart-shipments";
 const log = (...a) => console.log("[live-search]", ...a);

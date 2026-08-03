@@ -1,7 +1,7 @@
 // Camera path under a synthetic video device: camera list, chosen camera, start/stop,
 // and the fallback when a saved camera is gone. Real decoding still needs a real phone.
 // BASE=http://localhost:8080 to run against a local server.
-import { chromium, devices } from "@playwright/test";
+import { chromium, devices } from "./live-browser.mjs";   // blocks service workers: a fresh profile's SW install reloads the page mid-run
 
 const BASE = process.env.BASE || "https://mohamedroshdi.github.io/mart-shipments";
 const OUT = process.env.OUT || "/tmp/shots";
