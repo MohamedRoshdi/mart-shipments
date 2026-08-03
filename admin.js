@@ -1075,27 +1075,40 @@ addEventListener("db-error", (e) => toast(db.errorText(e.detail), "bad"));
 
 cfgReady = (async () => {
   await db.initDb().catch(console.error);
-  const stored = await db.getConfig().then((c) => { cfgFromServer = true; return c; })
-    .catch((e) => { console.error(e); return null; });
-  if (!stored) {
-    toast("مقدرناش نقرا الإعدادات من السيرفر — الحفظ متقفل عشان الإعدادات المحفوظة ما تتمسحش. اقفل الصفحة وجرّب تاني بعد شوية.", "bad");
-  }
-  $("btn-save-config").disabled = !cfgFromServer;
-  Object.assign(window.APP_CONFIG, stored || {});
-  applyBrand(window.APP_CONFIG);
-  cfg = workingCopy();
-  /* The admin is the WRITER, so a live update must never overwrite what somebody is typing —
-     that rule stays. But a page nobody has touched (dirty === false) showing yesterday's users
-     is how «المزامنة باظت» read on 2026-08-02: two open admin screens each held a stale copy.
-     Clean page → take the server's word and repaint. Dirty page → the human's edits win until
-     they save or leave. */
-  db.watchConfig((server) => {
+  /* ONE listener, and no `getConfig` before it. That read was not just a duplicate: `getDoc`
+     resolves out of the offline cache perfectly happily, so `cfgFromServer` — the flag that
+     unlocks a save which REPLACES the whole settings doc — could be set true by a copy that never
+     touched the server. That is the exact shape of the accident that emptied the users list twice.
+     `fromCache` on the snapshot is the real signal. A cached first delivery is normal and the flag
+     corrects itself the moment the server answers; a machine that cannot reach Firestore keeps the
+     save locked, which is the whole point.
+
+     The admin is the WRITER, so a live update must never overwrite what somebody is typing — that
+     rule stays. But a page nobody has touched (dirty === false) showing yesterday's users is how
+     «المزامنة باظت» read on 2026-08-02: two open admin screens each held a stale copy. Clean page →
+     take the server's word and repaint. Dirty page → the human's edits win until they save. */
+  let firstCfg = null, cfgFailed = false;
+  const cfgSeen = new Promise((resolve) => { firstCfg = resolve; });
+  db.watchConfig((server, fromCache) => {
+    cfgFromServer = !fromCache;
+    $("btn-save-config").disabled = !cfgFromServer;
     Object.assign(window.APP_CONFIG, server);
     applyBrand(window.APP_CONFIG);
+    if (firstCfg) { cfg = workingCopy(); firstCfg(); firstCfg = null; return; }
     if (dirty) { serverAhead = true; paintDirty(); return; }
     cfg = workingCopy();
     renderAll();
-  }).catch(console.error);
+  }).catch((e) => { console.error(e); cfgFailed = true; if (firstCfg) { firstCfg(); firstCfg = null; } });
+  await Promise.race([cfgSeen, new Promise((r) => setTimeout(r, 5000))]);
+  if (!cfg) { applyBrand(window.APP_CONFIG); cfg = workingCopy(); }   // nothing ever delivered
+  $("btn-save-config").disabled = !cfgFromServer;
+  /* A listener that REFUSED is known now, so say it now. A first delivery out of the cache is
+     ordinary and corrects itself the moment the server answers — warning on that would cry wolf on
+     every load — so it gets a few seconds first. Still cached after them means this machine never
+     reached the server, and a locked save button needs explaining. */
+  const lockNote = () => toast("مقدرناش نقرا الإعدادات من السيرفر — الحفظ متقفل عشان الإعدادات المحفوظة ما تتمسحش. اقفل الصفحة وجرّب تاني بعد شوية.", "bad");
+  if (cfgFailed) lockNote();
+  else setTimeout(() => { if (!cfgFromServer) lockNote(); }, 6000);
   const s = auth.session();
   if (!s) return;
   if (s.perms.includes("adm")) { await enterAdmin(); return; }   // already signed in elsewhere

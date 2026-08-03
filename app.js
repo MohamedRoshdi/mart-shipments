@@ -1393,28 +1393,33 @@ cfgReady = (async () => {
   const ok = await db.initDb().then(() => true).catch((e) => { console.error(e); return false; });
   dbBroken = !ok;
   updateSync();
-  // branches, PINs, types and users the admin edited win over the ones shipped in the code
-  Object.assign(window.APP_CONFIG, await db.getConfig().catch(() => ({})));
-  applyBrand(window.APP_CONFIG);
-  state.branch = myBranch();
-  if (!types().includes(state.type)) state.type = types()[0];
 
-  /* From here the settings are live: a permission, a branch or a supplier the admin changes on
-     another machine reaches this phone in seconds instead of at the next reload. Only what is
-     derived from the config is repainted — the branch the employee is standing in is left alone
-     unless it stopped being one they are allowed to use, because moving it mid-shipment would
-     stamp the delivery with the wrong branch. */
+  /* The settings are live from the first delivery, and that FIRST delivery is what boot waits on —
+     there is no separate `getConfig` read any more, because onSnapshot already fires immediately
+     with whatever is cached. Branches, PINs, types and users the admin edited win over the ones
+     shipped in the code. Afterwards only what is DERIVED from the config is repainted: the branch
+     the employee is standing in is left alone unless it stopped being one they are allowed to use,
+     because moving it mid-shipment would stamp the delivery with the wrong branch. */
+  let firstCfg = null;
+  const cfgSeen = new Promise((resolve) => { firstCfg = resolve; });
   db.watchConfig((cfg) => {
     Object.assign(window.APP_CONFIG, cfg);
     applyBrand(window.APP_CONFIG);
     // a catalog imported on any machine reaches this phone's name search in seconds, not in 7 days
     const cat = (cfg.filesMeta || {})["الأصناف"];
     if (cat && cat.at) db.dropCatalogIndexIfOlder(cat.at);
+    // the first delivery only releases boot; the lines after the await do the rest
+    if (firstCfg) { firstCfg(); firstCfg = null; return; }
     if (!allowedBranches().includes(state.branch)) state.branch = allowedBranches()[0];
     renderNewBranch();
     renderSuppliers();
     $("supplier-dl").innerHTML = "";     // the expiry datalist refills from the fresh list next open
-  }).catch(console.error);
+  }).catch((e) => { console.error(e); if (firstCfg) { firstCfg(); firstCfg = null; } });
+  // a listener that never delivers must not hold the app on a blank screen for ever
+  await Promise.race([cfgSeen, new Promise((r) => setTimeout(r, 5000))]);
+  applyBrand(window.APP_CONFIG);
+  state.branch = myBranch();
+  if (!types().includes(state.type)) state.type = types()[0];
 
   const s = auth.session();
   if (s && s.user && s.perms.includes("emp") && !myName()) {

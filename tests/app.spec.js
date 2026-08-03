@@ -155,7 +155,29 @@ async function openManagerPage(page) {
   const pin = await page.evaluate(() => window.APP_CONFIG.managerPin);
   await page.fill('#pin-input', pin);
   await page.click('#btn-pin');
+  await openTools(page);
 }
+
+/* «أدوات» is folded away by default (import / stock / export / the settings link are weekly jobs
+   and five cards were what the manager scrolled past on every open). Every test that reaches a
+   tool opens it first, exactly as a person does; that the fold STARTS closed and opens on a tap is
+   asserted once, on its own, rather than thirteen times by accident. */
+async function openTools(page) {
+  if (await page.locator('#btn-tools').isHidden()) return;   // no tool permissions: no fold
+  if (await page.locator('#tools-list').isHidden()) await page.click('#btn-tools');
+}
+
+test('manager: the toolbox is folded away until it is asked for', async ({ page }) => {
+  await signOut(page);
+  await page.goto('/manager.html?test=1');
+  await page.fill('#pin-input', await page.evaluate(() => window.APP_CONFIG.managerPin));
+  await page.click('#btn-pin');
+  await expect(page.locator('#tools-list')).toBeHidden();     // the list is what the manager opens for
+  await expect(page.locator('#tool-logout')).toBeVisible();   // signing out is never behind a fold
+  await page.click('#btn-tools');
+  await expect(page.locator('#tools-list')).toBeVisible();
+  await expect(page.locator('#btn-import')).toBeVisible();
+});
 
 test('manager page: PIN gate, list, copy barcode-tab-qty', async ({ page }) => {
   await page.goto('/manager.html?test=1');
@@ -308,6 +330,7 @@ test('shipment type: picked under the branch, saved, filtered and editable', asy
   await page.goto('/manager.html?test=1');
   await page.fill('#pin-input', await page.evaluate(() => window.APP_CONFIG.managerPin));
   await page.click('#btn-pin');
+  await openTools(page);
   await expect(page.locator('#all-shipments li')).toContainText(t2);
   await page.click('#btn-filters');
   await page.click(`button[data-typefilter="${t1}"]`);                     // wrong type → empty
@@ -351,6 +374,7 @@ test('a manager scoped to one branch sees only that branch', async ({ page }) =>
   await page.reload();                                        // APP_CONFIG merges the config at boot
   await page.fill('#pin-input', '8811');                      // شبين الكوم manager, by account
   await page.click('#btn-pin');
+  await openTools(page);
   await expect(page.locator('#all-shipments li')).toHaveCount(1);
   await expect(page.locator('#all-shipments li')).toContainText('شحنة شبين');
   await expect(page.locator('#screen-title')).toHaveText('شبين الكوم');
@@ -612,6 +636,7 @@ test('supplier code: found by code, stamped on the shipment, searchable and in E
   await page.goto('/manager.html?test=1');                          // keep the shipment just saved
   await page.fill('#pin-input', await page.evaluate(() => window.APP_CONFIG.managerPin));
   await page.click('#btn-pin');
+  await openTools(page);
   await page.fill('#list-search', '1042');                          // the manager finds it by code
   await expect(page.locator('#all-shipments li')).toHaveCount(1);
   await expect(page.locator('#all-shipments li')).toContainText('المراعي');
@@ -893,6 +918,7 @@ test('manager: ZIP export puts each shipment straight in its day folder', async 
   ])));
   await page.fill('#pin-input', await page.evaluate(() => window.APP_CONFIG.managerPin));
   await page.click('#btn-pin');
+  await openTools(page);
   const dl = (await Promise.all([
     page.waitForEvent('download'),
     page.click('#btn-export-zip'),
@@ -1208,6 +1234,7 @@ test('permissions actually hide the actions on the manager page', async ({ page 
   await seedUsers(page, [MGR]);
   await page.fill('#pin-input', MGR.pin);
   await page.click('#btn-pin');
+  await openTools(page);
   await expect(page.locator('#all-shipments li')).toHaveCount(1);
   await expect(page.locator('#btn-products')).toBeHidden();                 // no catalog permission
   await expect(page.locator('#tool-import')).toBeHidden();
@@ -1224,6 +1251,7 @@ test('a PIN typed on the wrong page is redirected to the right one', async ({ pa
   await seedUsers(page, [EMP, ADM]);
   await page.fill('#pin-input', ADM.pin);                    // admin PIN on the manager page
   await page.click('#btn-pin');
+  await openTools(page);
   await expect(page.locator('#toast')).toContainText('مش من صلاحياتك');
   await page.waitForURL(/admin\.html/);
   await expect(page.locator('#screen-admin')).toBeVisible();
@@ -1233,6 +1261,7 @@ test('a PIN typed on the wrong page is redirected to the right one', async ({ pa
   await page.goto('/admin.html?test=1');
   await page.fill('#pin-input', EMP.pin);                     // employee PIN on the admin page
   await page.click('#btn-pin');
+  await openTools(page);
   await page.waitForURL(/index\.html|\/\?test=1/);
   await expect(page.locator('#screen-home')).toBeVisible();
   await expect(page.locator('#who')).toContainText('سيد');
@@ -1243,6 +1272,7 @@ test('the old PINs keep working after users exist', async ({ page }) => {
   await seedUsers(page, [EMP]);
   await page.fill('#pin-input', await page.evaluate(() => window.APP_CONFIG.managerPin));
   await page.click('#btn-pin');
+  await openTools(page);
   await expect(page.locator('#screen-manager')).toBeVisible();
   await expect(page.locator('#btn-products')).toBeVisible();   // legacy master PIN keeps every action
   await expect(page.locator('#tool-import')).toBeVisible();
@@ -1987,6 +2017,7 @@ test('import: the two templates the app itself hands out still import', async ({
   await page.goto('/manager.html?test=1');
   await page.fill('#pin-input', await page.evaluate(() => window.APP_CONFIG.managerPin));
   await page.click('#btn-pin');
+  await openTools(page);
   await page.click('#btn-products');
   await page.setInputFiles('#import-file', 'products-template.csv');   // الباركود، اسم الصنف، الوحدة
   await expect(page.locator('#toast')).toContainText('تم استيراد 3 صنف');
@@ -2006,6 +2037,7 @@ test("import: the shop's own column order, unit codes and last selling price", a
   await page.goto('/manager.html?test=1');
   await page.fill('#pin-input', await page.evaluate(() => window.APP_CONFIG.managerPin));
   await page.click('#btn-pin');
+  await openTools(page);
   await page.click('#btn-products');
   // their catalog export: كود الصنف | الوحدة | اسم الصنف | معامل التحويل | اخر سعر بيع
   await page.setInputFiles('#import-file', {

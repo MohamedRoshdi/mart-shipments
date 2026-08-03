@@ -142,8 +142,16 @@ function applyPerms() {
   $("detail-danger").hidden = !canDo("del");
   $("btn-export-products").hidden = !canDo("download");
   $("tool-logout").hidden = !auth.session();
+  // a fold with nothing behind it is a button that does nothing
+  $("btn-tools").hidden = !(canDo("import") || canDo("download") || canDo("adm"));
   $("link-admin-page").href = auth.withQuery("admin.html");   // keep ?test=1 across pages
 }
+
+$("btn-tools").onclick = () => {
+  const open = $("tools-list").hidden;
+  $("tools-list").hidden = !open;
+  $("btn-tools").setAttribute("aria-expanded", String(open));
+};
 
 $("btn-logout").onclick = () => {
   auth.endSession();
@@ -1544,16 +1552,23 @@ keepFresh(toast);
    or a shipment type added on another machine used to arrive only at the next reload.
    Repaint only what is derived from the config — the list, the filters and the search are the
    manager's own state and must not be reset under them mid-task. */
-function watchSettings() {
-  db.watchConfig((cfg) => {
+function watchSettings(onFirst) {
+  db.watchConfig((cfg, fromCache) => {
+    /* `fromCache` is the honest version of what `getConfig` used to claim: that read resolved from
+       the offline cache just as readily, so «الإعدادات اتقرت» could be true of a purely local copy
+       — and an empty filesMeta makes every file look never-imported. */
+    cfgFromServer = !fromCache;
     Object.assign(window.APP_CONFIG, cfg);
     applyBrand(window.APP_CONFIG);
     // a catalog imported on another machine reaches this one's search and screen in seconds
     const cat = (cfg.filesMeta || {})["الأصناف"];
     if (cat && cat.at) db.dropCatalogIndexIfOlder(cat.at);
+    if (onFirst) { onFirst(); onFirst = null; return; }
     if (!$("screen-products").hidden) renderProducts();
     renderTypeFilter();
-  }).catch(console.error);
+    // the settings finally arrived from the server: the auto-import that was skipped can run now
+    autoImportFiles().catch(console.error);
+  }).catch((e) => { console.error(e); if (onFirst) { onFirst(); onFirst = null; } });
 }
 
 // a live listener that errors (quota, offline, bad rules) must say so, same as the employee app
@@ -1562,9 +1577,12 @@ addEventListener("db-error", (e) => toast(db.errorText(e.detail), "bad"));
 // PIN screen paints straight away; the PIN check waits for this instead
 cfgReady = (async () => {
   await db.initDb().catch(console.error);
-  Object.assign(window.APP_CONFIG, await db.getConfig().then((c) => { cfgFromServer = true; return c; }).catch(() => ({})));
-  applyBrand(window.APP_CONFIG);
-  watchSettings();
+  // one listener, no separate read: its first delivery is what the PIN handler waits for
+  await new Promise((resolve) => {
+    watchSettings(resolve);
+    setTimeout(resolve, 5000);      // a listener that never delivers must not lock the PIN screen
+  });
+  applyBrand(window.APP_CONFIG);    // also on the timeout path: the shipped defaults still have a look
   const s = auth.session();
   if (!s) return;
   if (s.perms.includes("mgr")) { enterManager(); return; }   // already signed in on another page

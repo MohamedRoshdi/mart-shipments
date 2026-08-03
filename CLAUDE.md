@@ -630,7 +630,17 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
 - **All three pages watch `config/app` — but the admin only follows while CLEAN.**
   `db.watchConfig(cb)` is an `onSnapshot` that fires once immediately from the cache and again on
   every change, so a permission, a branch, a supplier or a shipment type edited on another machine
-  reaches a phone in seconds. `app.js` and `manager.js` re-merge and repaint **only what is derived
+  reaches a phone in seconds. **It is the ONLY read of that doc** (2026-08-03): all three pages
+  used to call `getConfig()` and then attach the listener, paying twice for the same document on
+  every page load, and boot now awaits the listener's first delivery instead. The second callback
+  argument, `fromCache`, is what made that safe — and it fixed a lie: `getDoc` resolves out of the
+  offline cache perfectly happily, so `cfgFromServer` (the flag that unlocks a `saveConfig`, which
+  REPLACES the whole doc, and the flag that lets `autoImportFiles` run) could be set true by a copy
+  that never touched the server. That is the exact shape of the accident that emptied the users
+  list twice. A cached first delivery is ordinary and the flag corrects itself the moment the
+  server answers, so the admin's «مقدرناش نقرا الإعدادات» toast waits 6 s before it speaks — except
+  on a listener that actually ERRORED, which is known immediately. Both boot awaits carry a 5 s
+  race so a listener that never delivers cannot hold the app on a blank screen. `app.js` and `manager.js` re-merge and repaint **only what is derived
   from the config** — `state.branch` is left where it is unless it stopped being allowed, because
   moving it mid-shipment would stamp the delivery with the wrong branch. `admin.js` (since 1.0.78)
   rebuilds its working copy from a live update **only when `dirty` is false** — a clean admin
@@ -683,6 +693,15 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   the same failure as «فى الـنـظام» in the catalog rows). `.bottombar .count` keeps
   `font-variant-numeric: tabular-nums` and nothing else; every remaining `--mono` rule wraps digits
   or a barcode, never a word.
+  **The manager's toolbox is folded, and «الخروج» is outside the fold** (2026-08-03): import,
+  stock, export and the settings link are weekly jobs, and five full cards sat between the shipment
+  list and the bottom of the screen on every single open. `#btn-tools` toggles `#tools-list`, the
+  same pattern as `#btn-filters`, and hides itself when the user has no tool permission at all.
+  `#tool-logout` moved OUT of that list on purpose — signing out must never be behind a fold. On
+  the employee home the same reasoning moved `#home-links` (manager/admin links + «خروج») BELOW
+  the day's work: a full-width «خروج» sitting between the action cards and the lists is one
+  mis-tap away from asking a storekeeper for his PIN again. `openTools(page)` in the test file is
+  how every tool test reaches a tool now; that the fold STARTS closed is asserted once, on its own.
   **A list card carries no buttons at all** (2026-07-31, the owner's «a lot of buttons»): the card
   *is* the button (`button.card-open`, same drawn chevron as the home cards), and نسخ / Excel /
   TXT / حذف all live on the screen it opens — which is the same two taps they used to take. The

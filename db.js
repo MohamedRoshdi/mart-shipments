@@ -597,18 +597,32 @@ export async function getConfig() {
    actual change, where polling costs one per interval per phone against a 50k/day quota.
 
    Returns its own unsubscribe. Fires once immediately with what is already cached, which is what
-   makes it safe to use instead of getConfig rather than after it. */
+   makes it safe to use INSTEAD of getConfig rather than after it — and all three pages used to do
+   both, paying a second read of the same doc on every page load.
+
+   The second argument is what made dropping getConfig safe: `fromCache` says this delivery came
+   out of the offline cache and never reached the server. `getDoc` could not say that — it resolves
+   from the cache too, quite happily, so `cfgFromServer` was set to true by a purely local read.
+   That is the exact shape of the accident that emptied the users list: a stale cached copy, a save
+   that replaces the whole doc, and nobody told. A cached first delivery is normal (the SDK answers
+   instantly, then delivers again from the server), so the flag simply corrects itself seconds
+   later — and stays false for a machine that genuinely cannot reach Firestore, which is the case
+   that matters. */
 export async function watchConfig(onChange) {
   if (TEST_MODE) {
-    // the tests seed test-config and reload; another tab writing it is the only live case
-    const relay = (e) => { if (e.key === 'test-config') onChange(lsObj('test-config')); };
+    // the tests seed test-config and reload; another tab writing it is the only live case.
+    // Never "from cache": in test mode localStorage IS the server.
+    const relay = (e) => { if (e.key === 'test-config') onChange(lsObj('test-config'), false); };
     addEventListener('storage', relay);
-    onChange(lsObj('test-config'));
+    onChange(lsObj('test-config'), false);
     return () => removeEventListener('storage', relay);
   }
   await live();
   return fs.onSnapshot(fs.doc(dbRef, 'config', 'app'),
-    (snap) => { meter('reads', billed(snap) ?? 1); onChange(snap.exists() ? snap.data() : {}); },
+    (snap) => {
+      meter('reads', billed(snap) ?? 1);
+      onChange(snap.exists() ? snap.data() : {}, !!(snap.metadata && snap.metadata.fromCache));
+    },
     (e) => dispatchEvent(new CustomEvent('db-error', { detail: e })));
 }
 

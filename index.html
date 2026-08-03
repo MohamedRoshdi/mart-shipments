@@ -57,16 +57,19 @@
           <span class="action-sub">المهام المحفوظة — تتطبع من أي جهاز</span>
         </button>
       </div>
-      <div id="home-links" class="row-actions" hidden>
-        <a id="link-manager" href="manager.html" hidden>صفحة المدير</a>
-        <a id="link-admin" href="admin.html" hidden>صفحة النظام</a>
-        <button id="btn-logout" class="ghost" hidden>خروج</button>
-      </div>
       <h2>شحنات النهارده</h2>
       <ul id="my-shipments"></ul>
       <div id="counts-block" hidden>
         <h2>الجرد</h2>
         <ul id="my-counts"></ul>
+      </div>
+      <!-- under the day's work, not between it and the buttons: «خروج» sitting mid-menu is one
+           mis-tap away from asking a storekeeper for his PIN again. Same place the admin page
+           keeps it. -->
+      <div id="home-links" class="row-actions" hidden>
+        <a id="link-manager" href="manager.html" hidden>صفحة المدير</a>
+        <a id="link-admin" href="admin.html" hidden>صفحة النظام</a>
+        <button id="btn-logout" class="ghost" hidden>خروج</button>
       </div>
     </section>
 

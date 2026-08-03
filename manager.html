@@ -73,8 +73,13 @@
         </div>
       </div>
 
-      <h2>أدوات</h2>
-      <ul>
+      <!-- Folded by default: import, stock, export and the settings link are weekly jobs, and
+           five full cards between the shipment list and the bottom of the screen is what the
+           manager scrolls past every single time he opens the page. Same pattern as «فلترة». -->
+      <div class="row-actions">
+        <button id="btn-tools" type="button" class="ghost" aria-expanded="false">أدوات</button>
+      </div>
+      <ul id="tools-list" hidden>
         <li id="tool-import">
           <div class="card-main">
             <div class="card-title">أسماء الأصناف</div>
@@ -118,6 +123,9 @@
             <a id="link-admin-page" href="admin.html">فتح صفحة النظام</a>
           </div>
         </li>
+      </ul>
+      <!-- outside the fold: signing out must never be behind a collapsed section -->
+      <ul>
         <li id="tool-logout" hidden>
           <div class="card-main">
             <div class="card-title">الخروج</div>
