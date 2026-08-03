@@ -1,4 +1,5 @@
 import { chromium } from "@playwright/test";
+import { signIn } from "./seed.mjs";
 
 const OUT = process.env.OUT || "/tmp/shots";
 const BASE = process.env.BASE || "http://localhost:8099";
@@ -15,6 +16,7 @@ const rows = [
 ];
 
 await page.goto(BASE + "/?test=1");
+await signIn(page);
 await page.evaluate((r) => {
   localStorage.setItem("employeeName", "أحمد");
   localStorage.setItem("employeeBranch", "فرع قويسنا");
@@ -49,6 +51,8 @@ await page.click("#btn-lookup");
 await page.waitForSelector("#item-form:not([hidden])");
 await shot("e4-sheet");
 
+// the employee session would route this page straight back to index.html — drop it and use the PIN
+await page.evaluate(() => localStorage.removeItem("session"));
 await page.goto(BASE + "/manager.html?test=1");
 await page.fill("#pin-input", "1994");
 await page.click("#btn-pin");

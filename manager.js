@@ -334,8 +334,6 @@ async function openManager() {
       await loadMonth();
     }
   }
-  // الصلاحيات is filed by the expiry date, not by the day it was typed, so its own tab groups it
-  if (canDo("expiry")) await watchExpiryOnce();
   renderMonthPick();
   renderFilter();
   renderTypeFilter();
@@ -364,12 +362,18 @@ function renderTabs() {
   $("expiry-block").hidden = tab !== "expiry";
 }
 
-$("list-tabs").onclick = (e) => {
+$("list-tabs").onclick = async (e) => {
   const btn = e.target.closest("button[data-tab]");
   if (!btn) return;
   tab = btn.dataset.tab;
   resetPaging();
   renderTabs();
+  /* الصلاحيات is filed by the expiry date, not by the day it was typed, so it has its own
+     listener — attached HERE, on the first visit to the tab, not when the page opens. Everything
+     that reads those rows lives inside #expiry-block or the month screen, both behind this tab,
+     so a manager who never opens it never pays for it: attaching costs one read per row, up to
+     db.EXPIRY_CAP, on every single page open. */
+  if (tab === "expiry") await watchExpiryOnce();
   renderList();
 };
 

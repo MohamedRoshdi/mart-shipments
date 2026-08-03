@@ -805,6 +805,23 @@ test('admin: the audit trail shows what the manager did', async ({ page }) => {
   await expect(page.locator('#screen-admin')).toBeVisible();
 });
 
+/* The bulk-delete tool is the only screen that needs every shipment and every count ever saved —
+   two unbounded reads. Opening the admin page must not pay for a screen nobody opened: the button
+   still says «بنعد...» until the danger screen is actually reached, which is the one observable
+   the laziness leaves behind. */
+test('admin: the whole archive is read when the bulk tool opens, not when the page does', async ({ page }) => {
+  await page.goto('/admin.html?test=1');
+  await page.evaluate(() => localStorage.setItem('test-shipments', JSON.stringify([
+    { name: 'استلام 1', createdBy: 'أحمد', branch: 'فرع قويسنا', type: 'إذن استلام', createdAt: 1753700000000, items: [] },
+  ])));
+  await page.fill('#pin-input', await page.evaluate(() => window.APP_CONFIG.adminPin));
+  await page.click('#btn-pin');
+  await expect(page.locator('#screen-admin')).toBeVisible();
+  await expect(page.locator('#btn-bulk-delete')).toHaveText('بنعد...');
+  await page.click('#screen-admin [data-goto="screen-danger"]');
+  await expect(page.locator('#btn-bulk-delete')).toHaveText('حذف المطابق (1)');
+});
+
 test('admin: bulk delete by type, and it is logged', async ({ page }) => {
   await page.goto('/admin.html?test=1');
   await page.evaluate(() => localStorage.setItem('test-shipments', JSON.stringify([

@@ -5,6 +5,7 @@
 // A label that looks right on screen and prints on A4 by mistake would pass every other test.
 import { chromium } from "@playwright/test";
 import { readFileSync } from "node:fs";
+import { signIn } from "./seed.mjs";
 
 const OUT = process.env.OUT || "/tmp/shots";
 const BASE = process.env.BASE || "http://localhost:8080";
@@ -19,6 +20,7 @@ const shot = (n) => page.screenshot({ path: `${OUT}/${n}.png`, fullPage: true })
 const BARCODE = "6223001234562";
 
 await page.goto(`${BASE}/?test=1`);
+await signIn(page);
 await page.evaluate((code) => {
   localStorage.setItem("employeeName", "أحمد");
   localStorage.setItem("employeeBranch", "فرع قويسنا");

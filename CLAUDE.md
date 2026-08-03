@@ -512,10 +512,11 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   31st lands back in the same month, because June has no 31st.
 - **The counters count what is loaded, not what is shown.** A manager narrowing to one branch still
   needs the overall backlog, and a number that moved with every keystroke in the search box would
-  be noise. They honour the branch filter and nothing else. Four numbers, laid out **2×2 on a phone
-  and 1×4 above 560px** — the filter chips scroll sideways because there can be any number of them;
-  these are exactly four, and the one that scrolled off a 412px phone was «معلّقة», the number the
-  manager most needs. Caught in a screenshot, not by a test.
+  be noise. They honour the branch filter and nothing else. **THREE numbers, one row at every
+  width** — «جاهزة للاستيراد» went with the stage it counted (2026-08-02) but `.counters` kept its
+  2×2 grid until 2026-08-03, so the third box sat alone on a half-width row and the 560px rule left
+  a fourth column empty. `grid-template-columns` has to match what `renderCounters` emits; nothing
+  asserts that, so it is caught in a screenshot, never by a test.
 - **A duplicate permit is asked about, never decided.** `fingerprint()` in `manager.js` is
   type + branch + normalised supplier + every `barcode:qty` sorted — computed on the fly, so there
   is no stored hash to migrate or to fall out of step with the items. Two deliveries of the same
@@ -554,6 +555,15 @@ local cache and breaks the offline `orderBy('createdAt', 'desc')` list.
   one because the «معلّقة» counter needs every unfinished shipment and Firestore cannot query for
   a MISSING field, so bounding it would mean storing the state as a column. Since the list became a
   listener it costs its window once per page load, not per screen switch.
+  **And an unbounded read must be paid for by the screen that needs it, never by the page open**
+  (2026-08-03). Two were: the admin page read EVERY shipment and EVERY count at `enterAdmin` for a
+  bulk-delete counter, and `openManager()` attached the الصلاحيات listener (up to `EXPIRY_CAP`
+  rows) whether or not the tab was ever opened. Both are now once-per-page-life loaders fired from
+  the screen itself — `loadBulk()` from `render("screen-danger")` (the menu AND back/forward reach
+  it) and `watchExpiryOnce()` from the tab handler. Measured the day it was fixed the cost was 4
+  rows and 9 rows; the point is the slope, not the number — a shop doing 20 permits a day reaches
+  ~7,000 reads per admin open within a year. The observable that keeps the admin half honest is
+  `#btn-bulk-delete` still reading «بنعد...» on the menu, which the suite asserts.
 - **Every list a second device can change is LIVE — that is the whole list, not a sample**
   (2026-08-02, the owner: «شوف الصح إن كله يسمع على كله»). Beyond the manager's shipments and
   counts: the employee home (`feed()` in `app.js`, attached once per page life), الصلاحيات on both
@@ -899,6 +909,18 @@ OUT=/tmp/shots BASE=http://localhost:8080 node scripts/shots-label.mjs    # لي
 OUT=/tmp/shots BASE=http://localhost:8080 node scripts/shots-manager-list.mjs # the manager list, a card screen, the stocktake tab
 OUT=/tmp/shots BASE=http://localhost:8080 node scripts/shots-loaded.mjs   # the month bar, a «تم تحميلها» card and its screen, معامل التحويل on the item sheet
 ```
+
+**A screenshot script has to sign itself in, and `scripts/seed.mjs` is the one copy of how.**
+Since the one-door change (2026-08-01) every page opens on the PIN screen unless
+`localStorage.session` holds a live one — and **six of the eleven screenshot scripts were still
+writing only `employeeName`**, the key of the deleted «بيانات الموظف» screen, so the whole visual
+reference set had been timing out for two days without anyone noticing (measured 2026-08-03: 5
+hard failures plus `shots-all.mjs`). Three more product changes had left their own marks in there:
+the admin settings moved behind a menu (`[data-goto="screen-data"]` first), the employee home shows
+TODAY only (a fixture with a fixed `createdAt` renders an empty home the next day — stamp it from
+`Date.now()`), and an employee session ROUTES `manager.html` back to `index.html` (drop the session
+or use a second context before typing a manager PIN). All eleven pass again; run them after any
+change that moves a screen, because nothing else looks at these pages.
 
 Writing live scripts: pull real barcodes from the catalog first — invented ones are
 refused by design. Never `waitUntil: "networkidle"`; Firestore keeps a socket open,

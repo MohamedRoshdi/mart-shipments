@@ -1,6 +1,7 @@
 // The search box now lives inside #scan-block, so it has to look right on all three screens.
 // OUT=/tmp/shots BASE=http://localhost:8087 node scripts/shots-search.mjs
 import { chromium, devices } from "playwright";
+import { signIn } from "./seed.mjs";
 
 const BASE = process.env.BASE || "http://localhost:8080";
 const OUT = process.env.OUT || "/tmp/shots-search";
@@ -16,6 +17,7 @@ const ctx = await browser.newContext({ ...devices["Pixel 5"] });
 const page = await ctx.newPage();
 
 await page.goto(`${BASE}/?test=1`);
+await signIn(page);
 await page.evaluate((cat) => {
   localStorage.setItem("employeeName", "أحمد");
   localStorage.setItem("test-products", JSON.stringify(cat));

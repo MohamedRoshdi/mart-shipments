@@ -483,7 +483,7 @@ button.card-open {
 .row-actions button[data-expdel] { flex: 0 0 auto; min-inline-size: 0; padding-inline: 14px; }
 /* «تم تحميلها» and the ERP state: a state is said in WORDS on the card, never colour alone —
    the same rule as the الصلاحيات colours. The tint is there to be scanned, not to be read. */
-.tag-loaded, .tag-erp {
+.tag-erp {
   display: inline-block;
   margin-inline-start: 6px;
   padding: 1px 8px;
@@ -495,21 +495,21 @@ button.card-open {
   vertical-align: middle;
 }
 .tag-erp.erp-new { background: var(--bg); color: var(--ink-2); }
-.tag-erp.erp-ready { background: var(--amber-soft); color: #8a5a00; }
 .tag-erp.erp-done { background: #e3f3ea; color: var(--good); }
 
-/* Four numbers, and all four have to be ON the screen. The filter chips scroll sideways because
-   there can be any number of them; these are exactly four, and the one that scrolled off a phone
-   was «معلّقة» — the number the manager most needs to see. Two by two on a phone, one row above. */
+/* THREE numbers, and all three have to be ON the screen — «جاهزة للاستيراد» went with the stage
+   it counted (2026-08-02). The column count has to match `renderCounters` or the odd one out sits
+   alone on a half-width row, which is exactly what a 2×2 grid did to «معلّقة» — the number the
+   manager most needs to see. The filter chips scroll sideways because there can be any number of
+   them; these are exactly three, so they get a row of their own at every width. */
 .counters {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 8px;
   margin: 0 0 12px;
   padding: 0;
   list-style: none;
 }
-@media (min-width: 560px) { .counters { grid-template-columns: repeat(4, 1fr); } }
 .counters li {
   min-inline-size: 0;
   padding: 8px 12px;
@@ -520,7 +520,6 @@ button.card-open {
 }
 .counters b { display: block; font-size: 1.3rem; font-variant-numeric: tabular-nums; }
 .counters span { font-size: .72rem; color: var(--ink-2); }
-.counters li.erp-ready b { color: #8a5a00; }
 .counters li.erp-done b { color: var(--good); }
 .loaded-line {
   margin-block: 8px 0;

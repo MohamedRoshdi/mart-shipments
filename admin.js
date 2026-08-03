@@ -66,6 +66,8 @@ function render(id) {
   // the save bar follows the editing screens — and the menu too while a change is unsaved,
   // so backing out of a screen never puts «حفظ» out of reach
   $("cfg-savebar").hidden = !(EDITING.includes(id) || (dirty && id === "screen-admin"));
+  // here rather than in the menu handler: the back/forward buttons reach this screen too
+  if (id === "screen-danger") loadBulk().catch(console.error);
   scrollTo(0, 0);
 }
 
@@ -299,13 +301,22 @@ async function enterAdmin() {
   // the menu card too, or a no-permission admin opens an empty screen
   document.querySelector('[data-goto="screen-danger"]').hidden = !canDo("danger");
   $("btn-logout").hidden = !auth.session();
+}
+
+/* The bulk-delete tool is the ONLY thing that needs every shipment and every count ever saved,
+   and it is opened perhaps once a month — so it pays for itself instead of being paid for on
+   every admin page open. Two unbounded reads at open cost nothing today (4 rows, measured
+   2026-08-03) and everything after a year of real deliveries: a shop doing 20 permits a day is
+   7,000 reads per open by next summer, against a 50,000/day allowance. Once per page life. */
+let bulkLoading = null;
+const loadBulk = () => (bulkLoading ||= (async () => {
   [shipments, counts] = await Promise.all([
     db.listShipments().catch(() => []),
     db.listCounts().catch(() => []),
   ]);
   shipmentsLoaded = true;
   renderBulk();
-}
+})());
 
 // signing in is mandatory now, so no session means an EXPIRED one — deny, never grant
 const canDo = (perm) => auth.can(perm);

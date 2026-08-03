@@ -42,13 +42,19 @@ const seed = (page) => page.evaluate((d) => {
   localStorage.setItem("test-expiry", JSON.stringify(d.EXPIRY));
 }, { CATALOG, SHIPMENTS, COUNTS, EXPIRY });
 
+// One door: since 2026-08-01 the employee page opens on the PIN screen unless a session exists,
+// so a screenshot run has to sign itself in the way a person does.
+const signIn = (page) => page.evaluate((d) => localStorage.setItem("session", JSON.stringify(d)),
+  { name: "أحمد", branches: [], perms: ["emp", "create", "count", "expiry", "label", "edit"], user: true, at: Date.now() });
+
 /* ---------- employee ---------- */
 const page = await ctx.newPage();
 await page.goto(`${BASE}/?test=1`);
 await seed(page);
 await page.reload();
-await shot(page, "01-first-run");                       // no users: name + branch
+await shot(page, "01-login");                           // the one door: the PIN screen
 
+await signIn(page);
 await page.evaluate(() => localStorage.setItem("employeeName", "أحمد"));
 await page.reload();
 await shot(page, "02-home");
@@ -82,8 +88,12 @@ await page.waitForTimeout(200);
 await shot(page, "08-expiry-month");
 
 /* ---------- manager ---------- */
-const m = await ctx.newPage();
+// its own context, same reason as the admin below: the employee session routes this page away
+const mgrCtx = await browser.newContext({ ...devices["Pixel 5"] });
+const m = await mgrCtx.newPage();
 await m.goto(`${BASE}/manager.html?test=1`);
+await seed(m);
+await m.reload();
 await shot(m, "09-manager-pin");
 await m.fill("#pin-input", await m.evaluate(() => window.APP_CONFIG.managerPin));
 await m.click("#btn-pin");
@@ -110,11 +120,16 @@ await a.goto(`${BASE}/admin.html?test=1`);
 await a.fill("#pin-input", await a.evaluate(() => window.APP_CONFIG.adminPin));
 await a.click("#btn-pin");
 await a.waitForSelector("#screen-admin:not([hidden])");
+await shot(a, "15-admin-menu");
+await a.click('[data-goto="screen-data"]');             // the users list lives behind the menu now
+await a.waitForSelector("#screen-data:not([hidden])");
 await a.click("#btn-add-user");
 await a.fill('input[data-uname="0"]', "حسن الجندي");
 await a.fill('input[data-upin="0"]', "4411");
 await a.waitForTimeout(200);
 await shot(a, "15-admin");
+await a.click("#btn-back");
+await a.waitForSelector("#screen-admin:not([hidden])");
 await a.click("#btn-logs");
 await a.waitForTimeout(200);
 await shot(a, "16-admin-logs");
